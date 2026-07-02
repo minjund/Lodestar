@@ -1,0 +1,48 @@
+{
+  "name": "lodestar",
+  "version": "1.0.8",
+  "description": "WCC/GSD 프로젝트 상황판 — 여러 GSD 프로젝트의 phase·진행도를 한 화면에 보고, 논의 단계 질문에 claude -p로 의견을 주입한다.",
+  "main": "main.js",
+  "author": "wincube AX",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "test": "node scripts/regression-test.js",
+    "dist": "electron-builder --win portable",
+    "pack": "electron-builder --dir"
+  },
+  "dependencies": {
+    "js-yaml": "^4.2.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.wincube.lodestar",
+    "productName": "Lodestar",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "Lodestar-${version}-portable.exe"
+    }
+  }
+}

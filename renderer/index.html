@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self';" />
+  <title>Lodestar — WCC 상황판</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- 좌측 사이드바: 프로젝트 트리 -->
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <span class="logo">✦</span>
+        <div class="logo-text">
+          <div class="logo-title">Lodestar</div>
+          <div class="logo-sub">WCC 워크플로우 상황판</div>
+        </div>
+      </div>
+      <div class="sidebar-actions">
+        <button id="btnAdd" class="btn btn-ghost">＋ 폴더 추가</button>
+      </div>
+      <div id="attentionSection" class="attention-section hidden">
+        <div class="sidebar-label">주의 필요</div>
+        <div id="attentionList" class="attention-list"></div>
+      </div>
+      <div class="sidebar-label">프로젝트</div>
+      <nav id="projList" class="proj-list"></nav>
+      <div class="sidebar-foot">
+        <button id="btnRefresh" class="btn btn-primary full">↻ 새로고침</button>
+        <div id="lastScan" class="muted-xs"></div>
+      </div>
+    </aside>
+
+    <!-- 메인: 노드 캔버스 -->
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <span id="canvasTitle">워크플로우 캔버스</span>
+          <span id="canvasMeta" class="topbar-meta"></span>
+        </div>
+        <div class="topbar-tools">
+          <div id="topTokenSummary" class="top-token-summary" aria-label="남은 사용량">
+            <span class="top-token-label">남은 사용량</span>
+            <span class="quota-gauge unknown"><span class="quota-gauge-head"><b>5시간</b><em>-</em></span><span class="quota-gauge-track"><span class="quota-gauge-fill" style="width:100%"></span></span></span>
+            <span class="quota-gauge unknown"><span class="quota-gauge-head"><b>7일</b><em>-</em></span><span class="quota-gauge-track"><span class="quota-gauge-fill" style="width:100%"></span></span></span>
+            <span class="quota-gauge unknown"><span class="quota-gauge-head"><b>소넷</b><em>-</em></span><span class="quota-gauge-track"><span class="quota-gauge-fill" style="width:100%"></span></span></span>
+          </div>
+          <button id="zoomOut" class="icon-btn" title="축소">－</button>
+          <span id="zoomLevel" class="muted-xs">100%</span>
+          <button id="zoomIn" class="icon-btn" title="확대">＋</button>
+          <button id="zoomFit" class="icon-btn" title="전체 보기">⊡</button>
+          <button id="themeToggle" class="icon-btn" title="테마 전환">◐</button>
+        </div>
+      </header>
+
+      <div id="viewport" class="viewport">
+        <div id="world" class="world">
+          <svg id="edges" class="edges"></svg>
+          <div id="projectLayers" class="project-layers"></div>
+          <div id="nodes" class="nodes"></div>
+        </div>
+        <div id="emptyState" class="empty">
+          <div class="empty-icon">✦</div>
+          <p class="empty-title">선택한 프로젝트가 없습니다</p>
+          <p class="muted">좌측 <b>＋ 폴더 추가</b>로 GSD 프로젝트 폴더(들)를 고르세요.</p>
+        </div>
+      </div>
+
+      <!-- 범례 -->
+      <div class="legend">
+        <div class="legend-title">단계 (Stage)</div>
+        <div class="legend-row"><span class="ldot s-discuss"></span>논의</div>
+        <div class="legend-row"><span class="ldot s-research"></span>조사</div>
+        <div class="legend-row"><span class="ldot s-plan"></span>계획</div>
+        <div class="legend-row"><span class="ldot s-execute"></span>실행 중</div>
+        <div class="legend-row"><span class="ldot s-verify"></span>완료/검증</div>
+        <div class="legend-row"><span class="ldot s-pending"></span>대기</div>
+      </div>
+    </main>
+  </div>
+
+  <!-- 새 세션 브랜치 선택 패널 -->
+  <div id="branchSessionDrawer" class="drawer hidden">
+    <div class="drawer-overlay" id="branchSessionOverlay"></div>
+    <div class="drawer-box branch-session-box">
+      <div class="drawer-head">
+        <div>
+          <div class="drawer-title" id="branchSessionTitle">브랜치 작업 공간 선택</div>
+          <div class="drawer-sub" id="branchSessionSub"></div>
+        </div>
+        <button id="branchSessionClose" class="icon-btn">✕</button>
+      </div>
+      <div class="drawer-body">
+        <div class="branch-session-note">
+          새 세션은 반드시 하나의 Git 브랜치 영역 안에서 시작합니다. 기존 브랜치를 고르거나 새 브랜치를 만든 뒤 채팅창이 열립니다.
+        </div>
+        <div id="branchSessionStatus" class="git-status hidden"></div>
+        <label class="fld-label">기존 브랜치</label>
+        <input id="branchSessionFilter" class="fld git-filter" placeholder="브랜치 검색" />
+        <div id="branchSessionList" class="git-branch-list branch-session-list"></div>
+        <label class="fld-label">새 브랜치 생성</label>
+        <input id="branchSessionNewName" class="fld git-filter" placeholder="예) feat/order-audit" />
+      </div>
+      <div class="drawer-foot">
+        <button id="branchSessionCancel" class="btn btn-ghost">취소</button>
+        <button id="branchSessionCreate" class="btn btn-primary">브랜치 생성 후 세션 시작</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Git 브랜치 전환 패널 -->
+  <div id="gitDrawer" class="drawer hidden">
+    <div class="drawer-overlay" id="gitOverlay"></div>
+    <div class="drawer-box git-box">
+      <div class="drawer-head">
+        <div>
+          <div class="drawer-title" id="gitTitle">Git 브랜치 변경</div>
+          <div class="drawer-sub" id="gitSub"></div>
+        </div>
+        <button id="gitClose" class="icon-btn">✕</button>
+      </div>
+      <div class="drawer-body">
+        <div id="gitStatus" class="git-status hidden"></div>
+        <input id="gitFilter" class="fld git-filter" placeholder="브랜치 검색 또는 직접 입력" />
+        <div id="gitBranchList" class="git-branch-list"></div>
+      </div>
+      <div class="drawer-foot">
+        <button id="gitCancel" class="btn btn-ghost">취소</button>
+        <button id="gitSwitchInput" class="btn btn-primary">입력값으로 전환</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 활동 피드 패널 (서브에이전트 진행) -->
+  <div id="actDrawer" class="drawer hidden">
+    <div class="drawer-overlay" id="actOverlay"></div>
+    <div class="drawer-box act-box">
+      <div class="drawer-head">
+        <div>
+          <div class="drawer-title" id="actTitle">활동 피드</div>
+          <div class="drawer-sub" id="actSub"></div>
+        </div>
+        <button id="actClose" class="icon-btn">✕</button>
+      </div>
+      <div class="drawer-body" id="actBody"></div>
+    </div>
+  </div>
+
+  <!-- 서브에이전트 상세 패널 (에이전트 노드 클릭) -->
+  <div id="agDrawer" class="drawer hidden">
+    <div class="drawer-overlay" id="agOverlay"></div>
+    <div class="drawer-box act-box">
+      <div class="drawer-head">
+        <div>
+          <div class="drawer-title" id="agTitle">서브에이전트</div>
+          <div class="drawer-sub" id="agSub"></div>
+        </div>
+        <button id="agClose" class="icon-btn">✕</button>
+      </div>
+      <div class="drawer-body" id="agBody"></div>
+    </div>
+  </div>
+
+  <!-- 작업 요청 패널 (claude -p 로 직접 작업) -->
+  <div id="taskDrawer" class="drawer session-panel hidden">
+    <div class="drawer-overlay" id="taskOverlay"></div>
+    <div class="drawer-box session-console">
+      <div class="drawer-head session-console-head">
+        <div class="session-window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div>
+          <div class="session-kicker">Claude Session Console</div>
+          <div class="drawer-title" id="taskTitle">작업 요청</div>
+          <div class="drawer-sub" id="taskSub"></div>
+        </div>
+        <button id="taskClose" class="icon-btn">✕</button>
+      </div>
+      <div class="drawer-body session-console-body">
+        <main class="session-console-main">
+          <div id="taskNote" class="task-note">이 프로젝트 폴더에서 <code>claude -p</code> 를 실행해 작업을 시킵니다. 터미널을 따로 찾지 않아도 됩니다. <b>파일이 실제로 수정될 수 있는</b> 동작이라 실행 전 확인을 거칩니다.</div>
+          <div id="taskQuestions" class="drawer-questions" style="display:none"></div>
+          <label class="fld-label" id="taskPromptLabel">작업 지시 (claude 에게 시킬 내용)</label>
+          <textarea id="taskPrompt" class="fld" rows="10" placeholder="예) 현재 phase의 PLAN.md를 읽고 다음 plan을 실행해줘 / 테스트 돌려서 실패 원인 찾아줘 / README 업데이트해줘"></textarea>
+          <div id="skillSuggest" class="skill-suggest hidden"></div>
+
+          <div id="taskRun" class="runpanel hidden">
+            <div id="taskActivityStrip" class="activity-strip idle" aria-live="polite">
+              <span class="activity-spinner" aria-hidden="true"></span>
+              <span class="activity-copy">
+                <b id="taskActivityLabel">대기</b>
+                <small id="taskActivityDetail">작업을 실행하면 Claude 상태가 여기에 표시됩니다.</small>
+              </span>
+              <button id="taskStopInlineBtn" class="btn btn-danger hidden" type="button">중단</button>
+            </div>
+            <div class="run-status" id="taskStatus">실행 중…</div>
+            <div class="token-usage hidden" id="taskTokenUsage"></div>
+            <div id="taskOut" class="md-output"></div>
+            <div id="taskReplyRow" class="reply-row hidden">
+              <textarea id="taskReply" class="fld" rows="2" placeholder="claude가 물어보면 여기에 답하고 ‘이어서 보내기’를 누르세요. (Ctrl+Enter)"></textarea>
+              <div id="replySuggest" class="skill-suggest hidden"></div>
+              <div class="reply-btns">
+                <button id="taskReplyBtn" class="btn btn-primary">이어서 보내기 ↵</button>
+              </div>
+            </div>
+          </div>
+        </main>
+        <aside class="session-console-side">
+          <div id="taskPromptHistory" class="task-history hidden"></div>
+          <div id="sessionMini" class="session-mini hidden"></div>
+        </aside>
+      </div>
+      <div class="drawer-foot session-console-foot">
+        <button id="taskCancel" class="btn btn-ghost">취소</button>
+        <button id="taskStopBtn" class="btn btn-ghost hidden">대화 중단</button>
+        <button id="taskRunBtn" class="btn btn-danger">▶ 작업 실행 (claude)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 의견 주입 패널 (사이드 드로어) -->
+  <div id="drawer" class="drawer hidden">
+    <div class="drawer-overlay" id="drawerOverlay"></div>
+    <div class="drawer-box">
+      <div class="drawer-head">
+        <div>
+          <div class="drawer-title" id="drawerTitle">의견 주입</div>
+          <div class="drawer-sub" id="drawerSub"></div>
+        </div>
+        <button id="drawerClose" class="icon-btn">✕</button>
+      </div>
+      <div class="drawer-body">
+        <div id="drawerQuestions" class="drawer-questions"></div>
+        <label class="fld-label">논의 질문 / 맥락</label>
+        <textarea id="injQuestion" class="fld" rows="3" placeholder="이 phase에서 논의되는 질문 또는 맥락"></textarea>
+        <label class="fld-label">내 의견 / 답변</label>
+        <textarea id="injAnswer" class="fld" rows="6" placeholder="여기에 의견을 적으세요. claude -p가 프로젝트 맥락으로 정리해 인박스에 기록합니다."></textarea>
+
+        <div id="confirmPanel" class="confirm hidden">
+          <div class="confirm-warn">⚠ claude -p 호출 (되돌릴 수 없는 외부 단계)</div>
+          <div class="kv"><b>claude</b><code id="cvPath"></code></div>
+          <div class="kv"><b>폴더</b><code id="cvCwd"></code></div>
+          <div class="kv"><b>기록</b><code id="cvInbox"></code></div>
+          <details><summary>전송 프롬프트 미리보기</summary><pre id="cvPrompt"></pre></details>
+        </div>
+
+        <div id="runPanel" class="runpanel hidden">
+          <div class="run-status" id="runStatus">실행 중…</div>
+          <div id="runOut" class="md-output"></div>
+        </div>
+      </div>
+      <div class="drawer-foot">
+        <button id="btnCancel" class="btn btn-ghost">취소</button>
+        <button id="btnPreview" class="btn btn-primary">미리보기 →</button>
+        <button id="btnConfirmRun" class="btn btn-danger hidden">확인 — claude -p 실행</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
