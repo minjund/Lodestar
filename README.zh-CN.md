@@ -8,11 +8,14 @@
 
 [![Desktop CI](https://github.com/minjund/LodeToAgent/actions/workflows/desktop-ci.yml/badge.svg)](https://github.com/minjund/LodeToAgent/actions/workflows/desktop-ci.yml)
 [![npm version](https://img.shields.io/npm/v/loadtoagent?logo=npm&color=CB3837)](https://www.npmjs.com/package/loadtoagent)
+[![GitHub Release](https://img.shields.io/github/v/release/minjund/LodeToAgent?display_name=tag&sort=semver)](https://github.com/minjund/LodeToAgent/releases/latest)
 ![macOS](https://img.shields.io/badge/macOS-支持-111827?logo=apple)
 ![Windows](https://img.shields.io/badge/Windows-支持-111827?logo=windows11)
 ![Local first](https://img.shields.io/badge/数据-本地优先-35d69f)
 
 [English](README.md) | **简体中文** | [한국어](README.ko.md)
+
+[**下载 Windows / macOS 程序**](https://github.com/minjund/LodeToAgent/releases/latest) · [**通过 npm 安装**](https://www.npmjs.com/package/loadtoagent)
 
 </div>
 

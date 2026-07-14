@@ -8,11 +8,14 @@ Claude, Codex, Gemini, Grok 세션을 모니터링하고, 메인 AI와 도움 AI
 
 [![Desktop CI](https://github.com/minjund/LodeToAgent/actions/workflows/desktop-ci.yml/badge.svg)](https://github.com/minjund/LodeToAgent/actions/workflows/desktop-ci.yml)
 [![npm version](https://img.shields.io/npm/v/loadtoagent?logo=npm&color=CB3837)](https://www.npmjs.com/package/loadtoagent)
+[![GitHub Release](https://img.shields.io/github/v/release/minjund/LodeToAgent?display_name=tag&sort=semver)](https://github.com/minjund/LodeToAgent/releases/latest)
 ![macOS](https://img.shields.io/badge/macOS-지원-111827?logo=apple)
 ![Windows](https://img.shields.io/badge/Windows-지원-111827?logo=windows11)
 ![Local first](https://img.shields.io/badge/데이터-로컬--퍼스트-35d69f)
 
 [English](README.md) | [简体中文](README.zh-CN.md) | **한국어**
+
+[**Windows·macOS 프로그램 다운로드**](https://github.com/minjund/LodeToAgent/releases/latest) · [**npm으로 설치**](https://www.npmjs.com/package/loadtoagent)
 
 </div>
 
