@@ -32,7 +32,8 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
   mac-artifacts:
-    runs-on: macos-13
+    # Intel runner can package both x64 and arm64 Electron targets.
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
