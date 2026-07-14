@@ -107,7 +107,7 @@
 
   function requiredAgentTarget(agentSession, targetId = '') {
     const targets = agentTargets(agentSession);
-    if (!targets.length) throw new Error('이 AI가 실행 중인 입력 가능한 터미널을 찾지 못했습니다. 외부 터미널에서 시작한 AI는 Lodestar가 직접 입력할 수 없습니다.');
+    if (!targets.length) throw new Error('이 AI가 실행 중인 입력 가능한 터미널을 찾지 못했습니다. 외부 터미널에서 시작한 AI는 LoadToAgent가 직접 입력할 수 없습니다.');
     if (targetId) {
       const selected = targets.find(target => target.id === targetId);
       if (!selected) throw new Error('선택한 터미널 연결이 더 이상 유효하지 않습니다.');
@@ -123,8 +123,8 @@
     if (!text) throw new Error('AI에게 보낼 지시를 입력하세요.');
     const target = requiredAgentTarget(agentSession, targetId);
     const result = target.kind === 'tmux'
-      ? await window.lodestar.tmuxSendText({ distro: target.distro, target: target.paneNativeId, text, enter: true })
-      : await window.lodestar.terminalCommand(target.terminalId, text);
+      ? await window.loadtoagent.tmuxSendText({ distro: target.distro, target: target.paneNativeId, text, enter: true })
+      : await window.loadtoagent.terminalCommand(target.terminalId, text);
     if (!result || result.ok === false) throw new Error(result && result.error || '터미널에 지시를 보내지 못했습니다.');
     notice(`${target.label}에 AI 지시를 보냈습니다.`, 'success');
     return { ok: true, target };
@@ -229,9 +229,9 @@
     const entry = { terminal, fit, host, readOnly };
     if (!readOnly) {
       terminal.onData(data => {
-        if (state.selectedId === key) window.lodestar.terminalWrite(key, data);
+        if (state.selectedId === key) window.loadtoagent.terminalWrite(key, data);
       });
-      terminal.onResize(size => window.lodestar.terminalResize(key, size.cols, size.rows));
+      terminal.onResize(size => window.loadtoagent.terminalResize(key, size.cols, size.rows));
     }
     return entry;
   }
@@ -241,7 +241,7 @@
     requestAnimationFrame(() => {
       try {
         entry.fit.fit();
-        if (sessionId) window.lodestar.terminalResize(sessionId, entry.terminal.cols, entry.terminal.rows);
+        if (sessionId) window.loadtoagent.terminalResize(sessionId, entry.terminal.cols, entry.terminal.rows);
       } catch {}
     });
   }
@@ -251,7 +251,7 @@
     if (!entry) {
       entry = createXtermHost(session.id, false);
       state.terminals.set(session.id, entry);
-      const detail = await window.lodestar.terminalGet(session.id);
+      const detail = await window.loadtoagent.terminalGet(session.id);
       if (detail && detail.replay) entry.terminal.write(detail.replay);
     }
     return entry;
@@ -388,7 +388,7 @@
   }
 
   async function refreshSessions(payload = null) {
-    state.sessions = payload && payload.sessions || await window.lodestar.terminalList();
+    state.sessions = payload && payload.sessions || await window.loadtoagent.terminalList();
     if (state.selectedId && !state.sessions.some(item => item.id === state.selectedId)) state.selectedId = null;
     renderAll();
     if (state.active) await showSelection();
@@ -397,7 +397,7 @@
   async function createTerminal(type) {
     const distro = type === 'wsl' ? firstDistro() : null;
     if (type === 'wsl' && !distro) return notice('사용 가능한 Linux 환경이 없습니다.', 'error');
-    const created = await guarded(() => window.lodestar.terminalCreate({
+    const created = await guarded(() => window.loadtoagent.terminalCreate({
       type,
       cwd: (type === 'powershell' || type === 'shell') ? (preferredWorkspace() || undefined) : undefined,
       distro: distro && distro.name,
@@ -413,7 +413,7 @@
   async function captureRemote() {
     const remote = currentTmux();
     if (!remote || !state.active || state.selectedId) return;
-    const result = await guarded(() => window.lodestar.tmuxCapture({ distro: remote.distro.name, target: remote.pane.nativeId, lines: 1_500 }));
+    const result = await guarded(() => window.loadtoagent.tmuxCapture({ distro: remote.distro.name, target: remote.pane.nativeId, lines: 1_500 }));
     if (!result || typeof result.output !== 'string') return;
     if (result.output === state.remoteCapture) return;
     state.remoteCapture = result.output;
@@ -439,9 +439,9 @@
     if (!text.trim()) return notice('보낼 명령을 입력하세요.', 'error');
     const session = currentSession();
     const remote = currentTmux();
-    if (session) await guarded(() => window.lodestar.terminalCommand(session.id, text), '명령을 전송했습니다.');
+    if (session) await guarded(() => window.loadtoagent.terminalCommand(session.id, text), '명령을 전송했습니다.');
     else if (remote) {
-      await guarded(() => window.lodestar.tmuxSendText({ distro: remote.distro.name, target: remote.pane.nativeId, text, enter: true }), '선택한 나눠진 명령창에서 실행했습니다.');
+      await guarded(() => window.loadtoagent.tmuxSendText({ distro: remote.distro.name, target: remote.pane.nativeId, text, enter: true }), '선택한 나눠진 명령창에서 실행했습니다.');
       setTimeout(captureRemote, 160);
     } else notice('사용할 명령창을 먼저 선택하세요.', 'error');
   }
@@ -449,10 +449,10 @@
   async function sendSignal(signal) {
     const session = currentSession();
     const remote = currentTmux();
-    if (session) return guarded(() => window.lodestar.terminalSignal(session.id, signal), signal === 'interrupt' ? 'Ctrl+C를 보냈습니다.' : '화면을 정리했습니다.');
+    if (session) return guarded(() => window.loadtoagent.terminalSignal(session.id, signal), signal === 'interrupt' ? 'Ctrl+C를 보냈습니다.' : '화면을 정리했습니다.');
     if (remote) {
       const key = signal === 'interrupt' ? 'C-c' : 'C-l';
-      return guarded(() => window.lodestar.tmuxSendKey({ distro: remote.distro.name, target: remote.pane.nativeId, key }), `${key}를 보냈습니다.`);
+      return guarded(() => window.loadtoagent.tmuxSendKey({ distro: remote.distro.name, target: remote.pane.nativeId, key }), `${key}를 보냈습니다.`);
     }
     notice('사용할 명령창을 먼저 선택하세요.', 'error');
   }
@@ -471,14 +471,14 @@
   }
 
   async function refreshSnapshot() {
-    const snapshot = await guarded(() => window.lodestar.snapshot(), '여러 창 작업을 새로고침했습니다.');
+    const snapshot = await guarded(() => window.loadtoagent.snapshot(), '여러 창 작업을 새로고침했습니다.');
     if (snapshot) updateSnapshot(snapshot, state.workspaces);
   }
 
   async function attachTmux() {
     const remote = currentTmux();
     if (!remote) return;
-    const created = await guarded(() => window.lodestar.terminalCreate({
+    const created = await guarded(() => window.loadtoagent.terminalCreate({
       type: 'tmux',
       distro: remote.distro.name,
       tmuxSession: remote.session.name,
@@ -501,27 +501,27 @@
     if (action === 'rename-session') {
       const name = window.prompt('새 작업 묶음 이름', remote.session.name);
       if (!name || name === remote.session.name) return;
-      operation = () => window.lodestar.tmuxRenameSession({ ...base, target: remote.session.nativeId, name });
+      operation = () => window.loadtoagent.tmuxRenameSession({ ...base, target: remote.session.nativeId, name });
       message = '작업 묶음 이름을 변경했습니다.';
     } else if (action === 'new-window') {
       const name = window.prompt('새 창 이름', 'window');
       if (!name) return;
-      operation = () => window.lodestar.tmuxNewWindow({ ...base, target: remote.session.nativeId, name, cwd: remote.pane.cwd });
+      operation = () => window.loadtoagent.tmuxNewWindow({ ...base, target: remote.session.nativeId, name, cwd: remote.pane.cwd });
       message = '새 창을 만들었습니다.';
     } else if (action === 'split-horizontal' || action === 'split-vertical') {
-      operation = () => window.lodestar.tmuxSplitPane({ ...base, target: remote.pane.nativeId, direction: action === 'split-horizontal' ? 'horizontal' : 'vertical', cwd: remote.pane.cwd });
+      operation = () => window.loadtoagent.tmuxSplitPane({ ...base, target: remote.pane.nativeId, direction: action === 'split-horizontal' ? 'horizontal' : 'vertical', cwd: remote.pane.cwd });
       message = '선택한 명령창을 나눴습니다.';
     } else if (action === 'kill-pane') {
       if (!window.confirm(`${remote.pane.nativeId} 명령창을 닫을까요?`)) return;
-      operation = () => window.lodestar.tmuxKillPane({ ...base, target: remote.pane.nativeId });
+      operation = () => window.loadtoagent.tmuxKillPane({ ...base, target: remote.pane.nativeId });
       message = '선택한 명령창을 닫았습니다.';
     } else if (action === 'kill-window') {
       if (!window.confirm(`${remote.window.index}:${remote.window.name} 창과 안에 있는 명령창을 모두 닫을까요?`)) return;
-      operation = () => window.lodestar.tmuxKillWindow({ ...base, target: remote.window.nativeId });
+      operation = () => window.loadtoagent.tmuxKillWindow({ ...base, target: remote.window.nativeId });
       message = '창 전체를 닫았습니다.';
     } else if (action === 'kill-session') {
       if (!window.confirm(`${remote.session.name} 작업 묶음을 모두 끝낼까요?`)) return;
-      operation = () => window.lodestar.tmuxKillSession({ ...base, target: remote.session.nativeId });
+      operation = () => window.loadtoagent.tmuxKillSession({ ...base, target: remote.session.nativeId });
       message = '작업 묶음을 끝냈습니다.';
     }
     if (!operation) return;
@@ -566,7 +566,7 @@
     $('#terminalRestartBtn').addEventListener('click', async () => {
       const session = currentSession();
       if (!session) return;
-      const restarted = await guarded(() => window.lodestar.terminalRestart(session.id), '명령창을 다시 시작했습니다.');
+      const restarted = await guarded(() => window.loadtoagent.terminalRestart(session.id), '명령창을 다시 시작했습니다.');
       if (restarted) {
         const entry = state.terminals.get(session.id);
         if (entry) entry.terminal.reset();
@@ -581,7 +581,7 @@
         showSelection();
         return;
       }
-      const closed = await guarded(() => window.lodestar.terminalClose(session.id), '명령창을 닫았습니다.');
+      const closed = await guarded(() => window.loadtoagent.terminalClose(session.id), '명령창을 닫았습니다.');
       if (!closed) return;
       const entry = state.terminals.get(session.id);
       if (entry) {
@@ -600,7 +600,7 @@
     $('#terminalTmuxLayout').addEventListener('change', async event => {
       const remote = currentTmux();
       if (!remote) return;
-      const result = await guarded(() => window.lodestar.tmuxSelectLayout({ distro: remote.distro.name, target: remote.window.nativeId, layout: event.target.value }), '창 배치를 변경했습니다.');
+      const result = await guarded(() => window.loadtoagent.tmuxSelectLayout({ distro: remote.distro.name, target: remote.window.nativeId, layout: event.target.value }), '창 배치를 변경했습니다.');
       if (result) setTimeout(refreshSnapshot, 250);
     });
     $('#tmuxCreateForm').addEventListener('submit', async event => {
@@ -610,7 +610,7 @@
       const error = $('#tmuxCreateError');
       error.classList.add('hidden');
       try {
-        const result = await window.lodestar.tmuxNewSession({
+        const result = await window.loadtoagent.tmuxNewSession({
           distro: $('#tmuxCreateDistro').value,
           name: $('#tmuxCreateName').value,
           cwd: $('#tmuxCreateCwd').value,
@@ -638,12 +638,12 @@
       const entry = currentSession() ? state.terminals.get(state.selectedId) : state.remoteTerminal;
       fitEntry(entry, state.selectedId || '');
     });
-    window.lodestar.onTerminalData(payload => {
+    window.loadtoagent.onTerminalData(payload => {
       const entry = state.terminals.get(payload && payload.id);
       if (entry && payload.data) entry.terminal.write(payload.data);
     });
-    window.lodestar.onTerminalState(payload => refreshSessions(payload));
-    window.lodestar.onTerminalError(payload => notice(payload && payload.message || '명령창 입력에 실패했습니다.', 'error'));
+    window.loadtoagent.onTerminalState(payload => refreshSessions(payload));
+    window.loadtoagent.onTerminalError(payload => notice(payload && payload.message || '명령창 입력에 실패했습니다.', 'error'));
   }
 
   async function activate(snapshot, workspaces, mode = 'general') {
@@ -681,10 +681,10 @@
   function init() {
     if (state.initPromise) return state.initPromise;
     state.initPromise = (async () => {
-      if (!window.lodestar) return;
+      if (!window.loadtoagent) return;
       state.initialized = true;
       bindEvents();
-      const [bootstrap, sessions, environments] = await Promise.all([window.lodestar.bootstrap(), window.lodestar.terminalList(), window.lodestar.wslDistros()]);
+      const [bootstrap, sessions, environments] = await Promise.all([window.loadtoagent.bootstrap(), window.loadtoagent.terminalList(), window.loadtoagent.wslDistros()]);
       state.platform = bootstrap.platform || state.platform;
       state.sessions = sessions;
       state.wslDistros = environments;
@@ -694,7 +694,7 @@
     return state.initPromise;
   }
 
-  window.LodestarTerminal = {
+  window.LoadToAgentTerminal = {
     activate,
     deactivate,
     updateSnapshot,

@@ -46,7 +46,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
       - uses: actions/upload-artifact@v4
         with:
-          name: Lodestar-macOS
+          name: LoadToAgent-macOS
           path: |
             release/*.dmg
             release/*.zip

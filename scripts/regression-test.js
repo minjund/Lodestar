@@ -15,10 +15,10 @@ const { processRows, posixProcessRows, providerFromPosixProcess, selectAgentProc
 const { TerminalManager, normalizeLaunchOptions, launchSpec } = require('../src/terminalManager');
 const { TmuxController, safeName, safeTarget } = require('../src/tmuxController');
 const { BridgeServer } = require('../src/bridgeServer');
-const { parseArguments } = require('../bin/lodestar');
+const { parseArguments, parseCliArguments, desktopLaunchSpec } = require('../bin/loadtoagent');
 
 const root = path.resolve(__dirname, '..');
-const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'lodestar-test-'));
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'loadtoagent-test-'));
 let passed = 0;
 const tests = [];
 
@@ -36,6 +36,36 @@ test('네 제공사 레지스트리를 노출한다', () => {
   assert.deepStrictEqual(providerList().map(item => item.id), ['claude', 'codex', 'gemini', 'grok']);
   assert.equal(normalizeProvider('OpenAI GPT'), 'codex');
   assert.equal(normalizeProvider('xAI Grok'), 'grok');
+});
+
+test('npm 전역 명령으로 앱 열기와 브리지 실행을 구분한다', () => {
+  assert.deepStrictEqual(parseCliArguments([]), { action: 'open' });
+  assert.deepStrictEqual(parseCliArguments(['open']), { action: 'open' });
+  assert.deepStrictEqual(parseCliArguments(['--help']), { action: 'help' });
+  assert.deepStrictEqual(parseCliArguments(['--version']), { action: 'version' });
+  assert.deepStrictEqual(parseCliArguments(['run', 'codex', '--', '--model', 'gpt-5']), {
+    action: 'run', provider: 'codex', args: ['--model', 'gpt-5'],
+  });
+  assert.throws(() => parseCliArguments(['unknown']), /사용법/);
+});
+
+test('npm 설치본과 패키지 앱의 데스크톱 실행 경로를 만든다', () => {
+  const npmSpec = desktopLaunchSpec({
+    env: { PATH: '/usr/bin' },
+    electronPath: '/tmp/electron',
+    packageRoot: '/tmp/loadtoagent',
+  });
+  assert.equal(npmSpec.executable, '/tmp/electron');
+  assert.deepStrictEqual(npmSpec.args, ['/tmp/loadtoagent']);
+  assert.equal(npmSpec.env.PATH, '/usr/bin');
+
+  const packagedSpec = desktopLaunchSpec({
+    env: { PATH: '/usr/bin', ELECTRON_RUN_AS_NODE: '1' },
+    execPath: '/Applications/LoadToAgent.app/Contents/MacOS/LoadToAgent',
+  });
+  assert.equal(packagedSpec.executable, '/Applications/LoadToAgent.app/Contents/MacOS/LoadToAgent');
+  assert.deepStrictEqual(packagedSpec.args, []);
+  assert.equal('ELECTRON_RUN_AS_NODE' in packagedSpec.env, false);
 });
 
 test('관측값을 우선해 컨텍스트 창을 계산한다', () => {
@@ -238,7 +268,7 @@ test('외부 브리지는 같은 시각의 CLI 기록에만 연결하고 Codex �
   assert.ok(bridgeLinkScore({ ...base, clientKind: 'codex-cli', startedAt: '2026-07-14T09:59:35Z' }, bridge, now) > 10_000);
 });
 
-test('Lodestar 외부 브리지는 인증 소켓으로 전용 PTY에만 입력한다', async () => {
+test('LoadToAgent 외부 브리지는 인증 소켓으로 전용 PTY에만 입력한다', async () => {
   class FakeManager extends EventEmitter {
     constructor() { super(); this.writes = []; this.sessions = []; }
     create(options) {
@@ -253,7 +283,7 @@ test('Lodestar 외부 브리지는 인증 소켓으로 전용 PTY에만 입력�
     list() { return this.sessions; }
   }
   const manager = new FakeManager();
-  const endpoint = process.platform === 'win32' ? `\\\\.\\pipe\\lodestar-test-${process.pid}-${Date.now()}` : path.join(temp, 'bridge.sock');
+  const endpoint = process.platform === 'win32' ? `\\\\.\\pipe\\loadtoagent-test-${process.pid}-${Date.now()}` : path.join(temp, 'bridge.sock');
   const discovery = path.join(temp, 'bridge.json');
   const server = new BridgeServer({ terminalManager: manager, home: temp, platform: process.platform, endpoint, discoveryFile: discovery, token: 'test-token' });
   await server.start();
@@ -391,7 +421,7 @@ test('제공사별 합계와 활성 세션 수를 계산한다', () => {
 });
 
 test('메인과 렌더러 JavaScript 문법이 유효하다', () => {
-  for (const file of ['main.js', 'preload.js', 'bin/lodestar.js', 'src/bridgeServer.js', 'src/providerRegistry.js', 'src/agentMonitor.js', 'src/agentRunner.js', 'src/tmuxMonitor.js', 'src/tmuxController.js', 'src/terminalManager.js', 'src/processMonitor.js', 'src/monitorWorker.js', 'renderer/app.js', 'renderer/terminal.js', 'scripts/bridge-integration-test.js']) {
+  for (const file of ['main.js', 'preload.js', 'bin/loadtoagent.js', 'src/bridgeServer.js', 'src/providerRegistry.js', 'src/agentMonitor.js', 'src/agentRunner.js', 'src/tmuxMonitor.js', 'src/tmuxController.js', 'src/terminalManager.js', 'src/processMonitor.js', 'src/monitorWorker.js', 'renderer/app.js', 'renderer/terminal.js', 'scripts/bridge-integration-test.js']) {
     execFileSync(process.execPath, ['--check', path.join(root, file)], { stdio: 'pipe' });
   }
 });
@@ -416,14 +446,14 @@ test('필수 UI 영역과 초보자용 안내 계약이 존재한다', () => {
   const styles = fs.readFileSync(path.join(root, 'renderer', 'styles.css'), 'utf8');
   for (const contract of ['--motion-ease', 'motion-section-in', 'motion-live-update', 'motion-edge-draw', 'motion-modal-in', 'motion-modal-out', 'motion-toast-in', 'motion-toast-out', 'agent-command-panel', 'agent-command-input', '@media(prefers-reduced-motion:reduce)']) assert.ok(styles.includes(contract), `${contract} 모션 계약이 없습니다.`);
   const terminal = fs.readFileSync(path.join(root, 'renderer', 'terminal.js'), 'utf8');
-  for (const contract of ['window.Terminal', 'FitAddon.FitAddon', 'wslDistros', 'terminalWrite', 'terminalResize', 'tmuxSendText', 'tmuxCapture', 'tmuxSplitPane', 'tmuxKillSession', 'function modeSessions', 'function moveWorkbench', 'function agentTargets', 'function requiredAgentTarget', 'function dispatchAgentCommand', 'function openForAgent', 'selectTmuxById', 'window.LodestarTerminal']) assert.ok(terminal.includes(contract));
+  for (const contract of ['window.Terminal', 'FitAddon.FitAddon', 'wslDistros', 'terminalWrite', 'terminalResize', 'tmuxSendText', 'tmuxCapture', 'tmuxSplitPane', 'tmuxKillSession', 'function modeSessions', 'function moveWorkbench', 'function agentTargets', 'function requiredAgentTarget', 'function dispatchAgentCommand', 'function openForAgent', 'selectTmuxById', 'window.LoadToAgentTerminal']) assert.ok(terminal.includes(contract));
   assert.ok(html.includes('Content-Security-Policy'));
   assert.ok(html.includes('@xterm/xterm/lib/xterm.js'));
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.ok(pkg.dependencies['node-pty']);
   assert.ok(pkg.dependencies['@xterm/xterm']);
   assert.ok(pkg.dependencies['@xterm/addon-fit']);
-  assert.equal(pkg.bin.lodestar, 'bin/lodestar.js');
+  assert.equal(pkg.bin.loadtoagent, 'bin/loadtoagent.js');
   assert.ok(pkg.build.mac.target.some(item => item.arch.includes('arm64') && item.arch.includes('x64')));
 });
 
@@ -438,6 +468,25 @@ test('제품 소스에 이전 워크플로우 명칭이 남아 있지 않다', (
       for (const name of fs.readdirSync(full)) visit(path.join(target, name));
     } else if (/\.(js|json|html|css|md)$/i.test(full)) {
       assert.equal(forbidden.test(fs.readFileSync(full, 'utf8')), false, `${target}에 제거 대상 명칭이 남아 있습니다.`);
+    }
+  };
+  targets.forEach(visit);
+});
+
+test('제품 소스와 파일명에 이전 프로그램 명칭이 남아 있지 않다', () => {
+  const targets = ['.github', 'bin', 'docs', 'main.js', 'preload.js', 'package.json', 'README.md', 'README.ko.md', 'README.zh-CN.md', 'src', 'renderer', 'scripts'];
+  const forbidden = new RegExp(['lode', 'star'].join(''), 'i');
+  const visit = target => {
+    const full = path.join(root, target);
+    if (!fs.existsSync(full)) return;
+    const stat = fs.statSync(full);
+    if (stat.isDirectory()) {
+      for (const name of fs.readdirSync(full)) {
+        assert.equal(forbidden.test(name), false, `${path.join(target, name)} 파일명에 이전 프로그램 명칭이 남아 있습니다.`);
+        visit(path.join(target, name));
+      }
+    } else if (/\.(js|json|ya?ml|html|css|md)$/i.test(full)) {
+      assert.equal(forbidden.test(fs.readFileSync(full, 'utf8')), false, `${target}에 이전 프로그램 명칭이 남아 있습니다.`);
     }
   };
   targets.forEach(visit);

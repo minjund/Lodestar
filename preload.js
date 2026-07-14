@@ -2,7 +2,7 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('lodestar', {
+contextBridge.exposeInMainWorld('loadtoagent', {
   bootstrap: () => ipcRenderer.invoke('app:bootstrap'),
   snapshot: () => ipcRenderer.invoke('agents:snapshot'),
   sessionDetail: sessionId => ipcRenderer.invoke('agents:detail', sessionId),

@@ -4,7 +4,7 @@ const path = require('path');
 const { app } = require('electron');
 const { TerminalManager } = require('../src/terminalManager');
 
-const marker = `LODESTAR_PTY_OK_${Date.now()}`;
+const marker = `LOADTOAGENT_PTY_OK_${Date.now()}`;
 const manager = new TerminalManager();
 let sessionId = '';
 

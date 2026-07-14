@@ -1,6 +1,6 @@
 # 제공사 이벤트 계약
 
-Lodestar는 제공사별 이벤트를 아래 공통 단계로 정규화합니다.
+LoadToAgent는 제공사별 이벤트를 아래 공통 단계로 정규화합니다.
 
 `queued → session-start → turn-start → reasoning/tool/message → turn-complete → session-end`
 
@@ -35,7 +35,7 @@ Lodestar는 제공사별 이벤트를 아래 공통 단계로 정규화합니다
 ## 정확성 우선순위
 
 1. 세션 이벤트가 직접 보고한 값
-2. Lodestar가 시작한 CLI의 구조화 결과
+2. LoadToAgent가 시작한 CLI의 구조화 결과
 3. 제공사 공식 모델 카탈로그의 모델별 한도
 4. 값 미보고(`0` 또는 `--`)
 

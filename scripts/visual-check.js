@@ -30,7 +30,7 @@ app.whenReady().then(() => {
   const timeout = setTimeout(async () => {
     try {
       const win = BrowserWindow.getAllWindows()[0];
-      if (!win) throw new Error('Lodestar 창을 찾을 수 없습니다.');
+      if (!win) throw new Error('LoadToAgent 창을 찾을 수 없습니다.');
       win.setSize(1600, 980);
       for (let attempt = 0; attempt < 25; attempt += 1) {
         const tmuxReady = await win.webContents.executeJavaScript(`(() => {
@@ -46,15 +46,15 @@ app.whenReady().then(() => {
       await win.webContents.executeJavaScript("document.fonts.ready.then(() => { state.view = 'all'; state.graphFocusId = null; document.querySelectorAll('.view-nav .nav-item').forEach(item => item.classList.toggle('active', item.dataset.view === 'all')); renderSessions(); document.querySelector('.main-stage')?.scrollTo(0, 0); })");
       await new Promise(resolve => setTimeout(resolve, 500));
       const bridgeInfo = await win.webContents.executeJavaScript(`(async () => {
-        const bootstrap = await window.lodestar.bootstrap();
-        const command = await window.lodestar.bridgeCommand('codex');
+        const bootstrap = await window.loadtoagent.bootstrap();
+        const command = await window.loadtoagent.bridgeCommand('codex');
         return { launcher: bootstrap.bridgeCli, command };
       })()`);
       if (!bridgeInfo.launcher || !bridgeInfo.launcher.path || !fs.existsSync(bridgeInfo.launcher.path) || !bridgeInfo.command || !bridgeInfo.command.ok || !bridgeInfo.command.command.includes('run codex')) throw new Error(`외부 터미널 브리지 실행기가 준비되지 않았습니다: ${JSON.stringify(bridgeInfo)}`);
       const image = await win.webContents.capturePage();
       const outputDir = path.join(__dirname, '..', 'artifacts');
       fs.mkdirSync(outputDir, { recursive: true });
-      const output = path.join(outputDir, 'lodestar-dashboard.png');
+      const output = path.join(outputDir, 'loadtoagent-dashboard.png');
       fs.writeFileSync(output, image.toPNG());
       const beginnerMetrics = await win.webContents.executeJavaScript(`(() => {
         const guide = document.querySelector('#beginnerGuide');
@@ -91,7 +91,7 @@ app.whenReady().then(() => {
       })()`);
       if (!compactMetrics.guideVisible || !compactMetrics.guideStacked || !compactMetrics.noBodyOverflow || !compactMetrics.noGuideOverflow) throw new Error(`최소 창 크기에서 초보자 안내가 올바르지 않습니다: ${JSON.stringify(compactMetrics)}`);
       const compactImage = await win.webContents.capturePage();
-      const compactOutput = path.join(outputDir, 'lodestar-beginner-compact.png');
+      const compactOutput = path.join(outputDir, 'loadtoagent-beginner-compact.png');
       fs.writeFileSync(compactOutput, compactImage.toPNG());
       win.setSize(1600, 980);
       await new Promise(resolve => setTimeout(resolve, 350));
@@ -101,18 +101,18 @@ app.whenReady().then(() => {
       await win.webContents.executeJavaScript("document.querySelector('#newPowerShellBtn')?.click()");
       const powerShellId = await waitForRenderer(win, "document.querySelector('.terminal-tab.active')?.dataset.terminalId || ''", 50, 200);
       if (!powerShellId) throw new Error('PowerShell PTY 터미널이 생성되지 않았습니다.');
-      await win.webContents.executeJavaScript(`(() => { const input = document.querySelector('#terminalCommandInput'); input.value = 'Write-Output LODESTAR_PTY_OK'; document.querySelector('#terminalCommandForm').requestSubmit(); })()`);
-      const powerShellReplay = await waitForRenderer(win, `(async () => { const value = await window.lodestar.terminalGet(${JSON.stringify(powerShellId)}); return value && value.replay.includes('LODESTAR_PTY_OK') ? value.replay : ''; })()`, 50, 200);
+      await win.webContents.executeJavaScript(`(() => { const input = document.querySelector('#terminalCommandInput'); input.value = 'Write-Output LOADTOAGENT_PTY_OK'; document.querySelector('#terminalCommandForm').requestSubmit(); })()`);
+      const powerShellReplay = await waitForRenderer(win, `(async () => { const value = await window.loadtoagent.terminalGet(${JSON.stringify(powerShellId)}); return value && value.replay.includes('LOADTOAGENT_PTY_OK') ? value.replay : ''; })()`, 50, 200);
       if (!powerShellReplay) throw new Error('PowerShell PTY에 보낸 명령 결과를 수신하지 못했습니다.');
 
       await win.webContents.executeJavaScript("document.querySelector('#newWslBtn')?.click()");
       const wslId = await waitForRenderer(win, `(() => { const id = document.querySelector('.terminal-tab.active')?.dataset.terminalId || ''; return id && id !== ${JSON.stringify(powerShellId)} ? id : ''; })()`, 50, 200);
       if (!wslId) throw new Error('WSL PTY 터미널이 생성되지 않았습니다.');
-      await win.webContents.executeJavaScript(`(() => { const input = document.querySelector('#terminalCommandInput'); input.value = 'printf LODESTAR_WSL_OK'; document.querySelector('#terminalCommandForm').requestSubmit(); })()`);
-      const wslReplay = await waitForRenderer(win, `(async () => { const value = await window.lodestar.terminalGet(${JSON.stringify(wslId)}); return value && value.replay.includes('LODESTAR_WSL_OK') ? value.replay : ''; })()`, 50, 200);
+      await win.webContents.executeJavaScript(`(() => { const input = document.querySelector('#terminalCommandInput'); input.value = 'printf LOADTOAGENT_WSL_OK'; document.querySelector('#terminalCommandForm').requestSubmit(); })()`);
+      const wslReplay = await waitForRenderer(win, `(async () => { const value = await window.loadtoagent.terminalGet(${JSON.stringify(wslId)}); return value && value.replay.includes('LOADTOAGENT_WSL_OK') ? value.replay : ''; })()`, 50, 200);
       if (!wslReplay) throw new Error('WSL PTY에 보낸 명령 결과를 수신하지 못했습니다.');
       const terminalMetrics = await win.webContents.executeJavaScript(`(async () => {
-        const terminalSessions = await window.lodestar.terminalList();
+        const terminalSessions = await window.loadtoagent.terminalList();
         return {
           sectionVisible: !document.querySelector('#terminalSection')?.classList.contains('hidden'),
           appView: state.view,
@@ -132,15 +132,15 @@ app.whenReady().then(() => {
       await win.webContents.executeJavaScript("document.querySelector('.main-stage')?.scrollTo(0, 0)");
       await new Promise(resolve => setTimeout(resolve, 250));
       const terminalImage = await win.webContents.capturePage();
-      const terminalOutput = path.join(outputDir, 'lodestar-terminal-control.png');
+      const terminalOutput = path.join(outputDir, 'loadtoagent-terminal-control.png');
       fs.writeFileSync(terminalOutput, terminalImage.toPNG());
-      await win.webContents.executeJavaScript("window.lodestar.terminalList().then(items => Promise.all(items.map(item => window.lodestar.terminalClose(item.id))))");
+      await win.webContents.executeJavaScript("window.loadtoagent.terminalList().then(items => Promise.all(items.map(item => window.loadtoagent.terminalClose(item.id))))");
       await new Promise(resolve => setTimeout(resolve, 250));
 
       await win.webContents.executeJavaScript("document.querySelector('[data-view=\"tmux\"]')?.click(); document.querySelector('.main-stage')?.scrollTo(0, 0)");
       await new Promise(resolve => setTimeout(resolve, 500));
       const tmuxImage = await win.webContents.capturePage();
-      const tmuxOutput = path.join(outputDir, 'lodestar-tmux-map.png');
+      const tmuxOutput = path.join(outputDir, 'loadtoagent-tmux-map.png');
       fs.writeFileSync(tmuxOutput, tmuxImage.toPNG());
       await win.webContents.executeJavaScript("document.querySelector('.tmux-pane-node.has-agent [data-control-tmux]')?.click()");
       await new Promise(resolve => setTimeout(resolve, 650));
@@ -157,20 +157,20 @@ app.whenReady().then(() => {
       }))()`);
       if (!tmuxControlMetrics.tmuxSectionVisible || !tmuxControlMetrics.generalSectionHidden || !tmuxControlMetrics.workbenchInTmux || !tmuxControlMetrics.tmuxListInTmux || tmuxControlMetrics.generalListMixedIn || !tmuxControlMetrics.tmuxCreateInTmux || !tmuxControlMetrics.targetSelected || !tmuxControlMetrics.toolsVisible || tmuxControlMetrics.controlButtons < 1) throw new Error(`tmux 전용 묶음이 불완전합니다: ${JSON.stringify(tmuxControlMetrics)}`);
       const tmuxControlImage = await win.webContents.capturePage();
-      const tmuxControlOutput = path.join(outputDir, 'lodestar-tmux-control.png');
+      const tmuxControlOutput = path.join(outputDir, 'loadtoagent-tmux-control.png');
       fs.writeFileSync(tmuxControlOutput, tmuxControlImage.toPNG());
       await win.webContents.executeJavaScript("document.querySelector('.main-stage')?.scrollTo(0, 0)");
       await new Promise(resolve => setTimeout(resolve, 200));
       await win.webContents.executeJavaScript("document.querySelector('.tmux-pane-node.has-agent [data-tmux-type=\"pane\"]')?.click()");
       await new Promise(resolve => setTimeout(resolve, 500));
       const tmuxFocusImage = await win.webContents.capturePage();
-      const tmuxFocusOutput = path.join(outputDir, 'lodestar-tmux-focus.png');
+      const tmuxFocusOutput = path.join(outputDir, 'loadtoagent-tmux-focus.png');
       fs.writeFileSync(tmuxFocusOutput, tmuxFocusImage.toPNG());
       await win.webContents.executeJavaScript("document.querySelector('.tmux-pane-node.has-agent [data-open-session]')?.click()");
       const tmuxDetailReady = await waitForRenderer(win, `(() => document.querySelector('#detailDrawer')?.classList.contains('open') && !document.querySelector('.drawer-loading'))()`, 120, 250);
       if (!tmuxDetailReady) throw new Error('여러 창 작업에서 연결된 AI의 대화 상세를 불러오지 못했습니다.');
       const tmuxDetailImage = await win.webContents.capturePage();
-      const tmuxDetailOutput = path.join(outputDir, 'lodestar-tmux-detail.png');
+      const tmuxDetailOutput = path.join(outputDir, 'loadtoagent-tmux-detail.png');
       fs.writeFileSync(tmuxDetailOutput, tmuxDetailImage.toPNG());
       const tmuxDetailMetrics = await win.webContents.executeJavaScript(`(() => ({
         drawerOpen: document.querySelector('#detailDrawer')?.classList.contains('open'),
@@ -187,7 +187,7 @@ app.whenReady().then(() => {
         aiPaneNodes: document.querySelectorAll('.tmux-pane-node.has-agent').length,
         breadcrumbSteps: document.querySelectorAll('#tmuxBreadcrumbs button').length,
         focused: Boolean(state.tmuxFocus),
-        linkedCommandTargets: (state.snapshot && state.snapshot.sessions || []).filter(session => window.LodestarTerminal.agentTargets(session).some(target => target.kind === 'tmux')).length,
+        linkedCommandTargets: (state.snapshot && state.snapshot.sessions || []).filter(session => window.LoadToAgentTerminal.agentTargets(session).some(target => target.kind === 'tmux')).length,
       }))()`);
       if (Number(tmuxMetrics.summary?.linked || 0) > 0 && tmuxMetrics.linkedCommandTargets < 1) throw new Error(`연결된 tmux AI를 직접 지시 대상으로 찾지 못했습니다: ${JSON.stringify(tmuxMetrics)}`);
       await win.webContents.executeJavaScript("document.querySelector('[data-view=\"all\"]')?.click(); document.querySelector('.main-stage')?.scrollTo(0, 0)");
@@ -235,7 +235,7 @@ app.whenReady().then(() => {
         };
       })()`);
       const structuredImage = await win.webContents.capturePage();
-      const structuredOutput = path.join(outputDir, 'lodestar-structured-detail.png');
+      const structuredOutput = path.join(outputDir, 'loadtoagent-structured-detail.png');
       fs.writeFileSync(structuredOutput, structuredImage.toPNG());
       await win.webContents.executeJavaScript("document.querySelector('#closeDrawerBtn')?.click()");
       if (structuredSessionId && structuredMetrics.candidates === 0) throw new Error('구조화 JSON 메시지가 읽기 쉬운 카드로 렌더링되지 않았습니다.');
@@ -244,9 +244,9 @@ app.whenReady().then(() => {
         const sessions = state.snapshot && state.snapshot.sessions || [];
         const base = sessions.find(item => !item.parentId && isLiveSession(item)) || sessions[0];
         if (!base) return { focusId: '', terminalId: '' };
-        const directTerminal = await window.lodestar.terminalCreate({ type: 'powershell', title: 'AI 직접 지시 검증', cols: 120, rows: 32 });
-        const alternateTerminal = await window.lodestar.terminalCreate({ type: 'powershell', title: 'AI 지시 대상 선택 검증', cols: 120, rows: 32 });
-        await window.LodestarTerminal.refresh();
+        const directTerminal = await window.loadtoagent.terminalCreate({ type: 'powershell', title: 'AI 직접 지시 검증', cols: 120, rows: 32 });
+        const alternateTerminal = await window.loadtoagent.terminalCreate({ type: 'powershell', title: 'AI 지시 대상 선택 검증', cols: 120, rows: 32 });
+        await window.LoadToAgentTerminal.refresh();
         const providerIds = state.providers.map(item => item.id);
         const now = Date.now();
         const roots = Array.from({ length: 32 }, (_, index) => ({
@@ -289,13 +289,13 @@ app.whenReady().then(() => {
           updatedAt: new Date(now - index * 700).toISOString(),
         }));
         const fixtures = [...roots, ...children];
-        window.__lodestarDensityFixture = { fixtures, focusId: roots[0].id, terminalId: directTerminal.id };
-        window.__ensureLodestarDensityFixture = () => {
+        window.__loadtoagentDensityFixture = { fixtures, focusId: roots[0].id, terminalId: directTerminal.id };
+        window.__ensureLoadToAgentDensityFixture = () => {
           const current = state.snapshot && state.snapshot.sessions || [];
           const ids = new Set(current.map(item => item.id));
           for (const fixture of fixtures) if (!ids.has(fixture.id)) current.unshift(fixture);
         };
-        window.__ensureLodestarDensityFixture();
+        window.__ensureLoadToAgentDensityFixture();
         state.graphFocusId = null;
         state.graphExpandedProviders.clear();
         renderSessions();
@@ -307,10 +307,10 @@ app.whenReady().then(() => {
       const alternateCommandTerminalId = densitySetup.alternateTerminalId;
       await new Promise(resolve => setTimeout(resolve, 250));
       const treeImage = await win.webContents.capturePage();
-      const treeOutput = path.join(outputDir, 'lodestar-agent-tree.png');
+      const treeOutput = path.join(outputDir, 'loadtoagent-agent-tree.png');
       fs.writeFileSync(treeOutput, treeImage.toPNG());
       const densityMetrics = await win.webContents.executeJavaScript(`(() => {
-        window.__ensureLodestarDensityFixture?.();
+        window.__ensureLoadToAgentDensityFixture?.();
         state.graphFocusId = null;
         state.graphExpandedProviders.clear();
         renderSessions();
@@ -334,19 +334,19 @@ app.whenReady().then(() => {
       }
       if (densityFocusId) {
         await win.webContents.executeJavaScript(`(() => {
-          window.__ensureLodestarDensityFixture?.();
+          window.__ensureLoadToAgentDensityFixture?.();
           renderSessions();
           document.querySelector('[data-graph-focus="${densityFocusId}"]')?.click();
         })()`);
         await new Promise(resolve => setTimeout(resolve, 500));
       }
-      const directMarker = `LODESTAR_AGENT_DIRECT_${Date.now()}`;
+      const directMarker = `LOADTOAGENT_AGENT_DIRECT_${Date.now()}`;
       const commandUiMetrics = await win.webContents.executeJavaScript(`(() => {
-        window.__ensureLodestarDensityFixture?.();
+        window.__ensureLoadToAgentDensityFixture?.();
         state.graphFocusId = ${JSON.stringify(densityFocusId)};
         renderSessions();
         const session = state.snapshot.sessions.find(item => item.id === ${JSON.stringify(densityFocusId)});
-        const targets = window.LodestarTerminal.agentTargets(session);
+        const targets = window.LoadToAgentTerminal.agentTargets(session);
         const form = document.querySelector('[data-agent-command-form="${densityFocusId}"]');
         const input = form?.querySelector('[data-agent-command-draft]');
         const picker = form?.querySelector('[data-agent-command-target]');
@@ -371,13 +371,13 @@ app.whenReady().then(() => {
           maxLength: input?.maxLength || 0,
         };
       })()`);
-      const directReplay = await waitForRenderer(win, `(async () => { const value = await window.lodestar.terminalGet(${JSON.stringify(commandTerminalId)}); return value?.replay.includes(${JSON.stringify(directMarker)}) ? value.replay : ''; })()`, 50, 200);
+      const directReplay = await waitForRenderer(win, `(async () => { const value = await window.loadtoagent.terminalGet(${JSON.stringify(commandTerminalId)}); return value?.replay.includes(${JSON.stringify(directMarker)}) ? value.replay : ''; })()`, 50, 200);
       if (!commandUiMetrics.formVisible || !commandUiMetrics.connected || commandUiMetrics.targetCount !== 2 || !commandUiMetrics.targetIds.includes(commandTerminalId) || !commandUiMetrics.targetIds.includes(alternateCommandTerminalId) || !commandUiMetrics.pickerVisible || !commandUiMetrics.initiallyDisabled || commandUiMetrics.selectedTargetId !== commandTerminalId || commandUiMetrics.maxLength !== 8000 || !directReplay) {
         throw new Error(`선택한 AI의 터미널 직접 지시가 올바르지 않습니다: ${JSON.stringify(commandUiMetrics)}`);
       }
       const openDraft = '이 문장을 터미널 입력창에서 이어서 작성';
       await win.webContents.executeJavaScript(`(() => {
-        window.__ensureLodestarDensityFixture?.();
+        window.__ensureLoadToAgentDensityFixture?.();
         state.graphFocusId = ${JSON.stringify(densityFocusId)};
         renderSessions();
         const input = document.querySelector('[data-agent-command-draft="${densityFocusId}"]');
@@ -392,13 +392,13 @@ app.whenReady().then(() => {
       await win.webContents.executeJavaScript(`(() => {
         state.agentCommandDrafts.delete(${JSON.stringify(densityFocusId)});
         document.querySelector('[data-view="all"]')?.click();
-        window.__ensureLodestarDensityFixture?.();
+        window.__ensureLoadToAgentDensityFixture?.();
         state.graphFocusId = ${JSON.stringify(densityFocusId)};
         renderSessions();
       })()`);
       await new Promise(resolve => setTimeout(resolve, 300));
       const motionMetrics = await win.webContents.executeJavaScript(`(() => {
-        window.__ensureLodestarDensityFixture?.();
+        window.__ensureLoadToAgentDensityFixture?.();
         state.graphFocusId = null;
         renderSessions();
         document.querySelector('[data-graph-focus="${densityFocusId}"]')?.click();
@@ -432,17 +432,17 @@ app.whenReady().then(() => {
       }
       const focusImage = await captureStableState(win, `(() => {
         document.querySelector('#closeDrawerBtn')?.click();
-        window.__ensureLodestarDensityFixture?.();
+        window.__ensureLoadToAgentDensityFixture?.();
         state.graphFocusId = ${JSON.stringify(densityFocusId)};
         renderSessions();
         drawAgentWorkflowConnections();
         document.querySelector('.main-stage')?.scrollTo(0, 0);
       })()`, `state.graphFocusId === ${JSON.stringify(densityFocusId)} && document.querySelectorAll('.downstream-column .agent-workflow-node').length === 9 && !document.querySelector('#detailDrawer')?.classList.contains('open')`);
-      const focusOutput = path.join(outputDir, 'lodestar-agent-focus.png');
+      const focusOutput = path.join(outputDir, 'loadtoagent-agent-focus.png');
       fs.writeFileSync(focusOutput, focusImage.toPNG());
       const metrics = await win.webContents.executeJavaScript(`(() => {
-        window.__ensureLodestarDensityFixture?.();
-        if (window.__lodestarDensityFixture) state.graphFocusId = window.__lodestarDensityFixture.focusId;
+        window.__ensureLoadToAgentDensityFixture?.();
+        if (window.__loadtoagentDensityFixture) state.graphFocusId = window.__loadtoagentDensityFixture.focusId;
         renderSessions();
         const start = performance.now();
         for (let index = 0; index < 5; index += 1) renderSessions();
@@ -470,7 +470,7 @@ app.whenReady().then(() => {
       if (!metrics.graphFocused || metrics.liveNodes !== 1 || metrics.workflowCanvas !== 1 || metrics.upstreamNodes !== 1 || metrics.selectedNodes !== 1 || metrics.downstreamNodes !== 9 || metrics.connectionPaths !== 10 || metrics.ports !== 12 || !metrics.desktopDirectionFixed || !metrics.noHorizontalOverflow || metrics.averageRenderMs > 250) throw new Error(`연결형 에이전트 작업 흐름이 올바르지 않습니다: ${JSON.stringify(metrics)}`);
 
       const childClick = await win.webContents.executeJavaScript(`(() => {
-        window.__ensureLodestarDensityFixture?.();
+        window.__ensureLoadToAgentDensityFixture?.();
         state.graphFocusId = ${JSON.stringify(densityFocusId)};
         renderSessions();
         drawAgentWorkflowConnections();
@@ -482,7 +482,7 @@ app.whenReady().then(() => {
       if (!childFocusId || childClick.immediateFocusId !== childFocusId) throw new Error(`나눠 맡긴 AI 선택 이벤트가 적용되지 않았습니다: ${JSON.stringify(childClick)}`);
       await new Promise(resolve => setTimeout(resolve, 450));
       const childMetrics = await win.webContents.executeJavaScript(`(() => {
-        window.__ensureLodestarDensityFixture?.();
+        window.__ensureLoadToAgentDensityFixture?.();
         if (state.graphFocusId !== ${JSON.stringify(childFocusId)}) { state.graphFocusId = ${JSON.stringify(childFocusId)}; renderSessions(); }
         drawAgentWorkflowConnections();
         const upstream = document.querySelector('.upstream-column .agent-workflow-node')?.getBoundingClientRect();
@@ -502,18 +502,18 @@ app.whenReady().then(() => {
       })()`);
       const childFocusImage = await captureStableState(win, `(() => {
         document.querySelector('#closeDrawerBtn')?.click();
-        window.__ensureLodestarDensityFixture?.();
+        window.__ensureLoadToAgentDensityFixture?.();
         state.graphFocusId = ${JSON.stringify(childFocusId)};
         renderSessions();
         drawAgentWorkflowConnections();
         document.querySelector('.main-stage')?.scrollTo(0, 0);
       })()`, `state.graphFocusId === ${JSON.stringify(childFocusId)} && document.querySelector('.upstream-column [data-graph-focus]')?.dataset.graphFocus === ${JSON.stringify(densityFocusId)} && !document.querySelector('#detailDrawer')?.classList.contains('open')`);
-      const childFocusOutput = path.join(outputDir, 'lodestar-agent-child-focus.png');
+      const childFocusOutput = path.join(outputDir, 'loadtoagent-agent-child-focus.png');
       fs.writeFileSync(childFocusOutput, childFocusImage.toPNG());
       if (childMetrics.focusId !== childFocusId || childMetrics.parentId !== densityFocusId || !childMetrics.parentOnLeft || childMetrics.downstreamNodes !== 0 || !childMetrics.emptyShown || childMetrics.connectionPaths !== 1 || !childMetrics.commandUnavailable || !childMetrics.commandDisabled || !childMetrics.connectMode || !childMetrics.bridgeCopyVisible) throw new Error(`도움 AI 선택 후 부모 방향 또는 터미널 안전 상태가 올바르지 않습니다: ${JSON.stringify(childMetrics)}`);
 
       const controlStateMetrics = await win.webContents.executeJavaScript(`(() => {
-        window.__ensureLodestarDensityFixture?.();
+        window.__ensureLoadToAgentDensityFixture?.();
         const inspect = id => {
           state.graphFocusId = id;
           renderSessions();
@@ -542,7 +542,7 @@ app.whenReady().then(() => {
       if (returnClick.parentId !== densityFocusId || returnClick.immediateFocusId !== densityFocusId) throw new Error(`메인 AI로 돌아가기 이벤트가 적용되지 않았습니다: ${JSON.stringify(returnClick)}`);
       await new Promise(resolve => setTimeout(resolve, 450));
       const returnMetrics = await win.webContents.executeJavaScript(`(() => {
-        window.__ensureLodestarDensityFixture?.();
+        window.__ensureLoadToAgentDensityFixture?.();
         if (state.graphFocusId !== ${JSON.stringify(densityFocusId)}) { state.graphFocusId = ${JSON.stringify(densityFocusId)}; renderSessions(); }
         drawAgentWorkflowConnections();
         return {
@@ -557,7 +557,7 @@ app.whenReady().then(() => {
       win.setSize(1080, 700);
       await new Promise(resolve => setTimeout(resolve, 450));
       const workflowCompactMetrics = await win.webContents.executeJavaScript(`(() => {
-        window.__ensureLodestarDensityFixture?.();
+        window.__ensureLoadToAgentDensityFixture?.();
         state.graphFocusId = ${JSON.stringify(densityFocusId)};
         renderSessions();
         drawAgentWorkflowConnections();
@@ -573,16 +573,16 @@ app.whenReady().then(() => {
       })()`);
       if (!workflowCompactMetrics.verticalDirection || workflowCompactMetrics.connectionPaths !== 10 || !workflowCompactMetrics.noHorizontalOverflow) throw new Error(`최소 창 크기의 연결형 작업 흐름이 올바르지 않습니다: ${JSON.stringify(workflowCompactMetrics)}`);
       const workflowCompactImage = await win.webContents.capturePage();
-      const workflowCompactOutput = path.join(outputDir, 'lodestar-agent-workflow-compact.png');
+      const workflowCompactOutput = path.join(outputDir, 'loadtoagent-agent-workflow-compact.png');
       fs.writeFileSync(workflowCompactOutput, workflowCompactImage.toPNG());
       win.setSize(1600, 980);
       await new Promise(resolve => setTimeout(resolve, 400));
       await win.webContents.executeJavaScript("(() => { const target = document.querySelector('[data-open-session]') || document.querySelector('.session-card'); if (target) target.click(); })()");
       await new Promise(resolve => setTimeout(resolve, 1200));
       const drawerImage = await win.webContents.capturePage();
-      const drawerOutput = path.join(outputDir, 'lodestar-session-detail.png');
+      const drawerOutput = path.join(outputDir, 'loadtoagent-session-detail.png');
       fs.writeFileSync(drawerOutput, drawerImage.toPNG());
-      await win.webContents.executeJavaScript(`Promise.all([${JSON.stringify(commandTerminalId)}, ${JSON.stringify(alternateCommandTerminalId)}].map(id => window.lodestar.terminalClose(id).catch(() => null)))`);
+      await win.webContents.executeJavaScript(`Promise.all([${JSON.stringify(commandTerminalId)}, ${JSON.stringify(alternateCommandTerminalId)}].map(id => window.loadtoagent.terminalClose(id).catch(() => null)))`);
       process.stdout.write(`${output}\n${compactOutput}\n${terminalOutput}\n${tmuxOutput}\n${tmuxControlOutput}\n${tmuxFocusOutput}\n${tmuxDetailOutput}\n${structuredOutput}\n${treeOutput}\n${focusOutput}\n${childFocusOutput}\n${workflowCompactOutput}\n${drawerOutput}\n${JSON.stringify({ bridge: bridgeInfo, beginner: beginnerMetrics, compact: compactMetrics, terminal: terminalMetrics, terminalCommand: commandUiMetrics, controlStates: controlStateMetrics, tmuxControl: tmuxControlMetrics, dashboard: metrics, density: densityMetrics, motion: { ...motionMetrics, ...motionClosedMetrics }, workflowChild: childMetrics, workflowReturn: returnMetrics, workflowCompact: workflowCompactMetrics, tmux: tmuxMetrics, tmuxDetail: tmuxDetailMetrics, structuredDetail: structuredMetrics })}\n`);
     } catch (error) {
       process.stderr.write(`${error.stack || error.message}\n`);

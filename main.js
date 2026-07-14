@@ -14,6 +14,7 @@ const { TmuxController } = require('./src/tmuxController');
 const { normalizeWslList } = require('./src/tmuxMonitor');
 const { BridgeServer } = require('./src/bridgeServer');
 
+const demoCapture = process.env.LOADTOAGENT_DEMO_CAPTURE === '1';
 let mainWindow = null;
 let monitorWorker = null;
 let runner = null;
@@ -63,22 +64,22 @@ function shellQuote(value) {
 }
 
 function installBridgeLauncher() {
-  const directory = path.join(os.homedir(), '.lodestar', 'bin');
+  const directory = path.join(os.homedir(), '.loadtoagent', 'bin');
   fs.mkdirSync(directory, { recursive: true });
   const script = app.isPackaged
-    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'bin', 'lodestar.js')
-    : path.join(__dirname, 'bin', 'lodestar.js');
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'bin', 'loadtoagent.js')
+    : path.join(__dirname, 'bin', 'loadtoagent.js');
   if (process.platform === 'win32') {
-    const launcher = path.join(directory, 'lodestar.cmd');
+    const launcher = path.join(directory, 'loadtoagent.cmd');
     const content = `@echo off\r\nset "ELECTRON_RUN_AS_NODE=1"\r\n"${process.execPath}" "${script}" %*\r\n`;
     fs.writeFileSync(launcher, content, 'utf8');
-    return { path: launcher, directory, commandPrefix: `& "${launcher}"`, simpleCommand: 'lodestar' };
+    return { path: launcher, directory, commandPrefix: `& "${launcher}"`, simpleCommand: 'loadtoagent' };
   }
-  const launcher = path.join(directory, 'lodestar');
+  const launcher = path.join(directory, 'loadtoagent');
   const content = `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${shellQuote(process.execPath)} ${shellQuote(script)} "$@"\n`;
   fs.writeFileSync(launcher, content, { encoding: 'utf8', mode: 0o755 });
   fs.chmodSync(launcher, 0o755);
-  return { path: launcher, directory, commandPrefix: shellQuote(launcher), simpleCommand: 'lodestar' };
+  return { path: launcher, directory, commandPrefix: shellQuote(launcher), simpleCommand: 'loadtoagent' };
 }
 
 function listWorkspaces() {
@@ -132,7 +133,7 @@ function createWindow() {
     height: 980,
     minWidth: 1080,
     minHeight: 700,
-    title: 'Lodestar · AI Agent Observatory',
+    title: 'LoadToAgent · AI Agent Observatory',
     backgroundColor: '#080b12',
     show: false,
     webPreferences: {
@@ -180,6 +181,10 @@ function setupRuntime() {
   const runsDir = userFile('agent-runs');
   runner = new AgentRunner({ runsDir });
   terminalManager = new TerminalManager();
+  if (demoCapture) {
+    availability = Object.fromEntries(providerList().map(provider => [provider.id, true]));
+    return;
+  }
   try { bridgeLauncher = installBridgeLauncher(); } catch { bridgeLauncher = null; }
   terminalManager.on('data', payload => sendTerminal('terminals:data', payload));
   terminalManager.on('state', payload => {
@@ -227,7 +232,7 @@ function bridgePresence() {
       startedAt: session.createdAt,
       environment,
       kind: 'bridge',
-      label: 'Lodestar 외부 터미널 브리지',
+      label: 'LoadToAgent 외부 터미널 브리지',
     }));
 }
 
@@ -414,7 +419,7 @@ ipcMain.handle('bridge:command', (event, provider) => {
   requireTrustedSender(event);
   const id = String(provider || '').toLowerCase();
   if (!['claude', 'codex', 'gemini', 'grok'].includes(id)) return { ok: false };
-  const prefix = bridgeLauncher && bridgeLauncher.commandPrefix || 'lodestar';
+  const prefix = bridgeLauncher && bridgeLauncher.commandPrefix || 'loadtoagent';
   return { ok: true, command: `${prefix} run ${id}`, launcher: bridgeLauncher };
 });
 ipcMain.handle('agents:open-origin', async (event, session) => {

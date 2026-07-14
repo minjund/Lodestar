@@ -553,8 +553,8 @@ function parseManagedSession(runDir) {
     id: `${meta.provider}:${live.externalId || meta.externalId || meta.id}`,
     provider: meta.provider,
     runId: meta.id,
-    source: 'lodestar',
-    sourceLabel: 'Lodestar 실행',
+    source: 'loadtoagent',
+    sourceLabel: 'LoadToAgent 실행',
     statusObserved: true,
   };
   session.usage = finalizeUsage(session.usage);

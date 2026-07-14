@@ -261,10 +261,10 @@ function syntheticBridgeSession(bridge, now = Date.now()) {
   session.title = `${bridge.provider === 'codex' ? 'GPT · Codex' : bridge.provider} 외부 연결`;
   session.cwd = bridge.cwd || '';
   session.workspace = session.cwd ? session.cwd.replace(/\\/g, '/').split('/').filter(Boolean).pop() : '작업 폴더 확인 중';
-  session.source = 'lodestar-bridge';
-  session.sourceLabel = 'Lodestar 외부 터미널 브리지';
-  session.clientKind = 'lodestar-bridge';
-  session.runtimePresence = [{ ...bridge, kind: 'bridge', label: 'Lodestar 외부 터미널 브리지' }];
+  session.source = 'loadtoagent-bridge';
+  session.sourceLabel = 'LoadToAgent 외부 터미널 브리지';
+  session.clientKind = 'loadtoagent-bridge';
+  session.runtimePresence = [{ ...bridge, kind: 'bridge', label: 'LoadToAgent 외부 터미널 브리지' }];
   session.statusDetail = `안전하게 연결된 외부 터미널 · PID ${bridge.pid}`;
   return session;
 }
@@ -286,7 +286,7 @@ function applyRuntimePresence(agentSessions, tmuxSnapshot, processSnapshot, now 
     if (usedBridgeIds.has(pair.bridge.id) || usedSessionIds.has(pair.session.id)) continue;
     usedBridgeIds.add(pair.bridge.id);
     usedSessionIds.add(pair.session.id);
-    markRuntime(pair.session, { ...pair.bridge, kind: 'bridge', label: 'Lodestar 외부 터미널 브리지', linkScore: Math.round(pair.score) });
+    markRuntime(pair.session, { ...pair.bridge, kind: 'bridge', label: 'LoadToAgent 외부 터미널 브리지', linkScore: Math.round(pair.score) });
   }
   for (const distro of tmuxSnapshot && tmuxSnapshot.distros || []) {
     for (const tmuxSession of distro.sessions || []) {

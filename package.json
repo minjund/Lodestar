@@ -1,12 +1,44 @@
 {
-  "name": "lodestar",
+  "name": "loadtoagent",
   "version": "3.0.0",
-  "description": "Claude, GPT, Gemini, Grok이 맡은 일과 도움 AI, 토큰, 기억 공간을 쉬운 말로 보여주는 로컬 데스크톱 프로그램.",
+  "description": "A local desktop dashboard for Claude, Codex, Gemini, and Grok sessions.",
   "main": "main.js",
   "author": "wincube AX",
   "license": "UNLICENSED",
+  "homepage": "https://github.com/minjund/LodeToAgent#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minjund/LodeToAgent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/minjund/LodeToAgent/issues"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "codex",
+    "gemini",
+    "grok",
+    "electron",
+    "desktop"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin",
+    "main.js",
+    "preload.js",
+    "renderer",
+    "src",
+    "docs",
+    "README.md",
+    "README.ko.md",
+    "README.zh-CN.md"
+  ],
   "bin": {
-    "lodestar": "bin/lodestar.js"
+    "loadtoagent": "bin/loadtoagent.js"
   },
   "scripts": {
     "start": "electron .",
@@ -15,23 +47,32 @@
     "test:bridge": "electron scripts/bridge-integration-test.js",
     "test:tmux": "node scripts/tmux-integration-test.js",
     "test:visual": "electron scripts/visual-check.js",
+    "demo:readme": "electron scripts/readme-demo.js",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win portable",
     "dist:mac": "electron-builder --mac --publish never",
-    "pack": "electron-builder --dir"
+    "pack": "electron-builder --dir",
+    "prepublishOnly": "npm test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "node-pty": "^1.1.0"
   },
+  "peerDependencies": {
+    "electron": "^31.0.0"
+  },
   "devDependencies": {
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.wincube.lodestar",
-    "productName": "Lodestar",
+    "appId": "com.wincube.loadtoagent",
+    "productName": "LoadToAgent",
     "directories": {
       "output": "release"
     },
@@ -69,10 +110,10 @@
           "arch": ["arm64", "x64"]
         }
       ],
-      "artifactName": "Lodestar-${version}-${arch}.${ext}"
+      "artifactName": "LoadToAgent-${version}-${arch}.${ext}"
     },
     "portable": {
-      "artifactName": "Lodestar-${version}-portable.exe"
+      "artifactName": "LoadToAgent-${version}-portable.exe"
     }
   }
 }

@@ -475,8 +475,8 @@ function workflowCompactNode(session, model, side, label) {
 
 function agentCommandTargets(session) {
   try {
-    return window.LodestarTerminal && typeof window.LodestarTerminal.agentTargets === 'function'
-      ? window.LodestarTerminal.agentTargets(session) : [];
+    return window.LoadToAgentTerminal && typeof window.LoadToAgentTerminal.agentTargets === 'function'
+      ? window.LoadToAgentTerminal.agentTargets(session) : [];
   } catch {
     return [];
   }
@@ -505,7 +505,7 @@ function agentCommandComposer(session) {
   const help = mode === 'direct'
     ? 'Enter로 바로 보내고, Shift+Enter로 줄을 바꿀 수 있습니다.'
     : (mode === 'connect'
-      ? `임의로 열린 터미널에는 입력하지 않습니다. 새 터미널에서 lodestar run ${session.provider}로 안전하게 연결할 수 있습니다.`
+      ? `임의로 열린 터미널에는 입력하지 않습니다. 새 터미널에서 loadtoagent run ${session.provider}로 안전하게 연결할 수 있습니다.`
       : (mode === 'origin' ? '이 대화는 Codex 데스크톱 앱에서 시작되어 원래 작업으로 돌아갑니다.' : '실행이 끝난 AI의 기록에는 새 지시를 보내지 않습니다.'));
   const picker = targets.length > 1 ? `<label class="agent-command-target"><span>보낼 터미널</span><select data-agent-command-target="${esc(session.id)}"><option value="">터미널을 선택하세요</option>${targets.map(item => `<option value="${esc(item.id)}" ${item.id === targetId ? 'selected' : ''}>${esc(item.label)}</option>`).join('')}</select></label>` : '';
   const actions = mode === 'direct'
@@ -786,7 +786,7 @@ function renderSessions(motionKind = 'refresh', deferMotion = false) {
   $('#beginnerGuide').classList.toggle('hidden', tmuxView || terminalView);
   if (terminalView) {
     $('#liveSection').classList.add('hidden');
-    if (window.LodestarTerminal) window.LodestarTerminal.activate(state.snapshot, state.workspaces, 'general');
+    if (window.LoadToAgentTerminal) window.LoadToAgentTerminal.activate(state.snapshot, state.workspaces, 'general');
     if (!deferMotion) playMotionLayout(previousLayout, motionKind);
     if (motionKind === 'view') animateVisibleSections();
     return;
@@ -794,12 +794,12 @@ function renderSessions(motionKind = 'refresh', deferMotion = false) {
   if (tmuxView) {
     $('#liveSection').classList.add('hidden');
     renderTmuxMap();
-    if (window.LodestarTerminal) window.LodestarTerminal.activate(state.snapshot, state.workspaces, 'tmux');
+    if (window.LoadToAgentTerminal) window.LoadToAgentTerminal.activate(state.snapshot, state.workspaces, 'tmux');
     if (!deferMotion) playMotionLayout(previousLayout, motionKind);
     if (motionKind === 'view') animateVisibleSections();
     return;
   }
-  if (window.LodestarTerminal) window.LodestarTerminal.deactivate();
+  if (window.LoadToAgentTerminal) window.LoadToAgentTerminal.deactivate();
   const sessions = filteredSessions();
   const showMap = ['all', 'active'].includes(state.view);
   const graphLiveCount = showMap ? renderAgentMap(graphFilteredSessions(), motionKind) : 0;
@@ -847,7 +847,7 @@ function chosenAgentCommandTarget(session) {
 
 async function dispatchAgentCommand(sessionId, form) {
   const session = snapshotSession(sessionId);
-  if (!session || !window.LodestarTerminal) return toast('선택한 AI의 최신 정보를 찾지 못했습니다.');
+  if (!session || !window.LoadToAgentTerminal) return toast('선택한 AI의 최신 정보를 찾지 못했습니다.');
   const target = chosenAgentCommandTarget(session);
   const input = form.querySelector('[data-agent-command-draft]');
   const command = String(input && input.value || '').trim();
@@ -857,7 +857,7 @@ async function dispatchAgentCommand(sessionId, form) {
   const submit = form.querySelector('[type="submit"]');
   if (submit) { submit.disabled = true; submit.textContent = '보내는 중…'; }
   try {
-    await window.LodestarTerminal.dispatchAgentCommand(session, command, target.id);
+    await window.LoadToAgentTerminal.dispatchAgentCommand(session, command, target.id);
     state.agentCommandDrafts.delete(sessionId);
     if (input) input.value = '';
     toast(`${target.label}에 지시를 보냈습니다.`);
@@ -871,14 +871,14 @@ async function dispatchAgentCommand(sessionId, form) {
 
 async function openAgentTerminal(sessionId) {
   const session = snapshotSession(sessionId);
-  if (!session || !window.LodestarTerminal) return toast('선택한 AI의 터미널 정보를 찾지 못했습니다.');
+  if (!session || !window.LoadToAgentTerminal) return toast('선택한 AI의 터미널 정보를 찾지 못했습니다.');
   const target = chosenAgentCommandTarget(session);
   if (!target) return toast(agentCommandTargets(session).length ? '열어볼 터미널을 먼저 선택하세요.' : '이 AI에 연결된 입력 가능한 터미널이 없습니다.');
   state.view = target.kind === 'tmux' ? 'tmux' : 'terminal';
   $$('.nav-item').forEach(item => item.classList.toggle('active', item.dataset.view === state.view));
   renderSessions('view');
   try {
-    await window.LodestarTerminal.openForAgent(session, target.id, state.agentCommandDrafts.get(sessionId) || '');
+    await window.LoadToAgentTerminal.openForAgent(session, target.id, state.agentCommandDrafts.get(sessionId) || '');
     $('#terminalCommandInput')?.scrollIntoView({ behavior: motionPreference.matches ? 'auto' : 'smooth', block: 'center' });
   } catch (error) {
     toast(error && error.message || 'AI의 터미널을 열지 못했습니다.');
@@ -887,10 +887,10 @@ async function openAgentTerminal(sessionId) {
 
 async function copyBridgeCommand(provider) {
   try {
-    const result = await window.lodestar.bridgeCommand(provider);
+    const result = await window.loadtoagent.bridgeCommand(provider);
     if (!result || !result.ok) throw new Error('연결 명령을 만들지 못했습니다.');
     const command = result.command;
-    await window.lodestar.writeClipboard(command);
+    await window.loadtoagent.writeClipboard(command);
     toast(`${command} 명령을 복사했습니다.`);
   } catch (error) {
     toast(error && error.message || '연결 명령을 복사하지 못했습니다.');
@@ -901,7 +901,7 @@ async function openSessionOrigin(sessionId) {
   const session = snapshotSession(sessionId);
   if (!session) return toast('원래 Codex 작업 정보를 찾지 못했습니다.');
   try {
-    const result = await window.lodestar.openSessionOrigin(session);
+    const result = await window.loadtoagent.openSessionOrigin(session);
     if (!result || !result.ok) return toast('이 작업은 Codex 앱에서 직접 열 수 없습니다.');
     toast('원래 Codex 작업을 열었습니다.');
   } catch (error) {
@@ -914,7 +914,7 @@ async function loadSessionDetail(id, force = false) {
   state.detailLoading = true;
   renderDrawer();
   try {
-    const detail = await window.lodestar.sessionDetail(id);
+    const detail = await window.loadtoagent.sessionDetail(id);
     if (detail) state.details.set(id, detail);
     return detail;
   } finally {
@@ -1071,7 +1071,7 @@ async function handleRun(event) {
   submit.disabled = true;
   $('#runError').classList.add('hidden');
   try {
-    const result = await window.lodestar.runAgent({
+    const result = await window.loadtoagent.runAgent({
       provider: state.runProvider,
       cwd: $('#runCwd').value.trim(),
       model: $('#runModel').value.trim(),
@@ -1195,7 +1195,7 @@ function bindEvents() {
     const control = event.target.closest('[data-control-tmux]');
     if (control) {
       event.stopPropagation();
-      window.LodestarTerminal?.selectTmuxById(control.dataset.controlTmux);
+      window.LoadToAgentTerminal?.selectTmuxById(control.dataset.controlTmux);
       $('#tmuxControlSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
@@ -1209,7 +1209,7 @@ function bindEvents() {
     if (!node) return;
     state.tmuxFocus = { type: node.dataset.tmuxType, id: node.dataset.tmuxId };
     renderTmuxMap();
-    if (node.dataset.tmuxType === 'pane') window.LodestarTerminal?.selectTmuxById(node.dataset.tmuxId);
+    if (node.dataset.tmuxType === 'pane') window.LoadToAgentTerminal?.selectTmuxById(node.dataset.tmuxId);
   });
   $('#tmuxBreadcrumbs').addEventListener('click', event => {
     if (event.target.closest('[data-tmux-reset]')) state.tmuxFocus = null;
@@ -1229,7 +1229,7 @@ function bindEvents() {
     const remove = event.target.closest('[data-remove-workspace]');
     if (remove) {
       event.stopPropagation();
-      state.workspaces = await window.lodestar.removeWorkspace(remove.dataset.removeWorkspace);
+      state.workspaces = await window.loadtoagent.removeWorkspace(remove.dataset.removeWorkspace);
       if (state.workspace === remove.dataset.removeWorkspace) state.workspace = 'all';
       render();
       return;
@@ -1245,8 +1245,8 @@ function bindEvents() {
   });
   $('#providerFilter').addEventListener('change', event => { state.provider = event.target.value; state.visibleLimit = 30; renderSessions('filter'); });
   $('#sortSelect').addEventListener('change', event => { state.sort = event.target.value; state.visibleLimit = 30; renderSessions('filter'); });
-  $('#addWorkspaceBtn').addEventListener('click', async () => { state.workspaces = await window.lodestar.addWorkspaces(); renderWorkspaces(); });
-  $('#probeBtn').addEventListener('click', async () => { state.availability = await window.lodestar.probeProviders(); render(); toast('AI CLI 연결 상태를 다시 확인했습니다.'); });
+  $('#addWorkspaceBtn').addEventListener('click', async () => { state.workspaces = await window.loadtoagent.addWorkspaces(); renderWorkspaces(); });
+  $('#probeBtn').addEventListener('click', async () => { state.availability = await window.loadtoagent.probeProviders(); render(); toast('AI CLI 연결 상태를 다시 확인했습니다.'); });
   $('#newRunBtn').addEventListener('click', openRunModal);
   $$('[data-open-run]').forEach(button => button.addEventListener('click', openRunModal));
   $('#closeRunModalBtn').addEventListener('click', closeRunModal);
@@ -1258,7 +1258,7 @@ function bindEvents() {
     state.runProvider = button.dataset.runProvider;
     $('#runProviderPicker').innerHTML = providerPickerHtml();
   });
-  $('#pickRunCwdBtn').addEventListener('click', async () => { const folder = await window.lodestar.pickWorkspace(); if (folder) $('#runCwd').value = folder; });
+  $('#pickRunCwdBtn').addEventListener('click', async () => { const folder = await window.loadtoagent.pickWorkspace(); if (folder) $('#runCwd').value = folder; });
   $('#runForm').addEventListener('submit', handleRun);
   $('#closeDrawerBtn').addEventListener('click', closeDrawer);
   $('#drawerBackdrop').addEventListener('click', closeDrawer);
@@ -1272,7 +1272,7 @@ function bindEvents() {
     }
     const stop = event.target.closest('[data-stop-run]');
     if (!stop) return;
-    const result = await window.lodestar.stopAgent(stop.dataset.stopRun);
+    const result = await window.loadtoagent.stopAgent(stop.dataset.stopRun);
     toast(result.ok ? '중지 요청을 보냈습니다.' : result.error);
   });
   document.addEventListener('keydown', event => {
@@ -1283,12 +1283,12 @@ function bindEvents() {
 }
 
 async function init() {
-  if (!window.lodestar) {
+  if (!window.loadtoagent) {
     $('#emptyState').classList.remove('hidden');
-    $('#emptyState p').textContent = 'Lodestar 프로그램에서 열면 이 컴퓨터의 AI 작업 기록을 불러옵니다.';
+    $('#emptyState p').textContent = 'LoadToAgent 프로그램에서 열면 이 컴퓨터의 AI 작업 기록을 불러옵니다.';
     return;
   }
-  const bootstrap = await window.lodestar.bootstrap();
+  const bootstrap = await window.loadtoagent.bootstrap();
   state.providers = bootstrap.providers || [];
   state.providerMap = new Map(state.providers.map(provider => [provider.id, provider]));
   state.availability = bootstrap.availability || {};
@@ -1300,9 +1300,9 @@ async function init() {
   bindEvents();
   render();
   $('#lastSync').textContent = timeOnly(state.snapshot && state.snapshot.generatedAt);
-  window.lodestar.onSnapshot(snapshot => {
+  window.loadtoagent.onSnapshot(snapshot => {
     state.snapshot = snapshot;
-    if (window.LodestarTerminal) window.LodestarTerminal.updateSnapshot(snapshot, state.workspaces);
+    if (window.LoadToAgentTerminal) window.LoadToAgentTerminal.updateSnapshot(snapshot, state.workspaces);
     $('#lastSync').textContent = timeOnly(snapshot.generatedAt);
     render();
     if (state.selectedId && $('#detailDrawer').classList.contains('open') && !state.detailLoading) {

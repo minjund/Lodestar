@@ -58,7 +58,7 @@ function killPtyTree(handle, pid) {
       stdio: 'ignore',
     });
     killer.once('exit', code => {
-      if (code === 0 || handle.__lodestarExited) return;
+      if (code === 0 || handle.__loadtoagentExited) return;
       try { handle.kill(); } catch {}
     });
     killer.unref();
@@ -231,7 +231,7 @@ class TerminalManager extends EventEmitter {
         this.emit('data', { id: session.id, data: text });
       });
       processHandle.onExit(event => {
-        processHandle.__lodestarExited = true;
+        processHandle.__loadtoagentExited = true;
         if (session.generation !== generation) return;
         session.process = null;
         session.status = 'exited';
@@ -245,7 +245,7 @@ class TerminalManager extends EventEmitter {
       session.process = null;
       session.status = 'failed';
       session.updatedAt = new Date().toISOString();
-      session.replay += `\r\n[Lodestar] 터미널을 시작하지 못했습니다: ${error.message}\r\n`;
+      session.replay += `\r\n[LoadToAgent] 터미널을 시작하지 못했습니다: ${error.message}\r\n`;
       this.emit('data', { id: session.id, data: session.replay });
       this.emitState('updated', session);
       throw error;

@@ -11,7 +11,7 @@ const PROTOCOL_VERSION = 1;
 const MAX_FRAME_CHARS = 1024 * 1024;
 
 function bridgeDirectory(home = os.homedir()) {
-  return path.join(home, '.lodestar');
+  return path.join(home, '.loadtoagent');
 }
 
 function discoveryFile(home = os.homedir()) {
@@ -20,8 +20,8 @@ function discoveryFile(home = os.homedir()) {
 
 function endpointFor(platform = process.platform, home = os.homedir(), nonce = crypto.randomBytes(8).toString('hex')) {
   const identity = crypto.createHash('sha256').update(`${home}:${nonce}`).digest('hex').slice(0, 18);
-  if (platform === 'win32') return `\\\\.\\pipe\\lodestar-${identity}`;
-  return path.join(os.tmpdir(), `lodestar-${typeof process.getuid === 'function' ? process.getuid() : 'user'}-${identity}.sock`);
+  if (platform === 'win32') return `\\\\.\\pipe\\loadtoagent-${identity}`;
+  return path.join(os.tmpdir(), `loadtoagent-${typeof process.getuid === 'function' ? process.getuid() : 'user'}-${identity}.sock`);
 }
 
 function safeWriteJson(file, value) {
@@ -119,7 +119,7 @@ class BridgeServer {
 
   handle(client, message) {
     if (!client.authenticated) {
-      if (message.type !== 'run' || message.token !== this.token) throw new Error('Lodestar 브리지 인증에 실패했습니다.');
+      if (message.type !== 'run' || message.token !== this.token) throw new Error('LoadToAgent 브리지 인증에 실패했습니다.');
       const provider = validProvider(message.provider);
       if (!provider) throw new Error('지원하지 않는 AI 제공사입니다.');
       const bridgeId = crypto.randomUUID();
