@@ -17,7 +17,7 @@
     "test:visual": "electron scripts/visual-check.js",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win portable",
-    "dist:mac": "electron-builder --mac",
+    "dist:mac": "electron-builder --mac --publish never",
     "pack": "electron-builder --dir"
   },
   "dependencies": {
