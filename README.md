@@ -7,6 +7,7 @@
 Monitor Claude, Codex, Gemini, and Grok sessions, follow parent–subagent relationships, inspect token usage, and send work back to a connected terminal—without uploading your transcripts.
 
 [![Desktop CI](https://github.com/minjund/LodeToAgent/actions/workflows/desktop-ci.yml/badge.svg)](https://github.com/minjund/LodeToAgent/actions/workflows/desktop-ci.yml)
+[![npm version](https://img.shields.io/npm/v/loadtoagent?logo=npm&color=CB3837)](https://www.npmjs.com/package/loadtoagent)
 ![macOS](https://img.shields.io/badge/macOS-supported-111827?logo=apple)
 ![Windows](https://img.shields.io/badge/Windows-supported-111827?logo=windows11)
 ![Local first](https://img.shields.io/badge/data-local--first-35d69f)
@@ -23,7 +24,7 @@ Monitor Claude, Codex, Gemini, and Grok sessions, follow parent–subagent relat
 
 ## Install
 
-No Git checkout is required. Install the desktop app and its `loadtoagent` command through npm:
+LoadToAgent is published on npm as [`loadtoagent`](https://www.npmjs.com/package/loadtoagent). No Git checkout is required—install the desktop app and its command globally:
 
 ```bash
 npm install -g loadtoagent

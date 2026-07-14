@@ -7,6 +7,7 @@
 监控 Claude、Codex、Gemini 和 Grok 会话，追踪主代理与子代理的关系，检查 Token 用量，并把任务直接发送到已连接的终端。对话记录不会上传到外部服务。
 
 [![Desktop CI](https://github.com/minjund/LodeToAgent/actions/workflows/desktop-ci.yml/badge.svg)](https://github.com/minjund/LodeToAgent/actions/workflows/desktop-ci.yml)
+[![npm version](https://img.shields.io/npm/v/loadtoagent?logo=npm&color=CB3837)](https://www.npmjs.com/package/loadtoagent)
 ![macOS](https://img.shields.io/badge/macOS-支持-111827?logo=apple)
 ![Windows](https://img.shields.io/badge/Windows-支持-111827?logo=windows11)
 ![Local first](https://img.shields.io/badge/数据-本地优先-35d69f)
@@ -23,7 +24,7 @@
 
 ## 安装
 
-无需通过 Git 下载仓库。使用 npm 一次安装桌面应用和 `loadtoagent` 命令：
+LoadToAgent 已在 npm 以 [`loadtoagent`](https://www.npmjs.com/package/loadtoagent) 发布。无需通过 Git 下载仓库，直接全局安装桌面应用及其命令：
 
 ```bash
 npm install -g loadtoagent

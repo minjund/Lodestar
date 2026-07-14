@@ -7,6 +7,7 @@
 Claude, Codex, Gemini, Grok 세션을 모니터링하고, 메인 AI와 도움 AI의 관계를 따라가며, 토큰 사용량을 확인하고, 연결된 터미널로 바로 일을 전달하세요. 대화 기록은 외부로 업로드하지 않습니다.
 
 [![Desktop CI](https://github.com/minjund/LodeToAgent/actions/workflows/desktop-ci.yml/badge.svg)](https://github.com/minjund/LodeToAgent/actions/workflows/desktop-ci.yml)
+[![npm version](https://img.shields.io/npm/v/loadtoagent?logo=npm&color=CB3837)](https://www.npmjs.com/package/loadtoagent)
 ![macOS](https://img.shields.io/badge/macOS-지원-111827?logo=apple)
 ![Windows](https://img.shields.io/badge/Windows-지원-111827?logo=windows11)
 ![Local first](https://img.shields.io/badge/데이터-로컬--퍼스트-35d69f)
@@ -23,7 +24,7 @@ Claude, Codex, Gemini, Grok 세션을 모니터링하고, 메인 AI와 도움 AI
 
 ## 설치
 
-Git으로 저장소를 받을 필요가 없습니다. npm으로 데스크톱 앱과 `loadtoagent` 명령을 함께 설치하세요.
+LoadToAgent는 npm에 [`loadtoagent`](https://www.npmjs.com/package/loadtoagent)로 공개되어 있습니다. Git으로 저장소를 받을 필요 없이 데스크톱 앱과 명령을 전역 설치하세요.
 
 ```bash
 npm install -g loadtoagent
