@@ -544,15 +544,16 @@ function compactGraphNode(session, model, label = '') {
   const assignedWork = delegation.assignmentObserved && delegation.assignment ? delegation.assignment : (taskName || session.title);
   const sharedGoal = delegation.sharedGoal || session.sharedGoal || '';
   const outcome = delegation.result || session.result || '';
+  const outcomeText = outcome || latestWorkCopy(session);
   const taskLabel = session.parentId ? `${label || agentRoleLabel(session.agentRole)}${taskName ? ` · 담당 ${taskName}` : ''}` : label;
   const assignmentSourceNote = session.parentId && delegation.assignmentSource === 'parent-narration' ? '<span class="agent-flow-assignment-source">메인 AI가 작업 시작 직전에 설명한 내용</span>' : '';
   const sharedGoalCopy = session.parentId && sharedGoal && sharedGoal !== assignedWork ? `<span class="agent-flow-shared">공유 목표 · ${esc(sharedGoal)}</span>` : '';
   const outcomeCopy = session.parentId
-    ? `<span class="agent-flow-outcome ${session.status === 'completed' ? 'done' : ''}"><b>${session.status === 'completed' ? '완료 결과' : '현재 작업'}</b>${esc(outcome || latestWorkCopy(session))}</span>` : '';
+    ? `<span class="agent-flow-outcome ${session.status === 'completed' ? 'done' : ''}"><b>${session.status === 'completed' ? '완료 결과' : '현재 작업'}</b><span class="agent-flow-outcome-copy" title="${esc(outcomeText)}">${esc(outcomeText)}</span></span>` : '';
   if (session.parentId) {
     const primaryTask = taskName || assignedWork || session.title;
     const assignmentCopy = assignedWork && assignedWork !== primaryTask
-      ? `<span class="agent-flow-assignment"><small>담당 내용</small><strong>${esc(assignedWork)}</strong></span>` : '';
+      ? `<span class="agent-flow-assignment"><small>담당 내용</small><strong title="${esc(assignedWork)}">${esc(assignedWork)}</strong></span>` : '';
     const workState = subagentWorkState(session);
     const interaction = directChildren
       ? `data-graph-focus="${esc(session.id)}" aria-label="${esc(primaryTask)}의 하위 서브에이전트 흐름 보기"`
@@ -562,7 +563,7 @@ function compactGraphNode(session, model, label = '') {
       <span class="agent-flow-state" aria-hidden="true"></span>
       <span class="agent-flow-copy">
         <span class="agent-flow-kicker"><small>${esc(label || agentRoleLabel(session.agentRole))} 세션</small><time>${esc(timeAgo(session.updatedAt))}</time></span>
-        <b class="agent-flow-session-title">${esc(primaryTask)}</b>
+        <b class="agent-flow-session-title" title="${esc(primaryTask)}">${esc(primaryTask)}</b>
         <span class="agent-flow-agent"><i>${esc(provider.mark)}</i><strong>${esc(session.agentName || '이름 미확인')}</strong><small>${esc(provider.label)}${session.model ? ` · ${esc(session.model)}` : ''}</small></span>
         ${assignmentCopy}${assignmentSourceNote}${outcomeCopy}<span class="agent-flow-child-action">${esc(action)}</span>
       </span>

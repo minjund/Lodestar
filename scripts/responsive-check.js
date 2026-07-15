@@ -109,10 +109,14 @@ async function overlayMetrics(win) {
   await wait(360);
   return win.webContents.executeJavaScript(`(() => {
     const viewportContains = rect => Boolean(rect && rect.left >= -1 && rect.right <= window.innerWidth + 1 && rect.top >= -1 && rect.bottom <= window.innerHeight + 1);
+    const modalElement = document.querySelector('#runModal .run-modal');
+    for (const animation of [...(document.querySelector('#runModal')?.getAnimations() || []), ...(modalElement?.getAnimations() || [])]) {
+      try { animation.finish(); } catch {}
+    }
     for (const animation of document.querySelector('#detailDrawer')?.getAnimations() || []) {
       try { animation.finish(); } catch {}
     }
-    const modal = document.querySelector('#runModal .run-modal')?.getBoundingClientRect();
+    const modal = modalElement?.getBoundingClientRect();
     document.querySelector('#runModal')?.classList.add('hidden');
     document.querySelector('#runModal')?.classList.remove('closing');
     const drawer = document.querySelector('#detailDrawer');
@@ -150,12 +154,13 @@ async function setupWorkflowFixture(win) {
     };
     const children = childIds.map((id, index) => ({
       ...base, id, externalId: id, parentId: rootId, depth: 1, childIds: [],
-      title: index ? '작은 화면의 입력 영역 확인' : '연결선과 카드 배치 확인',
-      taskName: index ? 'compact_input_check' : 'workflow_layout_check',
-      agentName: index ? 'Layout' : 'Flow', agentRole: 'worker',
+      title: index ? '작은 화면의 입력 영역 확인' : '연결선과 카드 배치가 어떤 화면 크기에서도 서로 겹치지 않는지 긴 작업 이름으로 확인',
+      taskName: index ? 'compact_input_check' : 'workflow_layout_check_with_a_deliberately_long_task_name_that_must_stay_inside_the_compact_help_session_card_at_every_supported_width',
+      agentName: index ? 'Layout' : 'FlowAgentWithAnIntentionallyLongDisplayName', agentRole: 'worker',
+      statusDetail: index ? '모바일 입력창과 버튼 배치 확인 중' : '현재 연결선과 도움 세션 카드의 긴 현재 작업 문구가 카드 밖으로 넘치지 않고 말줄임표로 표시되는지 확인하는 중',
       delegation: {
-        taskName: index ? 'compact_input_check' : 'workflow_layout_check', assignmentObserved: true,
-        assignment: index ? '모바일 입력창과 버튼이 겹치지 않는지 확인' : '관계 카드와 연결선이 겹치지 않는지 확인',
+        taskName: index ? 'compact_input_check' : 'workflow_layout_check_with_a_deliberately_long_task_name_that_must_stay_inside_the_compact_help_session_card_at_every_supported_width', assignmentObserved: true,
+        assignment: index ? '모바일 입력창과 버튼이 겹치지 않는지 확인' : '관계 카드와 연결선이 겹치지 않고 상태 배지와 작업 요약이 제한된 카드 폭 안에서 안정적으로 보이는지 확인하고 화면이 더 넓어지거나 좁아져도 다른 카드의 상태와 행동 버튼을 밀어내지 않는지까지 함께 확인',
       },
     }));
     const fixtureIds = new Set([rootId, ...childIds]);
@@ -195,6 +200,17 @@ async function workflowMetrics(win) {
     const downstream = document.querySelector('.downstream-column');
     const output = document.querySelector('[data-workflow-port="focus-output"]');
     const identity = document.querySelector('.agent-workflow-selected .agent-identity');
+    const helpTitle = [...document.querySelectorAll('.downstream-stack .agent-flow-session-title')]
+      .find(element => element.title.includes('deliberately_long_task_name'));
+    const helpCard = helpTitle?.closest('.child-session');
+    const helpAssignment = helpCard?.querySelector('.agent-flow-assignment strong');
+    const helpOutcome = helpCard?.querySelector('.agent-flow-outcome-copy');
+    const ellipsisReady = element => {
+      if (!element) return false;
+      const style = getComputedStyle(element);
+      return style.textOverflow === 'ellipsis' && style.overflowX === 'hidden' && style.whiteSpace === 'nowrap';
+    };
+    const textTruncated = element => Boolean(element && element.scrollWidth > element.clientWidth);
     const path = document.querySelector('.agent-workflow-edge.downstream');
     const rect = element => element && element.getBoundingClientRect();
     const canvasRect = rect(canvas);
@@ -229,6 +245,16 @@ async function workflowMetrics(win) {
       horizontalOrder: stacked || Boolean(upstreamRect && selectedRect && downstreamRect && upstreamRect.right <= selectedRect.left + 1 && selectedRect.right <= downstreamRect.left + 1),
       pathCrossesCommand,
       identityClipped: Boolean(identity && (identity.scrollWidth > identity.clientWidth + 1 || identity.scrollHeight > identity.clientHeight + 1)),
+      helpCardInsideColumn: Boolean(helpCard && helpCard.getBoundingClientRect().right <= downstream.getBoundingClientRect().right + 1),
+      helpTitleEllipsisReady: ellipsisReady(helpTitle),
+      helpAssignmentEllipsisReady: ellipsisReady(helpAssignment),
+      helpOutcomeEllipsisReady: ellipsisReady(helpOutcome),
+      helpTextTruncated: [helpTitle, helpAssignment, helpOutcome].some(textTruncated),
+      helpTextMetrics: {
+        title: helpTitle ? { client: helpTitle.clientWidth, scroll: helpTitle.scrollWidth, overflow: getComputedStyle(helpTitle).textOverflow } : null,
+        assignment: helpAssignment ? { client: helpAssignment.clientWidth, scroll: helpAssignment.scrollWidth, overflow: getComputedStyle(helpAssignment).textOverflow } : null,
+        outcome: helpOutcome ? { client: helpOutcome.clientWidth, scroll: helpOutcome.scrollWidth, overflow: getComputedStyle(helpOutcome).textOverflow, text: helpOutcome.textContent } : null,
+      },
       formCount: document.querySelectorAll('.agent-command-panel').length,
       connectionPaths: document.querySelectorAll('.agent-workflow-edge').length,
     };
@@ -236,7 +262,7 @@ async function workflowMetrics(win) {
 }
 
 function assertWorkflow(metrics) {
-  if (metrics.canvasOverflow || metrics.bodyOverflow || !metrics.selectedBeforeCommand || !metrics.verticalOrder || !metrics.horizontalOrder || metrics.pathCrossesCommand || metrics.identityClipped || metrics.formCount !== 1 || metrics.connectionPaths !== 2 || (metrics.stacked && (!metrics.commandBeforeDownstream || !metrics.outputAfterCommand))) {
+  if (metrics.canvasOverflow || metrics.bodyOverflow || !metrics.selectedBeforeCommand || !metrics.verticalOrder || !metrics.horizontalOrder || metrics.pathCrossesCommand || metrics.identityClipped || !metrics.helpCardInsideColumn || !metrics.helpTitleEllipsisReady || !metrics.helpAssignmentEllipsisReady || !metrics.helpOutcomeEllipsisReady || !metrics.helpTextTruncated || metrics.formCount !== 1 || metrics.connectionPaths !== 2 || (metrics.stacked && (!metrics.commandBeforeDownstream || !metrics.outputAfterCommand))) {
     throw new Error(`선택 AI 작업 흐름 배치가 올바르지 않습니다: ${JSON.stringify(metrics)}`);
   }
 }
@@ -307,6 +333,17 @@ app.whenReady().then(async () => {
         })`);
         const image = await win.webContents.capturePage();
         fs.writeFileSync(path.join(outputDir, `loadtoagent-responsive-workflow-${width}.png`), image.toPNG());
+        await win.webContents.executeJavaScript(`(() => {
+          const stage = document.querySelector('.main-stage');
+          const downstream = document.querySelector('.downstream-stack .child-session');
+          if (!stage || !downstream) return false;
+          const stageTop = stage.getBoundingClientRect().top;
+          stage.scrollTo(0, Math.max(0, stage.scrollTop + downstream.getBoundingClientRect().top - stageTop - 12));
+          return true;
+        })()`);
+        await wait(180);
+        const helpImage = await win.webContents.capturePage();
+        fs.writeFileSync(path.join(outputDir, `loadtoagent-responsive-help-sessions-${width}.png`), helpImage.toPNG());
       }
       workflowReports.push(metrics);
     }

@@ -577,3 +577,61 @@ pre,code{overflow-wrap:anywhere}
   .runtime-segment>header>strong{grid-column:3;grid-row:1}
   .runtime-segment>header>.live-tmux-overview-open{grid-column:1/4;grid-row:2;width:100%;margin:0}
 }
+
+/* 3.4 — compact help-session summaries
+   Overview cards stay scannable; the drawer remains the full-history surface. */
+.downstream-stack .child-session .agent-flow-copy{
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  overflow:hidden;
+}
+.downstream-stack .child-session .agent-flow-copy>*{
+  min-width:0;
+  max-width:100%;
+  box-sizing:border-box;
+}
+.downstream-stack .child-session .agent-flow-session-title{
+  display:block;
+  width:100%;
+  min-width:0;
+  min-height:0;
+  max-width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  -webkit-line-clamp:initial;
+}
+.downstream-stack .child-session .agent-flow-agent strong{
+  min-width:0;
+  max-width:42%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.downstream-stack .child-session .agent-flow-assignment strong,
+.downstream-stack .child-session .agent-flow-assignment-source{
+  display:block;
+  width:100%;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  -webkit-line-clamp:initial;
+}
+.downstream-stack .child-session .agent-flow-assignment,
+.downstream-stack .child-session .agent-flow-outcome{
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  overflow:hidden;
+  box-sizing:border-box;
+}
+.downstream-stack .child-session .agent-flow-outcome-copy{
+  display:block;
+  min-width:0;
+  flex:1 1 auto;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
