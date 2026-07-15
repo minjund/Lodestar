@@ -8,11 +8,11 @@ const net = require('net');
 const { EventEmitter } = require('events');
 const { execFileSync } = require('child_process');
 const { providerList, normalizeProvider, modelContextWindow } = require('../src/providerRegistry');
-const { parseClaude, parseCodex, parseGeneric, buildSummary } = require('../src/agentMonitor');
+const { parseClaude, parseCodex, parseGeneric, buildSummary, attachHierarchy } = require('../src/agentMonitor');
 const { commandSpec } = require('../src/agentRunner');
 const { TmuxMonitor, normalizeWslList, parseTmuxProbe, buildDistroTopology, linkAgentSessions, providerFromProcess } = require('../src/tmuxMonitor');
 const { processRows, posixProcessRows, providerFromPosixProcess, selectAgentProcesses, bridgeLinkScore, applyRuntimePresence } = require('../src/processMonitor');
-const { TerminalManager, normalizeLaunchOptions, launchSpec } = require('../src/terminalManager');
+const { TerminalManager, normalizeLaunchOptions, launchSpec, resolveWindowsCommand } = require('../src/terminalManager');
 const { TmuxController, safeName, safeTarget } = require('../src/tmuxController');
 const { BridgeServer } = require('../src/bridgeServer');
 const { parseArguments, parseCliArguments, desktopLaunchSpec } = require('../bin/loadtoagent');
@@ -91,6 +91,21 @@ test('Claude 대화, 도구, usage를 정규화한다', () => {
   assert.ok(session.messages.some(item => item.type === 'tool'));
 });
 
+test('Claude 데스크톱 기록과 터미널 CLI 기록을 구분한다', () => {
+  const desktopFile = path.join(temp, 'claude', 'desktop', '22222222-2222-2222-2222-222222222222.jsonl');
+  const desktop = parseClaude(jsonl(desktopFile, [
+    { type: 'last-prompt', sessionId: '22222222-2222-2222-2222-222222222222' },
+    { type: 'user', timestamp: '2026-07-14T01:00:00Z', message: { role: 'user', content: '데스크톱 작업' } },
+  ]));
+  const cliFile = path.join(temp, 'claude', 'cli', '33333333-3333-3333-3333-333333333333.jsonl');
+  const cli = parseClaude(jsonl(cliFile, [
+    { type: 'user', timestamp: '2026-07-14T01:00:00Z', message: { role: 'user', content: '터미널 작업' } },
+  ]));
+  assert.equal(desktop.clientKind, 'claude-desktop');
+  assert.equal(desktop.sourceLabel, 'Claude 데스크톱 앱');
+  assert.equal(cli.clientKind, 'claude-cli');
+});
+
 test('Claude 서브에이전트를 부모 세션에 연결한다', () => {
   const file = path.join(temp, 'claude', 'project', 'parent-session', 'subagents', 'agent-child-01.jsonl');
   const session = parseClaude(jsonl(file, [{ type: 'assistant', agentId: 'child-01', timestamp: '2026-07-14T01:00:02Z', message: { role: 'assistant', model: 'claude-sonnet-4-6', content: [{ type: 'text', text: '조사 완료' }], usage: { input_tokens: 10, output_tokens: 5 } } }]));
@@ -132,6 +147,27 @@ test('Codex thread, turn, item, token_count를 정규화한다', () => {
   assert.equal(session.clientKind, 'codex-desktop');
 });
 
+test('Codex event와 response_item에 함께 기록된 같은 채팅은 한 번만 표시한다', () => {
+  const file = path.join(temp, 'codex', 'rollout-duplicate-chat.jsonl');
+  const session = parseCodex(jsonl(file, [
+    { timestamp: '2026-07-14T02:00:00.000Z', type: 'session_meta', payload: { id: 'duplicate-chat', cwd: 'D:\\repo' } },
+    { timestamp: '2026-07-14T02:00:01.000Z', type: 'event_msg', payload: { type: 'user_message', client_id: 'u1', message: '중복 없이 보여줘' } },
+    { timestamp: '2026-07-14T02:00:01.100Z', type: 'event_msg', payload: { type: 'user_message', client_id: 'u2', message: '중복 없이 보여줘' } },
+    { timestamp: '2026-07-14T02:00:01.750Z', type: 'response_item', payload: { id: 'user-item', type: 'message', role: 'user', content: [{ type: 'input_text', text: '중복 없이 보여줘' }] } },
+    { timestamp: '2026-07-14T02:00:02.000Z', type: 'event_msg', payload: { type: 'agent_message', message: '한 번만 표시합니다.' } },
+    { timestamp: '2026-07-14T02:00:02.001Z', type: 'response_item', payload: { id: 'assistant-item', type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '한 번만 표시합니다.' }] } },
+    { timestamp: '2026-07-14T02:00:03.000Z', type: 'response_item', payload: { id: 'reverse-assistant', type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '역순도 한 번입니다.' }] } },
+    { timestamp: '2026-07-14T02:00:03.300Z', type: 'event_msg', payload: { type: 'agent_message', message: '역순도 한 번입니다.' } },
+    { timestamp: '2026-07-14T02:00:04.000Z', type: 'response_item', payload: { id: 'developer-message', type: 'message', role: 'developer', content: [{ type: 'input_text', text: '내부 개발자 지침' }] } },
+  ]));
+  assert.deepStrictEqual(session.messages.map(item => [item.role, item.text]), [
+    ['user', '중복 없이 보여줘'],
+    ['user', '중복 없이 보여줘'],
+    ['assistant', '한 번만 표시합니다.'],
+    ['assistant', '역순도 한 번입니다.'],
+  ]);
+});
+
 test('Codex 서브에이전트 source를 해석한다', () => {
   const file = path.join(temp, 'codex', 'rollout-sub.jsonl');
   const session = parseCodex(jsonl(file, [{ timestamp: '2026-07-14T02:00:00Z', type: 'session_meta', payload: { id: 'child', cwd: 'D:\\repo', thread_source: 'subagent', source: { subagent: { thread_spawn: { parent_thread_id: 'parent', depth: 1, agent_nickname: 'Cicero', agent_role: 'explorer' } } } } }]));
@@ -140,17 +176,161 @@ test('Codex 서브에이전트 source를 해석한다', () => {
   assert.equal(session.agentRole, 'explorer');
 });
 
+test('Codex 협업 이벤트로 누적·동시 한도·실행·완료와 통신을 구분한다', () => {
+  const parent = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-collaboration-parent.jsonl'), [
+    { timestamp: '2026-07-14T02:10:00Z', type: 'session_meta', payload: { id: 'collaboration-parent', cwd: 'D:\\repo', originator: 'Codex Desktop' } },
+    { timestamp: '2026-07-14T02:10:01Z', type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.' }] } },
+    { timestamp: '2026-07-14T02:10:02Z', type: 'event_msg', payload: { type: 'user_message', message: '버튼 정확도를 검사해줘' } },
+    { timestamp: '2026-07-14T02:10:03Z', type: 'response_item', payload: { type: 'function_call', name: 'spawn_agent', namespace: 'collaboration', call_id: 'spawn-1', arguments: JSON.stringify({ task_name: 'button_audit', message: '버튼의 실제 동작을 검사해줘' }) } },
+    { timestamp: '2026-07-14T02:10:04Z', type: 'event_msg', payload: { type: 'sub_agent_activity', event_id: 'spawn-1', agent_thread_id: 'collaboration-child', agent_path: '/root/button_audit', kind: 'started' } },
+    { timestamp: '2026-07-14T02:10:05Z', type: 'response_item', payload: { type: 'agent_message', author: '/root/button_audit', recipient: '/root', content: [{ type: 'input_text', text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/button_audit\nPayload:\n버튼 12개 확인 완료' }] } },
+    { timestamp: '2026-07-14T02:10:06Z', type: 'response_item', payload: { type: 'function_call', name: 'list_agents', namespace: 'collaboration', call_id: 'list-1', arguments: '{}' } },
+    { timestamp: '2026-07-14T02:10:07Z', type: 'response_item', payload: { type: 'function_call_output', call_id: 'list-1', output: JSON.stringify({ agents: [{ agent_name: '/root', agent_status: 'running' }, { agent_name: '/root/button_audit', agent_status: { completed: 'done' } }] }) } },
+  ]));
+  const child = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-collaboration-child.jsonl'), [
+    { timestamp: '2026-07-14T02:10:04Z', type: 'session_meta', payload: { id: 'collaboration-child', source: { subagent: { thread_spawn: { parent_thread_id: 'collaboration-parent', depth: 1, agent_path: '/root/button_audit', agent_nickname: 'Pascal', agent_role: 'tester' } } } } },
+    { timestamp: '2026-07-14T02:10:04Z', type: 'event_msg', payload: { type: 'user_message', message: '버튼 정확도를 검사해줘' } },
+    { timestamp: '2026-07-14T02:10:05Z', type: 'event_msg', payload: { type: 'agent_message', phase: 'final_answer', message: '버튼 12개 확인 완료' } },
+    { timestamp: '2026-07-14T02:10:06Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'child-turn', last_agent_message: '버튼 12개 확인 완료', completed_at: '2026-07-14T02:10:06Z' } },
+  ]));
+  const sessions = [parent, child];
+  attachHierarchy(sessions);
+  assert.deepStrictEqual(parent.collaboration.capacity, { totalThreads: 4, subagents: 3, source: 'runtime-instruction' });
+  assert.deepStrictEqual(parent.collaboration.metrics, {
+    cumulativeCreated: 1,
+    simultaneousCapacity: 3,
+    currentlyRunning: 0,
+    completedRecords: 1,
+    retainedCount: 1,
+    capacitySource: 'runtime-instruction',
+    cumulativeSource: 'spawn-events',
+  });
+  assert.equal(parent.collaboration.communications.some(item => item.kind === 'assignment' && item.text === '버튼의 실제 동작을 검사해줘'), true);
+  assert.equal(parent.collaboration.communications.some(item => item.kind === 'result' && item.text === '버튼 12개 확인 완료'), true);
+  assert.equal(child.status, 'completed');
+  assert.equal(child.title, 'button_audit');
+  assert.equal(child.sharedGoal, '버튼 정확도를 검사해줘');
+  assert.equal(child.delegation.assignment, '버튼의 실제 동작을 검사해줘');
+});
+
+test('암호화된 spawn 지시는 직전 메인 AI 설명으로 복원한다', () => {
+  const parent = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-encrypted-assignment.jsonl'), [
+    { timestamp: '2026-07-14T02:15:00Z', type: 'session_meta', payload: { id: 'encrypted-assignment', cwd: 'D:\\repo' } },
+    { timestamp: '2026-07-14T02:15:01Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-1' } },
+    { timestamp: '2026-07-14T02:15:02Z', type: 'event_msg', payload: { type: 'agent_message', message: '서브에이전트를 생성해 독립적으로 1 = 1을 확인시키겠습니다.' } },
+    { timestamp: '2026-07-14T02:15:03Z', type: 'response_item', payload: { type: 'function_call', name: 'spawn_agent', namespace: 'collaboration', call_id: 'spawn-encrypted', arguments: JSON.stringify({ task_name: 'equality_check', message: 'gAAAAABencryptedPayload' }) } },
+  ]));
+  const spawn = parent.collaboration.spawns[0];
+  const assignment = parent.collaboration.communications.find(item => item.kind === 'assignment');
+  assert.equal(spawn.assignment, '서브에이전트를 생성해 독립적으로 1 = 1을 확인시키겠습니다.');
+  assert.equal(spawn.assignmentObserved, true);
+  assert.equal(spawn.assignmentProtected, true);
+  assert.equal(spawn.assignmentSource, 'parent-narration');
+  assert.equal(assignment.text, spawn.assignment);
+  assert.equal(assignment.protected, false);
+  assert.equal(assignment.assignmentSource, 'parent-narration');
+});
+
+test('기존 서브에이전트 interrupt 이벤트를 새 생성으로 중복 집계하지 않는다', () => {
+  const parent = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-collaboration-interrupt.jsonl'), [
+    { timestamp: '2026-07-14T02:20:00Z', type: 'session_meta', payload: { id: 'interrupt-parent', cwd: 'D:\\repo' } },
+    { timestamp: '2026-07-14T02:20:01Z', type: 'response_item', payload: { type: 'function_call', name: 'spawn_agent', namespace: 'collaboration', call_id: 'spawn-original', arguments: JSON.stringify({ task_name: 'worker', message: '검사해줘' }) } },
+    { timestamp: '2026-07-14T02:20:02Z', type: 'event_msg', payload: { type: 'sub_agent_activity', event_id: 'spawn-original', agent_thread_id: 'interrupt-child', agent_path: '/root/worker', kind: 'started' } },
+    { timestamp: '2026-07-14T02:20:03Z', type: 'response_item', payload: { type: 'function_call', name: 'interrupt_agent', namespace: 'collaboration', call_id: 'interrupt-later', arguments: JSON.stringify({ target: '/root/worker' }) } },
+    { timestamp: '2026-07-14T02:20:04Z', type: 'event_msg', payload: { type: 'sub_agent_activity', event_id: 'interrupt-later', agent_thread_id: 'interrupt-child', agent_path: '/root/worker', kind: 'interrupted' } },
+  ]));
+  const child = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-interrupt-child.jsonl'), [
+    { timestamp: '2026-07-14T02:20:02Z', type: 'session_meta', payload: { id: 'interrupt-child', source: { subagent: { thread_spawn: { parent_thread_id: 'interrupt-parent', depth: 1, agent_path: '/root/worker' } } } } },
+    { timestamp: '2026-07-14T02:20:04Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'done', completed_at: '2026-07-14T02:20:04Z' } },
+  ]));
+  const sessions = [parent, child];
+  attachHierarchy(sessions);
+  assert.equal(parent.collaboration.spawns.length, 1);
+  assert.equal(parent.collaboration.spawns[0].callId, 'spawn-original');
+  assert.equal(parent.collaboration.metrics.cumulativeCreated, 1);
+  assert.equal(parent.childIds.length, 1);
+  assert.equal(parent.collaboration.communications.some(item => item.kind === 'interrupt'), true);
+});
+
+test('fork로 상속된 부모의 과거 협업 호출을 서브에이전트가 만든 하위 작업으로 오인하지 않는다', () => {
+  const child = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-forked-collaboration.jsonl'), [
+    { timestamp: '2026-07-14T02:30:00Z', type: 'session_meta', payload: { id: 'forked-child', timestamp: '2026-07-14T02:30:00Z', source: { subagent: { thread_spawn: { parent_thread_id: 'forked-parent', depth: 1, agent_path: '/root/current_child' } } } } },
+    { timestamp: '2026-07-14T02:29:00Z', type: 'response_item', payload: { type: 'function_call', name: 'spawn_agent', namespace: 'collaboration', call_id: 'inherited-spawn', arguments: JSON.stringify({ task_name: 'older_sibling', message: '부모가 과거에 배정한 일' }) } },
+    { timestamp: '2026-07-14T02:30:05Z', type: 'event_msg', payload: { type: 'sub_agent_activity', event_id: 'inherited-spawn', occurred_at_ms: Date.parse('2026-07-14T02:29:01Z'), agent_thread_id: 'older-sibling', agent_path: '/root/older_sibling', kind: 'started' } },
+    { timestamp: '2026-07-14T02:31:00Z', type: 'response_item', payload: { type: 'function_call', name: 'spawn_agent', namespace: 'collaboration', call_id: 'own-spawn', arguments: JSON.stringify({ task_name: 'real_nested_child', message: '현재 서브가 새로 배정한 일' }) } },
+    { timestamp: '2026-07-14T02:31:01Z', type: 'event_msg', payload: { type: 'sub_agent_activity', event_id: 'own-spawn', occurred_at_ms: Date.parse('2026-07-14T02:31:01Z'), agent_thread_id: 'real-nested-child', agent_path: '/root/current_child/real_nested_child', kind: 'started' } },
+  ]));
+  assert.equal(child.collaboration.spawns.length, 1);
+  assert.equal(child.collaboration.spawns[0].taskName, 'real_nested_child');
+  assert.equal(child.collaboration.spawns[0].childId, 'codex:real-nested-child');
+  assert.equal(child.collaboration.communications.some(item => item.taskName === 'older_sibling'), false);
+  assert.equal(child.collaboration.communications.some(item => item.taskName === 'real_nested_child'), true);
+});
+
+test('큰 Codex 로그가 잘려도 첫 세션 메타데이터를 보존한다', () => {
+  const file = path.join(temp, 'codex', 'rollout-large-subagent.jsonl');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const first = { timestamp: '2026-07-14T03:00:00Z', type: 'session_meta', payload: { id: 'large-child', timestamp: '2026-07-14T03:00:00Z', source: { subagent: { thread_spawn: { parent_thread_id: 'large-parent', depth: 1, agent_path: '/root/large_child', agent_nickname: 'Kepler' } } } } };
+  const filler = { timestamp: '2026-07-14T03:00:01Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'x'.repeat(12 * 1024 * 1024 + 2048) }] } };
+  const inherited = { timestamp: '2026-07-14T03:00:02Z', type: 'session_meta', payload: { id: 'large-parent', source: 'vscode' } };
+  fs.writeFileSync(file, [first, filler, inherited].map(row => JSON.stringify(row)).join('\n'));
+  const stat = fs.statSync(file);
+  const session = parseCodex({ file, mtimeMs: stat.mtimeMs, size: stat.size });
+  assert.equal(session.id, 'codex:large-child');
+  assert.equal(session.parentId, 'codex:large-parent');
+  assert.equal(session.agentName, 'Kepler');
+  assert.equal(session.taskName, 'large_child');
+  assert.equal(session.truncated, true);
+});
+
+test('부모 로그에 spawn 이벤트가 없어도 자식 세션으로 메인 대화 이력을 복원한다', () => {
+  const parent = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-inferred-parent.jsonl'), [
+    { timestamp: '2026-07-14T03:10:00Z', type: 'session_meta', payload: { id: 'inferred-parent', cwd: 'D:\\repo' } },
+  ]));
+  const child = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-inferred-child.jsonl'), [
+    { timestamp: '2026-07-14T03:10:01Z', type: 'session_meta', payload: { id: 'inferred-child', source: { subagent: { thread_spawn: { parent_thread_id: 'inferred-parent', depth: 1, agent_path: '/root/inferred_task', agent_nickname: 'Darwin' } } } } },
+    { timestamp: '2026-07-14T03:10:02Z', type: 'event_msg', payload: { type: 'agent_message', phase: 'final_answer', message: '검사 결과 이상 없음' } },
+    { timestamp: '2026-07-14T03:10:03Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'done', completed_at: '2026-07-14T03:10:03Z', last_agent_message: '검사 결과 이상 없음' } },
+  ]));
+  const sessions = [parent, child];
+  attachHierarchy(sessions);
+  assert.equal(parent.collaboration.spawns.length, 1);
+  assert.equal(parent.collaboration.spawns[0].childId, child.id);
+  assert.deepStrictEqual(parent.collaboration.communications.map(item => item.kind), ['assignment', 'started', 'result']);
+  assert.equal(parent.collaboration.communications.every(item => item.childId === child.id), true);
+  assert.equal(parent.collaboration.communications[2].text, '검사 결과 이상 없음');
+});
+
 test('Codex 내부 지침 대신 실제 사용자 목표를 카드 제목으로 사용한다', () => {
   const file = path.join(temp, 'codex', 'rollout-visible-title.jsonl');
   const session = parseCodex(jsonl(file, [
     { timestamp: '2026-07-14T02:00:00Z', type: 'session_meta', payload: { id: 'visible-title', cwd: 'D:\\repo', source: 'cli' } },
     { timestamp: '2026-07-14T02:00:01Z', type: 'event_msg', payload: { type: 'user_message', message: '<permissions instructions>Filesystem sandboxing defines which files can be read or written</permissions instructions>' } },
     { timestamp: '2026-07-14T02:00:01Z', type: 'event_msg', payload: { type: 'user_message', message: 'You are `/root`, the primary agent in a team of agents collaborating to fulfill the user goals. All agents share the same directory and collaboration tools cannot be called from inside another tool.' } },
-    { timestamp: '2026-07-14T02:00:02Z', type: 'event_msg', payload: { type: 'user_message', message: '<codex_internal_context><objective>실시간 토큰 게이지를 크게 보여줘</objective></codex_internal_context>' } },
-    { timestamp: '2026-07-14T02:00:03Z', type: 'response_item', payload: { id: 'later-user', type: 'message', role: 'user', content: [{ type: 'input_text', text: '<codex_internal_context><objective>서브에이전트 관계를 마인드맵으로 보여줘</objective></codex_internal_context>' }] } },
+    { timestamp: '2026-07-14T02:00:01Z', type: 'event_msg', payload: { type: 'user_message', message: '완료된 서브에이전트는 기본으로 숨기고 펼쳐서 보게 해줘' } },
+    { timestamp: '2026-07-14T02:00:02Z', type: 'event_msg', payload: { type: 'user_message', message: '<codex_internal_context source="goal"><objective>실시간 토큰 게이지를 크게 보여줘</objective></codex_internal_context>' } },
+    { timestamp: '2026-07-14T02:00:03Z', type: 'response_item', payload: { id: 'later-user', type: 'message', role: 'user', content: [{ type: 'input_text', text: '<codex_internal_context source="goal"><objective>서브에이전트 관계를 마인드맵으로 보여줘</objective></codex_internal_context>' }] } },
   ]));
-  assert.equal(session.title, '서브에이전트 관계를 마인드맵으로 보여줘');
+  assert.equal(session.title, '완료된 서브에이전트는 기본으로 숨기고 펼쳐서 보게 해줘');
   assert.equal(session.messages.some(item => /Filesystem sandboxing/.test(item.text)), false);
+  assert.equal(session.messages.some(item => /실시간 토큰 게이지|서브에이전트 관계/.test(item.text)), false);
+});
+
+test('잘린 Codex 로그에 내부 목표만 남아도 마크업 없이 카드 제목을 복원한다', () => {
+  const session = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-internal-goal-title.jsonl'), [
+    { timestamp: '2026-07-14T02:10:00Z', type: 'session_meta', payload: { id: 'internal-goal-title', cwd: 'D:\\repo' } },
+    { timestamp: '2026-07-14T02:10:01Z', type: 'event_msg', payload: { type: 'user_message', message: '<codex_internal_context source="goal">\n<untrusted_objective>완료된 서브에이전트는 기본으로 숨겨줘</untrusted_objective>\n</codex_internal_context>' } },
+  ]));
+  assert.equal(session.title, '완료된 서브에이전트는 기본으로 숨겨줘');
+  assert.equal(session.messages.some(item => item.role === 'user' || /codex_internal_context|untrusted_objective/.test(item.text)), false);
+});
+
+test('Codex 데스크톱 첨부파일 안내 대신 실제 요청을 카드 제목으로 사용한다', () => {
+  const session = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-desktop-request-title.jsonl'), [
+    { timestamp: '2026-07-14T02:20:00Z', type: 'session_meta', payload: { id: 'desktop-request-title', cwd: 'D:\\repo' } },
+    { timestamp: '2026-07-14T02:20:01Z', type: 'event_msg', payload: { type: 'user_message', message: '# Files mentioned by the user:\n\n## screenshot.png: C:/Temp/screenshot.png\n\n## My request for Codex:\n완료 에이전트를 보기 좋게 접어줘\n\n<image name="Image #1">' } },
+  ]));
+  assert.equal(session.title, '완료 에이전트를 보기 좋게 접어줘');
 });
 
 test('오래전에 끊긴 미완료 턴을 현재 작업 중으로 표시하지 않는다', () => {
@@ -264,6 +444,7 @@ test('외부 브리지는 같은 시각의 CLI 기록에만 연결하고 Codex �
   const bridge = { provider: 'codex', environment: 'windows', cwd: 'D:\\repo', startedAt: '2026-07-14T09:59:30Z' };
   const base = { provider: 'codex', environment: { kind: 'windows' }, cwd: 'D:\\repo', parentId: null, updatedAt: '2026-07-14T10:00:00Z' };
   assert.equal(bridgeLinkScore({ ...base, clientKind: 'codex-desktop', startedAt: bridge.startedAt }, bridge, now), -Infinity);
+  assert.equal(bridgeLinkScore({ ...base, provider: 'claude', clientKind: 'claude-desktop', startedAt: bridge.startedAt }, { ...bridge, provider: 'claude' }, now), -Infinity);
   assert.equal(bridgeLinkScore({ ...base, clientKind: 'codex-cli', startedAt: '2026-07-14T09:40:00Z' }, bridge, now), -Infinity);
   assert.ok(bridgeLinkScore({ ...base, clientKind: 'codex-cli', startedAt: '2026-07-14T09:59:35Z' }, bridge, now) > 10_000);
 });
@@ -329,6 +510,24 @@ test('Gemini/Grok 계열 JSON 세션을 공통 모델로 읽는다', () => {
   assert.equal(session.context.window, 1_048_576);
 });
 
+test('Gemini/Grok 스트리밍 메시지는 같은 ID의 최종 내용만 시간순으로 표시한다', () => {
+  const file = path.join(temp, 'grok', 'stream.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ id: 'grok-1', events: [
+    { id: 'a1', role: 'assistant', content: '답', timestamp: '2026-01-01T00:00:02.000Z' },
+    { id: 'u1', role: 'user', content: '질문', timestamp: '2026-01-01T00:00:01.000Z' },
+    { id: 'a1', role: 'assistant', content: '답변 완성', timestamp: '2026-01-01T00:00:03.000Z' },
+    { id: 'a2', type: 'message_delta', role: 'assistant', delta: '조', timestamp: '2026-01-01T00:00:04.000Z' },
+    { id: 'a2', type: 'message_delta', role: 'assistant', delta: '각', timestamp: '2026-01-01T00:00:05.000Z' },
+    { id: 'tool1', type: 'tool_use', role: 'assistant', content: '도구 중복 본문', name: 'search', timestamp: '2026-01-01T00:00:02.500Z' },
+  ] }), 'utf8');
+  const stat = fs.statSync(file);
+  const session = parseGeneric({ file, mtimeMs: stat.mtimeMs, size: stat.size }, 'grok');
+  const chat = session.messages.filter(message => message.role === 'user' || message.role === 'assistant');
+  assert.deepStrictEqual(chat.map(message => message.text), ['질문', '답변 완성', '조각']);
+  assert.equal(session.messages.filter(message => message.id === 'tool1').length, 1);
+});
+
 test('실행 명령은 각 제공사의 공식 구조화 출력 플래그를 사용한다', () => {
   const base = { prompt: 'hello', cwd: root, allowWrites: false };
   assert.ok(commandSpec('claude', base, 'claude').args.includes('stream-json'));
@@ -355,6 +554,7 @@ test('PTY 터미널을 만들고 입력·명령·리사이즈·신호·재시작
   } } });
   const session = manager.create({ type: 'powershell', cwd: root, cols: 100, rows: 30 });
   assert.equal(session.status, 'running');
+  assert.equal(session.background, false);
   assert.equal(session.pid, 9000);
   manager.write(session.id, 'hello');
   manager.command(session.id, 'Get-Location');
@@ -373,6 +573,9 @@ test('PTY 터미널을 만들고 입력·명령·리사이즈·신호·재시작
   manager.close(session.id);
   assert.equal(processes[1].killed, true);
   assert.equal(manager.list().length, 0);
+  const backgroundAgent = manager.create({ type: 'agent', provider: 'codex', cwd: root });
+  assert.equal(backgroundAgent.background, true);
+  manager.close(backgroundAgent.id);
   assert.equal(normalizeLaunchOptions({ type: 'cmd', cwd: root }).type, 'cmd');
   assert.ok(launchSpec(normalizeLaunchOptions({ type: 'powershell', cwd: root })).args.includes('-NoLogo'));
   const macShell = normalizeLaunchOptions({ cwd: root }, 'darwin');
@@ -380,6 +583,17 @@ test('PTY 터미널을 만들고 입력·명령·리사이즈·신호·재시작
   assert.equal(launchSpec(macShell, 'darwin').args[0], '-l');
   const macTmux = launchSpec(normalizeLaunchOptions({ type: 'tmux', distro: 'macOS', tmuxSession: 'work' }, 'darwin'), 'darwin');
   assert.notEqual(macTmux.file, 'wsl.exe');
+});
+
+test('Windows npm AI 명령은 실행 가능한 PowerShell 호스트로 연다', () => {
+  const bin = path.join(temp, 'windows-agent-bin');
+  fs.mkdirSync(bin, { recursive: true });
+  const shim = path.join(bin, 'codex.ps1');
+  fs.writeFileSync(shim, 'Write-Output codex', 'utf8');
+  assert.equal(resolveWindowsCommand('codex', { Path: bin }), shim);
+  const spec = launchSpec(normalizeLaunchOptions({ type: 'agent', provider: 'codex', args: ['resume', 'session-id'], cwd: root }), 'win32', { codex: { command: shim, label: 'Codex' } });
+  assert.ok(/powershell|pwsh/i.test(spec.file));
+  assert.deepStrictEqual(spec.args.slice(-3), [shim, 'resume', 'session-id']);
 });
 
 test('tmux 명령은 셸 문자열 결합 없이 대상·입력을 분리하고 관리 동작을 지원한다', async () => {
@@ -428,9 +642,11 @@ test('메인과 렌더러 JavaScript 문법이 유효하다', () => {
 
 test('필수 UI 영역과 초보자용 안내 계약이 존재한다', () => {
   const html = fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8');
-  for (const id of ['beginnerGuide', 'providerOverview', 'liveSection', 'liveSessionGrid', 'graphBreadcrumbs', 'graphResetBtn', 'terminalSection', 'terminalWorkbench', 'terminalWorkbenchMount', 'terminalViewport', 'terminalCommandForm', 'terminalSessionList', 'terminalTmuxList', 'tmuxCreateModal', 'tmuxSection', 'tmuxControlSection', 'tmuxWorkbenchMount', 'tmuxStats', 'tmuxBreadcrumbs', 'tmuxResetBtn', 'tmuxMap', 'sessionGrid', 'loadMoreBtn', 'detailDrawer', 'runModal', 'drawerContent']) assert.ok(html.includes(`id="${id}"`));
-  for (const label of ['처음이라면 이렇게 보세요', '>홈<', '>진행 중<', '>내 확인 필요<', '직접 실행 · tmux 안 씀', '>일반 명령창<', 'tmux 전용', '>tmux 작업<', '일반 명령창만', 'tmux 안의 명령창만', 'AI에게 새 일 맡기기', 'AI들이 맡은 일', 'tmux 작업 만들기']) assert.ok(html.includes(label), `${label} 문구가 없습니다.`);
+  const monitorWorker = fs.readFileSync(path.join(root, 'src', 'monitorWorker.js'), 'utf8');
+  for (const id of ['beginnerGuide', 'providerOverview', 'liveSection', 'liveSessionGrid', 'graphBreadcrumbs', 'graphResetBtn', 'terminalSection', 'terminalWorkbench', 'terminalWorkbenchMount', 'terminalStage', 'terminalHistoryPanel', 'terminalHistoryList', 'terminalViewport', 'terminalCommandForm', 'terminalSessionList', 'terminalTmuxList', 'tmuxCreateModal', 'tmuxSection', 'tmuxControlSection', 'tmuxWorkbenchMount', 'tmuxStats', 'tmuxBreadcrumbs', 'tmuxResetBtn', 'tmuxMap', 'sessionGrid', 'loadMoreBtn', 'detailDrawer', 'runModal', 'drawerContent']) assert.ok(html.includes(`id="${id}"`));
+  for (const label of ['처음이라면 이렇게 보세요', '>홈<', '>진행 중<', '>내 확인 필요<', '기존 세션에 이어서 입력', '>세션 터미널<', 'tmux 전용', '>tmux 작업<', '내 터미널 세션', 'AI 대화 기록', '이 대화가 오른쪽 터미널과 연결되어 있습니다', '실시간 터미널', 'Enter 전송 · Shift+Enter 줄바꿈', 'tmux 안의 명령창만', 'AI에게 새 일 맡기기', 'AI들이 맡은 일', 'tmux 작업 만들기']) assert.ok(html.includes(label), `${label} 문구가 없습니다.`);
   for (const jargon of ['AI AGENT OBSERVATORY', 'SESSION STREAM', 'AGENT MIND MAP', 'NEW TMUX SESSION']) assert.equal(html.includes(jargon), false, `${jargon} 전문 용어가 기본 화면에 남아 있습니다.`);
+  for (const contract of ['function cardCollaboration', 'collaboration: cardCollaboration(session.collaboration)', 'taskName: session.taskName', 'completionObserved: Boolean(session.completionObserved)', 'session.collaboration && session.collaboration.metrics', 'session.collaboration && session.collaboration.communications']) assert.ok(monitorWorker.includes(contract), `${contract} 협업 전송 계약이 없습니다.`);
   const terminalBlock = html.slice(html.indexOf('id="terminalSection"'), html.indexOf('id="tmuxSection"'));
   const tmuxBlock = html.slice(html.indexOf('id="tmuxSection"'), html.indexOf('id="liveSection"'));
   for (const tmuxOnlyId of ['newTmuxSessionBtn', 'terminalTmuxList', 'tmuxControlSection']) {
@@ -440,13 +656,17 @@ test('필수 UI 영역과 초보자용 안내 계약이 존재한다', () => {
   assert.equal(html.includes('data-view="subagents"'), false);
   assert.equal(html.includes('id="navSubagentCount"'), false);
   const app = fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8');
-  for (const contract of ['function renderAgentMap', 'function connectedGraphSessions', 'function providerFlowLane', 'function focusedGraph', 'function workflowCompactNode', 'function drawAgentWorkflowConnections', 'function workflowCurve', 'function captureMotionLayout', 'function playMotionLayout', 'function motionEnterOffset', 'function animateVisibleSections', 'function agentCommandComposer', 'function agentControlMode', 'function dispatchAgentCommand', 'function openAgentTerminal', 'function copyBridgeCommand', 'function openSessionOrigin', 'data-agent-command-form', 'data-agent-command-draft', 'data-agent-terminal-open', 'data-agent-bridge-copy', 'data-agent-open-origin', '직접 입력 가능', '연결 후 입력 가능', '보기 전용 · 원래 앱에서 계속', '종료된 세션', '바로 보내기', 'data-motion-key', 'data-motion-value', 'dataset.lastMotion', 'motion-connect', 'pathLength="1"', 'prefers-reduced-motion: reduce', 'data-graph-provider-more', 'agent-flow-overview', 'agent-workflow-canvas', 'data-workflow-port', '이 일을 맡긴 AI', '지금 선택한 AI', '이 AI가 나눠 맡긴 일', 'function renderTmuxMap', 'function tmuxPaneCard', 'function messageContentHtml', 'function memoryCandidatesHtml', 'data-scroll-latest', 'data-graph-focus', 'data-tmux-type', 'data-open-session']) assert.ok(app.includes(contract));
+  for (const contract of ['function renderAgentMap', 'function connectedGraphSessions', 'function providerFlowLane', 'function focusedGraph', 'function workflowCompactNode', 'function workflowChildrenSummary', 'function workflowMetrics', 'function workflowCommunicationPanel', 'function subagentWorkState', 'function splitSubagents', 'function completedSubagentDisclosure', 'function agentExecutionMode', 'function executionModeBadge', 'function subagentTextPreview', 'function subagentConversationHtml', 'function openSubagentConversation', 'function resumeAgentTerminal', 'data-collaboration-metric', 'data-collaboration-communications', 'data-open-subagent-chat', 'data-subagent-completed-toggle', 'data-resume-agent', 'data-subagent-message-preview', 'data-truncated', '이 작업에서 누적 생성', '동시에 유지 가능', '현재 실행 중', '작업 완료 기록', '메인 AI ↔ 서브에이전트 소통', 'TMUX 사용', 'TMUX 미사용', '완료된 서브에이전트', 'child-session', 'agent-flow-session-title', 'children-group-input', 'function drawAgentWorkflowConnections', 'function workflowCurve', 'data-workflow-edge-kind', 'function captureMotionLayout', 'function playMotionLayout', 'function motionEnterOffset', 'function animateVisibleSections', 'function agentCommandComposer', 'function originAppInfo', 'function agentControlMode', 'function dispatchAgentCommand', 'function openAgentTerminal', 'function copyBridgeCommand', 'function openSessionOrigin', 'data-agent-command-form', 'data-agent-command-draft', 'data-agent-terminal-open', 'data-agent-bridge-copy', 'data-agent-open-origin', '직접 입력 가능', '외부 터미널에서 실행 중 · 같은 대화로 이어받기 가능', '원래 터미널이 종료됨 · 같은 세션으로 복구 가능', '쉬는 데스크톱 작업 · 백그라운드 터미널로 이어가기 가능', '백그라운드 터미널로 이어서 보내기', '보기 전용 · 원래 앱에서 계속', '종료된 세션', '바로 보내기', 'data-motion-key', 'data-motion-value', 'dataset.lastMotion', 'motion-connect', 'pathLength="1"', 'prefers-reduced-motion: reduce', 'data-graph-provider-more', 'agent-flow-overview', 'agent-workflow-canvas', 'data-workflow-port', '이 일을 맡긴 AI', '지금 선택한 AI', '서브에이전트 세션', 'function renderTmuxMap', 'function tmuxPaneCard', 'function messageContentHtml', 'function memoryCandidatesHtml', 'data-scroll-latest', 'data-graph-focus', 'data-tmux-type', 'data-open-session']) assert.ok(app.includes(contract));
   assert.equal(app.includes('agent-focus-layout'), false);
   assert.equal(app.includes("state.view === 'subagents'"), false);
   const styles = fs.readFileSync(path.join(root, 'renderer', 'styles.css'), 'utf8');
-  for (const contract of ['--motion-ease', 'motion-section-in', 'motion-live-update', 'motion-edge-draw', 'motion-modal-in', 'motion-modal-out', 'motion-toast-in', 'motion-toast-out', 'agent-command-panel', 'agent-command-input', '@media(prefers-reduced-motion:reduce)']) assert.ok(styles.includes(contract), `${contract} 모션 계약이 없습니다.`);
+  for (const contract of ['--motion-ease', 'motion-section-in', 'motion-live-update', 'motion-edge-draw', 'motion-modal-in', 'motion-modal-out', 'motion-toast-in', 'motion-toast-out', 'agent-command-panel', 'agent-command-input', 'terminal-stage', 'terminal-history-panel', 'terminal-history-message', 'terminal-console-pane', 'terminal-console-head', 'terminal-command-composer', 'terminal-resource-tip', 'agent-workflow-summary', 'workflow-summary-chip', 'density-many', 'agent-workflow-edge.downstream.group', 'agent-flow-session-title', 'completed-subagent-disclosure', 'completed-subagent-list', 'execution-mode-badge', 'work-working', 'work-resting', 'subagent-conversation-summary', 'subagent-message-preview', '-webkit-line-clamp:5', 'resume-ready', 'control-handoff', 'control-origin-resume', '@media(prefers-reduced-motion:reduce)']) assert.ok(styles.includes(contract), `${contract} UI 계약이 없습니다.`);
   const terminal = fs.readFileSync(path.join(root, 'renderer', 'terminal.js'), 'utf8');
-  for (const contract of ['window.Terminal', 'FitAddon.FitAddon', 'wslDistros', 'terminalWrite', 'terminalResize', 'tmuxSendText', 'tmuxCapture', 'tmuxSplitPane', 'tmuxKillSession', 'function modeSessions', 'function moveWorkbench', 'function agentTargets', 'function requiredAgentTarget', 'function dispatchAgentCommand', 'function openForAgent', 'selectTmuxById', 'window.LoadToAgentTerminal']) assert.ok(terminal.includes(contract));
+  for (const contract of ['window.Terminal', 'FitAddon.FitAddon', 'wslDistros', 'terminalWrite', 'terminalResize', 'tmuxSendText', 'tmuxCapture', 'tmuxSplitPane', 'tmuxKillSession', 'function modeSessions', 'function moveWorkbench', 'function terminalTypeLabel', 'function terminalTypeMark', 'function setConnectionState', 'function agentTargets', 'terminal.bridgeId === agentSession.id', '백그라운드 유지', 'AI 백그라운드', 'function requiredAgentTarget', 'function resumeSupport', 'function resumeForAgent', "provider === 'codex' ? ['resume', sessionId] : ['--resume', sessionId]", 'function dispatchAgentCommand', 'function openForAgent', 'function bindAgent', 'function renderHistoryPanel', 'function queueHistoryRefresh', 'selectTmuxById', 'window.LoadToAgentTerminal']) assert.ok(terminal.includes(contract));
+  const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
+  for (const contract of ['function backgroundAgentSessions', 'function ensureBackgroundTray', 'function updateBackgroundTrayMenu', "ipcMain.handle('app:background-state'", "ipcMain.handle('app:show'", '프로그램 끝내기 · AI 세션도 종료', 'event.preventDefault()', 'mainWindow.hide()']) assert.ok(main.includes(contract), `${contract} 백그라운드 유지 계약이 없습니다.`);
+  const preload = fs.readFileSync(path.join(root, 'preload.js'), 'utf8');
+  for (const contract of ['backgroundState', 'showApp']) assert.ok(preload.includes(contract), `${contract} 백그라운드 IPC 계약이 없습니다.`);
   assert.ok(html.includes('Content-Security-Policy'));
   assert.ok(html.includes('@xterm/xterm/lib/xterm.js'));
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));

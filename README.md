@@ -75,7 +75,7 @@ The current desktop files are not code-signed. Windows SmartScreen or macOS Gate
 | Relationship view | The request origin, selected agent, and every directly delegated subagent |
 | Session detail | Conversation, tool activity, lifecycle events, model, workspace, and status |
 | Token view | Input, output, cached, reasoning, total, and reported context-window usage |
-| Terminal control | Local shell sessions plus safe command delivery to LoadToAgent-owned terminals |
+| Session terminal | The selected AI's prior conversation beside its existing PTY or tmux pane, with input continuing in that exact session |
 | tmux workspace | Session → window → pane → AI process topology on macOS or Windows through WSL |
 
 LoadToAgent distinguishes between a terminal it can control, a session that needs a bridge connection, a read-only session that must continue in its original app, and an ended session. It never types into an arbitrary external window.
@@ -97,7 +97,7 @@ Arguments after `--` are passed to the provider CLI:
 loadtoagent run claude -- --model claude-sonnet-4-6
 ```
 
-The external terminal and LoadToAgent dashboard now control the same LoadToAgent-owned PTY. Existing sessions started elsewhere remain visible but read-only unless the original app exposes a supported handoff.
+The external terminal and LoadToAgent dashboard control the same LoadToAgent-owned PTY. Opening a terminal from an AI card reuses the exact connected terminal instead of creating a new shell, keeps its PTY output intact across UI navigation, and shows that session's prior conversation in a live side rail. Sessions started arbitrarily elsewhere remain visible but read-only unless the original app exposes a supported handoff.
 
 ## Local-first by design
 

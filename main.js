@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Tray, Menu } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -21,6 +21,8 @@ let runner = null;
 let terminalManager = null;
 let bridgeServer = null;
 let bridgeLauncher = null;
+let backgroundTray = null;
+let isQuitting = false;
 const tmuxController = new TmuxController({ platform: process.platform });
 let availability = {};
 let detailRequestId = 0;
@@ -35,7 +37,9 @@ let lastSnapshot = {
   },
 };
 
-const singleInstance = app.requestSingleInstanceLock();
+const isolatedTestInstance = process.env.LOADTOAGENT_TEST_INSTANCE === '1';
+const bridgeHome = process.env.LOADTOAGENT_BRIDGE_HOME || os.homedir();
+const singleInstance = isolatedTestInstance || app.requestSingleInstanceLock();
 if (!singleInstance) app.quit();
 else app.on('second-instance', () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -63,8 +67,8 @@ function shellQuote(value) {
   return `'${String(value || '').replace(/'/g, `'"'"'`)}'`;
 }
 
-function installBridgeLauncher() {
-  const directory = path.join(os.homedir(), '.loadtoagent', 'bin');
+function installBridgeLauncher(home = bridgeHome) {
+  const directory = path.join(home, '.loadtoagent', 'bin');
   fs.mkdirSync(directory, { recursive: true });
   const script = app.isPackaged
     ? path.join(process.resourcesPath, 'app.asar.unpacked', 'bin', 'loadtoagent.js')
@@ -149,7 +153,50 @@ function createWindow() {
   const allowedUrl = pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).href;
   mainWindow.webContents.on('will-navigate', (event, url) => { if (url !== allowedUrl) event.preventDefault(); });
   mainWindow.once('ready-to-show', () => mainWindow && mainWindow.show());
+  mainWindow.on('close', event => {
+    if (isQuitting || !backgroundAgentSessions().length) return;
+    event.preventDefault();
+    mainWindow.hide();
+    ensureBackgroundTray();
+  });
   mainWindow.on('closed', () => { mainWindow = null; });
+}
+
+function backgroundAgentSessions() {
+  if (!terminalManager) return [];
+  return terminalManager.list().filter(session => session.type === 'agent' && (session.status === 'running' || session.status === 'starting'));
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function updateBackgroundTrayMenu() {
+  if (!backgroundTray) return;
+  const count = backgroundAgentSessions().length;
+  backgroundTray.setToolTip(`LoadToAgent · 백그라운드 AI 세션 ${count}개`);
+  backgroundTray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'LoadToAgent 열기', click: showMainWindow },
+    { label: `백그라운드 AI 세션 ${count}개 유지 중`, enabled: false },
+    { type: 'separator' },
+    { label: '프로그램 끝내기 · AI 세션도 종료', click: () => { isQuitting = true; app.quit(); } },
+  ]));
+}
+
+async function ensureBackgroundTray() {
+  if (backgroundTray || isQuitting) return backgroundTray;
+  try {
+    const icon = await app.getFileIcon(process.execPath, { size: 'small' });
+    if (isQuitting || backgroundTray) return backgroundTray;
+    backgroundTray = new Tray(icon);
+    backgroundTray.on('click', showMainWindow);
+    backgroundTray.on('double-click', showMainWindow);
+    updateBackgroundTrayMenu();
+  } catch {}
+  return backgroundTray;
 }
 
 function trustedSender(event) {
@@ -185,13 +232,14 @@ function setupRuntime() {
     availability = Object.fromEntries(providerList().map(provider => [provider.id, true]));
     return;
   }
-  try { bridgeLauncher = installBridgeLauncher(); } catch { bridgeLauncher = null; }
+  try { bridgeLauncher = installBridgeLauncher(bridgeHome); } catch { bridgeLauncher = null; }
   terminalManager.on('data', payload => sendTerminal('terminals:data', payload));
   terminalManager.on('state', payload => {
     sendTerminal('terminals:state', payload);
+    updateBackgroundTrayMenu();
     if (monitorWorker) monitorWorker.postMessage({ type: 'bridge-presence', bridges: bridgePresence() });
   });
-  bridgeServer = new BridgeServer({ terminalManager, home: os.homedir(), platform: process.platform });
+  bridgeServer = new BridgeServer({ terminalManager, home: bridgeHome, platform: process.platform });
   bridgeServer.start().catch(error => sendTerminal('terminals:error', { id: '', message: `외부 터미널 브리지를 열지 못했습니다: ${error.message}` }));
   availability = probeProviders();
   monitorWorker = new Worker(path.join(__dirname, 'src', 'monitorWorker.js'), {
@@ -252,6 +300,19 @@ ipcMain.handle('app:bootstrap', () => ({
   },
   bridgeCli: bridgeLauncher,
 }));
+ipcMain.handle('app:background-state', event => {
+  requireTrustedSender(event);
+  return {
+    visible: Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()),
+    backgroundSessions: backgroundAgentSessions().length,
+    trayReady: Boolean(backgroundTray),
+  };
+});
+ipcMain.handle('app:show', event => {
+  requireTrustedSender(event);
+  showMainWindow();
+  return { ok: true };
+});
 
 ipcMain.handle('agents:snapshot', () => {
   if (monitorWorker) monitorWorker.postMessage({ type: 'scan' });
@@ -427,16 +488,23 @@ ipcMain.handle('agents:open-origin', async (event, session) => {
   const provider = String(session && session.provider || '');
   const externalId = String(session && session.externalId || '');
   const clientKind = String(session && session.clientKind || '');
-  if (provider !== 'codex' || clientKind !== 'codex-desktop' || !/^[0-9a-f-]{20,80}$/i.test(externalId)) return { ok: false };
-  await shell.openExternal(`codex://threads/${encodeURIComponent(externalId)}`);
-  return { ok: true };
+  const validId = /^[0-9a-f-]{20,80}$/i.test(externalId);
+  if (provider === 'codex' && clientKind === 'codex-desktop' && validId) {
+    await shell.openExternal(`codex://threads/${encodeURIComponent(externalId)}`);
+    return { ok: true };
+  }
+  if (provider === 'claude' && clientKind === 'claude-desktop') {
+    await shell.openExternal('claude://');
+    return { ok: true };
+  }
+  return { ok: false };
 });
 
 app.whenReady().then(() => {
   hydratePlatformPath();
   setupRuntime();
   createWindow();
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  app.on('activate', showMainWindow);
 });
 
 app.on('window-all-closed', () => {
@@ -444,10 +512,16 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  isQuitting = true;
   if (bridgeServer) bridgeServer.dispose();
   if (terminalManager) terminalManager.dispose();
   if (monitorWorker) {
     monitorWorker.postMessage({ type: 'stop' });
     monitorWorker.terminate();
   }
+});
+
+app.on('will-quit', () => {
+  if (backgroundTray) backgroundTray.destroy();
+  backgroundTray = null;
 });

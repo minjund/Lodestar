@@ -17,17 +17,21 @@ const state = {
   sort: 'recent',
   selectedId: null,
   drawerTab: 'chat',
+  drawerMode: 'session',
   runProvider: 'claude',
   details: new Map(),
-  detailLoading: false,
+  detailLoadingIds: new Set(),
   drawerForceLatest: false,
   visibleLimit: 30,
   graphFocusId: null,
   graphExpandedProviders: new Set(),
+  expandedCompletedSubagents: new Set(),
   tmuxFocus: null,
   agentCommandDrafts: new Map(),
   agentCommandTargets: new Map(),
   agentCommandSending: new Set(),
+  stopRequests: new Set(),
+  detailErrors: new Map(),
   platform: { id: 'win32', label: 'Windows', localShell: 'powershell', localShellLabel: 'Windows 명령창', nativeTmux: false },
 };
 
@@ -135,7 +139,7 @@ const VIEW_TITLES = {
   all: '최근 대화와 작업',
   active: '진행 중인 작업',
   waiting: '내 확인이 필요한 작업',
-  terminal: '일반 명령창',
+  terminal: '세션 터미널',
   tmux: 'tmux 작업',
 };
 
@@ -168,6 +172,42 @@ function memoryCandidatesHtml(items) {
   return `<div class="memory-candidates"><div class="structured-heading"><b>저장할 작업 기억</b><span>${items.length}개 항목</span></div>${items.map((item, index) => `<article class="memory-candidate"><header><b>${index + 1}</b><span class="memory-target">${esc(item.target || 'MEMORY')}</span><span class="memory-category">${esc(memoryCategoryLabel(item.category))}</span></header><p>${esc(item.content || '내용 없음')}</p></article>`).join('')}</div>`;
 }
 
+function inlineMarkdown(value) {
+  return esc(value).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+}
+
+function markdownHtml(value) {
+  const output = [];
+  let fence = false;
+  let code = [];
+  let list = '';
+  const closeList = () => { if (list) { output.push(`</${list}>`); list = ''; } };
+  for (const line of String(value || '').replace(/\r\n/g, '\n').split('\n')) {
+    if (/^```/.test(line)) {
+      closeList();
+      if (fence) { output.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`); code = []; fence = false; } else fence = true;
+      continue;
+    }
+    if (fence) { code.push(line); continue; }
+    const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    if (bullet || ordered) {
+      const next = bullet ? 'ul' : 'ol';
+      if (list !== next) { closeList(); output.push(`<${next}>`); list = next; }
+      output.push(`<li>${inlineMarkdown((bullet || ordered)[1])}</li>`);
+      continue;
+    }
+    closeList();
+    if (!line.trim()) { output.push('<br>'); continue; }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) output.push(`<h${heading[1].length + 2}>${inlineMarkdown(heading[2])}</h${heading[1].length + 2}>`);
+    else output.push(`<p>${inlineMarkdown(line)}</p>`);
+  }
+  closeList();
+  if (fence) output.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`);
+  return `<div class="chat-content markdown">${output.join('')}</div>`;
+}
+
 function messageContentHtml(message) {
   const text = String(message && message.text || '').trim();
   if (!text) return '<div class="chat-content empty">표시할 내용이 없습니다.</div>';
@@ -180,7 +220,7 @@ function messageContentHtml(message) {
       return `<div class="structured-json"><div class="structured-heading"><b>구조화된 데이터</b><span>${Array.isArray(parsed) ? `${parsed.length}개 항목` : 'JSON'}</span></div>${jsonValueHtml(parsed)}</div>`;
     } catch {}
   }
-  return `<div class="chat-content plain">${esc(text)}</div>`;
+  return markdownHtml(text);
 }
 
 function compact(value) {
@@ -228,12 +268,12 @@ function agentRoleLabel(value) {
 }
 
 function statusClass(status) {
-  return ['running', 'waiting', 'failed', 'cancelled'].includes(status) ? status : '';
+  return ['running', 'waiting', 'completed', 'failed', 'cancelled'].includes(status) ? status : '';
 }
 
 function currentActivity(session) {
   const items = session.lifecycle || [];
-  const running = [...items].reverse().find(item => item.status === 'running');
+  const running = isLiveSession(session) ? [...items].reverse().find(item => item.status === 'running') : null;
   const last = running || items[items.length - 1];
   if (last) return { title: last.label || '활동', detail: last.detail || session.statusDetail || '', type: last.type || 'activity' };
   const message = (session.messages || [])[session.messages.length - 1];
@@ -242,6 +282,16 @@ function currentActivity(session) {
 
 function isLiveSession(session) {
   return session && (session.status === 'running' || session.status === 'starting');
+}
+
+function subagentWorkState(session) {
+  if (isLiveSession(session)) return 'working';
+  if (session && session.status === 'failed') return 'attention';
+  return 'resting';
+}
+
+function subagentWorkLabel(session) {
+  return ({ working: '일하는 중', resting: '쉬는 중', attention: '확인 필요' })[subagentWorkState(session)];
 }
 
 function readableActivityDetail(value) {
@@ -262,6 +312,10 @@ function readableActivityDetail(value) {
 }
 
 function latestWorkCopy(session) {
+  const delegation = session.delegation || {};
+  const completedResult = delegation.result || session.result;
+  if (session.status === 'completed' && completedResult) return `완료 결과 · ${completedResult}`;
+  if (session.status === 'completed') return '담당 작업을 완료하고 메인 AI에 결과를 반환했습니다.';
   const activity = currentActivity(session);
   if (activity.detail) return readableActivityDetail(activity.detail);
   const messages = session.messages || [];
@@ -307,7 +361,7 @@ function renderGlobalStats() {
     ['전체 대화와 작업', totals.sessions || 0, '개', ''],
     ['지금 일하는 AI', totals.active || 0, '개', 'live'],
     ['내 확인 기다림', totals.waiting || 0, '개', 'alert'],
-    ['도움을 맡은 AI', totals.subagents || 0, '개', ''],
+    ['서브에이전트 기록', totals.subagents || 0, '개', ''],
     ['사용한 토큰', compact(totals.usage && totals.usage.total), '개', ''],
   ];
   $('#globalStats').innerHTML = items.map(([label, value, unit, cls], index) => `<div class="global-stat ${cls}" data-motion-key="stat:${index}" data-motion-value="${esc(value)}"><span>${label}</span><strong>${esc(value)}</strong><em>${unit}</em></div>`).join('');
@@ -334,7 +388,7 @@ function renderProviderOverview() {
 }
 
 function filteredSessions() {
-  let sessions = [...(state.snapshot && state.snapshot.sessions || [])];
+  let sessions = [...(state.snapshot && state.snapshot.sessions || [])].filter(session => !session.parentId);
   if (state.view === 'active') sessions = sessions.filter(session => session.status === 'running' || session.status === 'starting');
   if (state.view === 'waiting') sessions = sessions.filter(session => session.status === 'waiting');
   if (state.provider !== 'all') sessions = sessions.filter(session => session.provider === state.provider);
@@ -370,19 +424,24 @@ function graphNode(session, options = {}) {
   const percent = Math.max(0, Math.min(100, Number(context.percent || 0)));
   const running = isLiveSession(session);
   const childCount = (session.childIds || []).length;
+  const childMetrics = session.collaboration && session.collaboration.metrics;
+  const cumulativeChildren = childMetrics ? childMetrics.cumulativeCreated : childCount;
+  const delegation = session.delegation || {};
+  const displayedTask = session.parentId && delegation.assignmentObserved && delegation.assignment
+    ? delegation.assignment : (session.parentId && (delegation.taskName || session.taskName) ? (delegation.taskName || session.taskName) : session.title);
   const role = session.parentId
     ? `도움 AI${session.agentName ? ` · ${session.agentName}` : ''}${session.agentRole ? ` / ${agentRoleLabel(session.agentRole)}` : ''}`
     : '일을 맡은 AI';
   return `<article class="agent-node ${running ? 'running' : ''} ${session.parentId ? 'child-agent' : 'root-agent'} ${options.focus ? 'is-focus' : ''}" data-motion-key="agent:${esc(session.id)}" data-motion-value="${esc(session.updatedAt || '')}:${usage.total || 0}:${esc(session.status || '')}" style="${providerStyle(session.provider)}">
     <button class="agent-node-main" type="button" data-graph-focus="${esc(session.id)}" aria-label="${esc(role)} 관계 중심으로 보기">
-      <span class="agent-node-top"><span class="provider-mark">${esc(provider.mark)}</span><span class="agent-identity"><b>${esc(role)}</b><small>${esc(provider.label)} · ${esc(session.model || '모델 정보 없음')}</small></span><span class="status-pill ${statusClass(session.status)}">${esc(STATUS[session.status] || session.status)}</span></span>
-      <span class="agent-task-label">${session.parentId ? '도움을 맡은 일' : '전체 목표'}</span>
-      <strong class="agent-task">${esc(session.title)}</strong>
+      <span class="agent-node-top"><span class="provider-mark">${esc(provider.mark)}</span><span class="agent-identity"><b>${esc(role)}</b><small>${esc(provider.label)} · ${esc(session.model || '모델 정보 없음')}</small></span>${executionModeBadge(session, true)}<span class="status-pill ${statusClass(session.status)}">${esc(STATUS[session.status] || session.status)}</span></span>
+      <span class="agent-task-label">${session.parentId ? `담당 작업${delegation.assignmentSource === 'parent-narration' ? ' · 메인 AI 설명 기반' : ''}` : '전체 목표'}</span>
+      <strong class="agent-task">${esc(displayedTask)}</strong>
       <span class="agent-current"><span><i>${statusIcon(activity.type)}</i><b>지금 하는 일</b></span><strong>${esc(latestWorkCopy(session))}</strong></span>
       <span class="agent-node-metrics"><span><small>기억 공간 사용</small><b>${context.window ? `${percent.toFixed(1)}%` : '--'}</b></span><span><small>사용 토큰</small><b>${compact(usage.total)}</b></span><span><small>마지막 활동</small><b>${esc(timeAgo(session.updatedAt))}</b></span></span>
       <span class="agent-node-gauge"><i style="width:${percent}%"></i></span>
     </button>
-    <footer class="agent-node-footer"><span>${childCount ? `도움 AI ${childCount}명에게 나눔` : (session.parentId ? '도움을 맡은 AI' : '이 작업의 중심 AI')}</span><button type="button" data-open-session="${esc(session.id)}">대화 내용 보기 <b>↗</b></button></footer>
+    <footer class="agent-node-footer"><span>${cumulativeChildren ? `서브에이전트 ${cumulativeChildren}개 누적 생성` : (session.parentId ? '도움을 맡은 AI' : '이 작업의 중심 AI')}</span><button type="button" data-open-session="${esc(session.id)}">대화 내용 보기 <b>↗</b></button></footer>
   </article>`;
 }
 
@@ -398,7 +457,7 @@ function graphPath(session, byId) {
   return path;
 }
 
-function connectedGraphSessions(sessions) {
+function connectedGraphSessions(sessions, focusId = state.graphFocusId) {
   const byId = new Map(sessions.map(session => [session.id, session]));
   const included = new Set(sessions.filter(isLiveSession).map(session => session.id));
   const includeAncestors = session => {
@@ -411,6 +470,23 @@ function connectedGraphSessions(sessions) {
     }
   };
   sessions.filter(isLiveSession).forEach(includeAncestors);
+  const includeDescendants = session => {
+    const queue = [...(session && session.childIds || [])];
+    const seen = new Set();
+    while (queue.length) {
+      const id = queue.shift();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      included.add(id);
+      const child = byId.get(id);
+      if (child) queue.push(...(child.childIds || []));
+    }
+  };
+  const requestedFocus = focusId && byId.get(focusId);
+  if (requestedFocus) {
+    includeAncestors(requestedFocus);
+    includeDescendants(requestedFocus);
+  }
   for (const id of [...included]) {
     const session = byId.get(id);
     for (const childId of (session && session.childIds || [])) included.add(childId);
@@ -430,6 +506,22 @@ function graphChildren(session, model) {
   return sortGraphNodes((session.childIds || []).map(id => model.byId.get(id)).filter(Boolean));
 }
 
+function agentExecutionMode(session) {
+  const presence = Array.isArray(session && session.runtimePresence) ? session.runtimePresence : [];
+  const tmux = presence.find(item => item.kind === 'tmux');
+  if (tmux) return {
+    kind: 'tmux',
+    label: 'TMUX 사용',
+    detail: [tmux.distro, tmux.sessionName, tmux.paneNativeId || tmux.paneId].filter(Boolean).join(' · ') || '분할 터미널에서 실행',
+  };
+  return { kind: 'standard', label: '일반 실행', detail: 'TMUX 미사용' };
+}
+
+function executionModeBadge(session, compact = false) {
+  const mode = agentExecutionMode(session);
+  return `<span class="execution-mode-badge ${mode.kind}" title="${esc(mode.detail)}"><i>${mode.kind === 'tmux' ? '▦' : '›_'}</i><b>${esc(mode.label)}</b>${compact ? '' : `<small>${esc(mode.detail)}</small>`}</span>`;
+}
+
 function graphDescendantCount(session, model) {
   const queue = [...(session.childIds || [])];
   const seen = new Set();
@@ -447,9 +539,39 @@ function compactGraphNode(session, model, label = '') {
   const usage = session.usage || {};
   const directChildren = graphChildren(session, model).length;
   const identity = session.parentId ? `도움 AI ${session.agentName || agentRoleLabel(session.agentRole)}` : (session.workspace || '중심 작업');
-  return `<button type="button" class="agent-flow-row ${isLiveSession(session) ? 'running' : ''}" data-graph-focus="${esc(session.id)}" data-motion-key="agent:${esc(session.id)}" data-motion-value="${esc(session.updatedAt || '')}:${usage.total || 0}:${esc(session.status || '')}" style="${providerStyle(session.provider)}">
+  const delegation = session.delegation || {};
+  const taskName = delegation.taskName || session.taskName || '';
+  const assignedWork = delegation.assignmentObserved && delegation.assignment ? delegation.assignment : (taskName || session.title);
+  const sharedGoal = delegation.sharedGoal || session.sharedGoal || '';
+  const outcome = delegation.result || session.result || '';
+  const taskLabel = session.parentId ? `${label || agentRoleLabel(session.agentRole)}${taskName ? ` · 담당 ${taskName}` : ''}` : label;
+  const assignmentSourceNote = session.parentId && delegation.assignmentSource === 'parent-narration' ? '<span class="agent-flow-assignment-source">메인 AI가 작업 시작 직전에 설명한 내용</span>' : '';
+  const sharedGoalCopy = session.parentId && sharedGoal && sharedGoal !== assignedWork ? `<span class="agent-flow-shared">공유 목표 · ${esc(sharedGoal)}</span>` : '';
+  const outcomeCopy = session.parentId
+    ? `<span class="agent-flow-outcome ${session.status === 'completed' ? 'done' : ''}"><b>${session.status === 'completed' ? '완료 결과' : '현재 작업'}</b>${esc(outcome || latestWorkCopy(session))}</span>` : '';
+  if (session.parentId) {
+    const primaryTask = taskName || assignedWork || session.title;
+    const assignmentCopy = assignedWork && assignedWork !== primaryTask
+      ? `<span class="agent-flow-assignment"><small>담당 내용</small><strong>${esc(assignedWork)}</strong></span>` : '';
+    const workState = subagentWorkState(session);
+    const interaction = directChildren
+      ? `data-graph-focus="${esc(session.id)}" aria-label="${esc(primaryTask)}의 하위 서브에이전트 흐름 보기"`
+      : `data-open-subagent-chat="${esc(session.id)}" aria-label="${esc(primaryTask)}와 메인 AI의 대화 보기"`;
+    const action = directChildren ? `하위 서브에이전트 ${directChildren}개 보기 →` : '메인 AI와의 대화 보기 →';
+    return `<button type="button" class="agent-flow-row child-session work-${workState} ${statusClass(session.status)}" ${interaction} data-motion-key="agent:${esc(session.id)}" data-motion-value="${esc(session.updatedAt || '')}:${usage.total || 0}:${esc(session.status || '')}" style="${providerStyle(session.provider)}">
+      <span class="agent-flow-state" aria-hidden="true"></span>
+      <span class="agent-flow-copy">
+        <span class="agent-flow-kicker"><small>${esc(label || agentRoleLabel(session.agentRole))} 세션</small><time>${esc(timeAgo(session.updatedAt))}</time></span>
+        <b class="agent-flow-session-title">${esc(primaryTask)}</b>
+        <span class="agent-flow-agent"><i>${esc(provider.mark)}</i><strong>${esc(session.agentName || '이름 미확인')}</strong><small>${esc(provider.label)}${session.model ? ` · ${esc(session.model)}` : ''}</small></span>
+        ${assignmentCopy}${assignmentSourceNote}${outcomeCopy}<span class="agent-flow-child-action">${esc(action)}</span>
+      </span>
+      <span class="agent-flow-provider">${executionModeBadge(session, true)}<small class="status-pill work-${workState}">${esc(subagentWorkLabel(session))}</small>${session.status === 'completed' ? '<em>최근 작업 완료</em>' : ''}</span>
+    </button>`;
+  }
+  return `<button type="button" class="agent-flow-row ${isLiveSession(session) ? 'running' : ''} ${statusClass(session.status)}" data-graph-focus="${esc(session.id)}" data-motion-key="agent:${esc(session.id)}" data-motion-value="${esc(session.updatedAt || '')}:${usage.total || 0}:${esc(session.status || '')}" style="${providerStyle(session.provider)}">
     <span class="agent-flow-state" aria-hidden="true"></span>
-    <span class="agent-flow-copy">${label ? `<small>${esc(label)}</small>` : ''}<b>${esc(session.title)}</b><em>${esc(identity)} · ${directChildren ? `도움 AI ${directChildren}명 · ` : ''}${esc(timeAgo(session.updatedAt))}</em></span>
+    <span class="agent-flow-copy">${taskLabel ? `<small>${esc(taskLabel)}</small>` : ''}<b>${esc(assignedWork)}</b><em>${esc(identity)} · ${directChildren ? `도움 AI ${directChildren}명 · ` : ''}${esc(timeAgo(session.updatedAt))}</em>${assignmentSourceNote}${sharedGoalCopy}${outcomeCopy}</span>
     <span class="agent-flow-provider"><i>${esc(provider.mark)}</i><small>${esc(STATUS[session.status] || session.status)}</small></span>
   </button>`;
 }
@@ -469,8 +591,164 @@ function providerFlowLane(providerId, roots, model) {
 }
 
 function workflowCompactNode(session, model, side, label) {
-  const port = side === 'upstream' ? '<span class="agent-workflow-port output" data-workflow-port="upstream-output" aria-hidden="true"></span>' : `<span class="agent-workflow-port input" data-workflow-port="child-input:${esc(session.id)}" aria-hidden="true"></span>`;
+  const port = side === 'upstream' ? '<span class="agent-workflow-port output" data-workflow-port="upstream-output" aria-hidden="true"></span>' : '';
   return `<div class="agent-workflow-node ${side}" data-workflow-node="${esc(session.id)}">${port}${compactGraphNode(session, model, label)}</div>`;
+}
+
+function liveTmuxEntries(tmux = state.snapshot && state.snapshot.tmux) {
+  const entries = [];
+  for (const distro of tmux && tmux.distros || []) {
+    for (const tmuxSession of distro.sessions || []) {
+      for (const window of tmuxSession.windows || []) {
+        for (const pane of window.panes || []) {
+          if (!pane.agent) continue;
+          entries.push({ distro, tmuxSession, window, pane, agent: pane.agent });
+        }
+      }
+    }
+  }
+  return entries.sort((a, b) => Number(b.pane.active) - Number(a.pane.active)
+    || Number(a.pane.dead) - Number(b.pane.dead)
+    || String(a.tmuxSession.name).localeCompare(String(b.tmuxSession.name)));
+}
+
+function liveTmuxPaneCard(entry) {
+  const { distro, tmuxSession, window, pane, agent } = entry;
+  const provider = providerInfo(agent.provider);
+  const linked = agent.linkedSessionId ? snapshotSession(agent.linkedSessionId) : null;
+  const title = linked ? linked.title : (pane.title || `${provider.label} TMUX 작업`);
+  const stateLabel = pane.dead ? '종료됨' : (pane.active ? '현재 선택된 칸' : '백그라운드 실행');
+  return `<article class="live-tmux-card ${pane.active ? 'active' : ''} ${pane.dead ? 'dead' : ''}" style="${providerStyle(agent.provider)}" data-motion-key="live-tmux:${esc(pane.id)}" data-motion-value="${esc(agent.updatedAt || '')}:${pane.pid || 0}">
+    <button type="button" class="live-tmux-pane" data-tmux-type="pane" data-tmux-id="${esc(pane.id)}" aria-label="${esc(tmuxSession.name)} TMUX 칸 열기">
+      <span class="live-tmux-card-head"><span class="live-tmux-symbol">▦</span><span><small>TMUX 세션</small><b>${esc(tmuxSession.name)}</b></span><em>${esc(stateLabel)}</em></span>
+      <strong class="live-tmux-title">${esc(title)}</strong>
+      <span class="live-tmux-agent"><i>${esc(provider.mark)}</i><b>${esc(provider.label)}</b><small>${esc(agent.command || pane.command || 'AI')}</small></span>
+      <span class="live-tmux-location"><b>${esc(distro.name)}</b><i>›</i><span>${esc(window.name || `창 ${window.index + 1}`)}</span><i>›</i><span>칸 ${pane.index + 1} · ${esc(pane.nativeId || pane.id)}</span></span>
+      <span class="live-tmux-cwd" title="${esc(pane.cwd || '')}">${esc(pane.cwd || '작업 폴더 미확인')}</span>
+    </button>
+    <footer><span>${linked ? '대화 기록과 연결됨' : 'TMUX 프로세스에서 직접 감지'}</span><span>${linked ? `<button type="button" data-graph-focus="${esc(linked.id)}">AI 흐름 보기</button>` : ''}<button type="button" class="live-tmux-pane" data-tmux-type="pane" data-tmux-id="${esc(pane.id)}">TMUX에서 열기 →</button></span></footer>
+  </article>`;
+}
+
+function runtimeSeparatedOverview(roots, model) {
+  const tmux = state.snapshot && state.snapshot.tmux || { distros: [], summary: {} };
+  const tmuxEntries = liveTmuxEntries(tmux);
+  const tmuxLinkedIds = new Set(tmuxEntries.map(entry => entry.agent.linkedSessionId).filter(Boolean));
+  const tmuxRoots = roots.filter(root => agentExecutionMode(root).kind === 'tmux');
+  const standardRoots = roots.filter(root => agentExecutionMode(root).kind !== 'tmux');
+  const providerOrder = [...new Set([...state.providers.map(item => item.id), ...roots.map(item => item.provider)])];
+  const lanesFor = items => providerOrder.map(providerId => ({ providerId, roots: items.filter(root => root.provider === providerId) })).filter(item => item.roots.length);
+  const standardLanes = lanesFor(standardRoots);
+  const fallbackTmuxLanes = lanesFor(tmuxRoots.filter(root => !tmuxLinkedIds.has(root.id)));
+  const summary = tmux.summary || {};
+  const standardHtml = standardLanes.length
+    ? `<div class="agent-flow-overview">${standardLanes.map(item => providerFlowLane(item.providerId, item.roots, model)).join('')}</div>`
+    : '<div class="runtime-segment-empty"><b>일반 실행 AI가 없습니다</b><span>현재 감지된 작업은 모두 TMUX에서 실행 중입니다.</span></div>';
+  const tmuxHtml = tmuxEntries.length || fallbackTmuxLanes.length
+    ? `${tmuxEntries.length ? `<div class="live-tmux-grid">${tmuxEntries.map(liveTmuxPaneCard).join('')}</div>` : ''}${fallbackTmuxLanes.length ? `<div class="agent-flow-overview live-tmux-fallback">${fallbackTmuxLanes.map(item => providerFlowLane(item.providerId, item.roots, model)).join('')}</div>` : ''}`
+    : '<div class="runtime-segment-empty tmux"><b>TMUX에서 실행 중인 AI가 없습니다</b><span>TMUX AI 프로세스가 감지되면 일반 실행과 분리해 여기에 표시합니다.</span></div>';
+  return `<div class="agent-runtime-split" data-runtime-split="true">
+    <section class="runtime-segment tmux-runtime" data-runtime-segment="tmux">
+      <header><span class="runtime-segment-icon">▦</span><span><small>TMUX 전용</small><b>TMUX 세션</b><em>Linux 작업 묶음·창·분할 칸을 유지해서 실행 중인 AI</em></span><strong>${tmuxEntries.length || summary.aiPanes || 0}개</strong><button type="button" class="live-tmux-overview-open">TMUX 전체 화면 →</button></header>
+      ${tmuxHtml}
+    </section>
+    <section class="runtime-segment standard-runtime" data-runtime-segment="standard">
+      <header><span class="runtime-segment-icon">›_</span><span><small>TMUX 미사용</small><b>일반 실행 세션</b><em>Codex 앱·외부 터미널에서 실행 중인 메인 AI</em></span><strong>${standardRoots.length}개</strong></header>
+      ${standardHtml}
+    </section>
+  </div>`;
+}
+
+function workflowMetrics(session, children) {
+  const observed = session.collaboration && session.collaboration.metrics;
+  return observed || {
+    cumulativeCreated: children.length,
+    simultaneousCapacity: 0,
+    currentlyRunning: children.filter(isLiveSession).length,
+    completedRecords: children.filter(child => child.status === 'completed').length,
+    retainedCount: null,
+    capacitySource: 'unknown',
+    cumulativeSource: 'child-sessions',
+  };
+}
+
+function workflowChildrenSummary(session, children) {
+  if (!children.length && !(session.collaboration && session.collaboration.metrics)) return '';
+  const counts = new Map();
+  for (const child of children) counts.set(child.provider, (counts.get(child.provider) || 0) + 1);
+  const providers = [...counts.entries()].map(([providerId, count]) => {
+    const provider = providerInfo(providerId);
+    return `<span class="workflow-summary-chip" style="${providerStyle(providerId)}"><i>${esc(provider.mark)}</i><b>${esc(provider.label)}</b><em>${count}</em></span>`;
+  }).join('');
+  const metrics = workflowMetrics(session, children);
+  const capacity = metrics.simultaneousCapacity > 0 ? metrics.simultaneousCapacity : '--';
+  const retained = metrics.retainedCount == null ? '현재 목록 유지 수는 관측되지 않음' : `현재 런타임 목록에는 ${metrics.retainedCount}개 유지`;
+  const source = metrics.capacitySource === 'runtime-instruction' ? '세션 런타임 한도' : '동시 한도 출처 미확인';
+  return `<div class="agent-workflow-summary" data-collaboration-summary="true">
+    <div class="workflow-metric-grid">
+      <span data-collaboration-metric="created"><small>이 작업에서 누적 생성</small><b>${esc(metrics.cumulativeCreated)}</b><em>개</em></span>
+      <span data-collaboration-metric="capacity"><small>동시에 유지 가능</small><b>${esc(capacity)}</b><em>${capacity === '--' ? '' : '개'}</em></span>
+      <span data-collaboration-metric="running"><small>현재 실행 중</small><b>${esc(metrics.currentlyRunning)}</b><em>개</em></span>
+      <span data-collaboration-metric="completed"><small>작업 완료 기록</small><b>${esc(metrics.completedRecords)}</b><em>개</em></span>
+    </div>
+    <div class="workflow-summary-evidence"><span>${esc(retained)} · 완료 기록은 삭제하지 않고 기본으로 접어 보관</span><small>${esc(source)} · spawn/완료 이벤트 기준</small></div>
+    <div class="workflow-summary-providers">${providers}</div>
+  </div>`;
+}
+
+function splitSubagents(children) {
+  return children.reduce((out, session) => {
+    if (session.status === 'completed' || session.completionObserved) out.completed.push(session);
+    else out.ongoing.push(session);
+    return out;
+  }, { ongoing: [], completed: [] });
+}
+
+function completedSubagentDisclosure(ownerId, completed, expanded) {
+  if (!completed.length) return '';
+  return `<div class="completed-subagent-disclosure ${expanded ? 'expanded' : ''}" data-completed-subagent-section>
+    <button type="button" data-subagent-completed-toggle="${esc(ownerId)}" aria-expanded="${expanded ? 'true' : 'false'}">
+      <span class="completed-disclosure-icon">✓</span><span><b>완료된 서브에이전트 ${completed.length}개</b><small>${expanded ? '완료 기록을 펼쳐 보는 중' : '작업 중인 AI에 집중할 수 있도록 기본으로 접어둡니다'}</small></span><i>${expanded ? '접기 ↑' : '펼쳐 보기 ↓'}</i>
+    </button>
+  </div>`;
+}
+
+function agentPathTaskName(value) {
+  return String(value || '').replace(/\\/g, '/').replace(/\/$/, '').split('/').filter(Boolean).pop() || '';
+}
+
+function communicationEndpoint(value, owner, model) {
+  const path = String(value || '');
+  if (!path) return '대상 미상';
+  if (path === 'Codex 런타임') return path;
+  if (path === '/root' || path === owner.agentPath || (!owner.agentPath && path === owner.id)) return '메인 AI';
+  const taskName = agentPathTaskName(path);
+  const session = model.nodes.find(node => node.agentPath === path || node.taskName === taskName);
+  if (session) return `${session.agentName || '서브 AI'}${taskName ? ` · ${taskName}` : ''}`;
+  return taskName || path;
+}
+
+function workflowCommunicationPanel(focus, parent, model) {
+  const owner = focus;
+  const all = owner.collaboration && owner.collaboration.communications || [];
+  const relevant = all.filter(event => ['assignment', 'started', 'followup', 'message', 'result', 'interrupt'].includes(event.kind));
+  const events = relevant.slice(-60);
+  if (!events.length) {
+    return `<section class="agent-communication-panel empty" data-collaboration-communications="0"><header><span><b>메인 AI ↔ 서브에이전트 소통</b><small>배정·추가 지시·결과 반환 기록</small></span></header><p>이 세션 로그에서는 에이전트 간 통신 이벤트가 확인되지 않았습니다.</p></section>`;
+  }
+  const rows = events.map(event => {
+    const text = event.text || (event.protected
+      ? `${event.taskName || '이 작업'}을 서브에이전트에게 배정했습니다.`
+      : (event.kind === 'started' ? '런타임에서 실행 시작을 확인했습니다.' : '내용 없이 상태만 기록되었습니다.'));
+    const sourceLabel = event.assignmentSource === 'parent-narration' ? ' · 작업 시작 직전 메인 AI 설명' : '';
+    return `<article class="agent-communication-event ${esc(event.kind)}" data-communication-kind="${esc(event.kind)}">
+      <span class="communication-route"><b>${esc(communicationEndpoint(event.from, owner, model))}</b><i>→</i><b>${esc(communicationEndpoint(event.to, owner, model))}</b></span>
+      <span class="communication-copy"><small>${esc(event.label)}${event.taskName ? ` · ${esc(event.taskName)}` : ''}${sourceLabel}</small><strong>${esc(text)}</strong></span>
+      <time>${esc(timeOnly(event.timestamp))}</time>
+    </article>`;
+  }).join('');
+  const countLabel = relevant.length > events.length ? `최근 ${events.length} / 전체 ${relevant.length}건` : `${events.length}건`;
+  return `<section class="agent-communication-panel" data-collaboration-communications="${events.length}" data-collaboration-communications-total="${relevant.length}"><header><span><b>메인 AI ↔ 서브에이전트 소통</b><small>누가 일을 맡겼고, 언제 시작했으며, 어떤 결과를 돌려줬는지 시간순으로 표시</small></span><em>${countLabel}</em></header><div class="agent-communication-list">${rows}</div></section>`;
 }
 
 function agentCommandTargets(session) {
@@ -482,9 +760,25 @@ function agentCommandTargets(session) {
   }
 }
 
+function agentResumeSupport(session) {
+  try {
+    return window.LoadToAgentTerminal && typeof window.LoadToAgentTerminal.resumeSupport === 'function'
+      ? window.LoadToAgentTerminal.resumeSupport(session) : { supported: false, reason: '터미널 재개 기능을 준비하는 중입니다.' };
+  } catch (error) {
+    return { supported: false, reason: error && error.message || '세션 재개 가능 여부를 확인하지 못했습니다.' };
+  }
+}
+
+function originAppInfo(session) {
+  if (session && session.provider === 'codex' && session.clientKind === 'codex-desktop') return { provider: 'Codex', label: 'Codex 데스크톱 앱' };
+  if (session && session.provider === 'claude' && session.clientKind === 'claude-desktop') return { provider: 'Claude', label: 'Claude 데스크톱 앱' };
+  return null;
+}
+
 function agentControlMode(session, targets) {
   if (targets.length) return 'direct';
-  if (session.provider === 'codex' && session.clientKind === 'codex-desktop') return 'origin';
+  if (originAppInfo(session)) return !isLiveSession(session) && agentResumeSupport(session).supported ? 'origin-resume' : 'origin';
+  if (agentResumeSupport(session).supported) return isLiveSession(session) ? 'handoff' : 'resume';
   if (isLiveSession(session)) return 'connect';
   return 'ended';
 }
@@ -498,26 +792,35 @@ function agentCommandComposer(session) {
   const target = targets.find(item => item.id === targetId) || null;
   const draft = state.agentCommandDrafts.get(session.id) || '';
   const sending = state.agentCommandSending.has(session.id);
-  const canSend = mode === 'direct' && Boolean(target) && !sending;
-  const status = mode === 'direct'
-    ? `직접 입력 가능 · ${targets.length === 1 ? target.label : `${targets.length}개 터미널 중 선택`}`
-    : (mode === 'connect' ? '연결 후 입력 가능 · 현재 세션은 보기 전용' : (mode === 'origin' ? '보기 전용 · 원래 앱에서 계속' : '종료된 세션'));
-  const help = mode === 'direct'
-    ? 'Enter로 바로 보내고, Shift+Enter로 줄을 바꿀 수 있습니다.'
-    : (mode === 'connect'
-      ? `임의로 열린 터미널에는 입력하지 않습니다. 새 터미널에서 loadtoagent run ${session.provider}로 안전하게 연결할 수 있습니다.`
-      : (mode === 'origin' ? '이 대화는 Codex 데스크톱 앱에서 시작되어 원래 작업으로 돌아갑니다.' : '실행이 끝난 AI의 기록에는 새 지시를 보내지 않습니다.'));
+  const canSend = ((mode === 'direct' && Boolean(target)) || mode === 'resume' || mode === 'handoff' || mode === 'origin-resume') && !sending;
+  const origin = originAppInfo(session);
+  const status = mode === 'direct' ? `직접 입력 가능 · ${targets.length === 1 ? target.label : `${targets.length}개 터미널 중 선택`}`
+    : mode === 'handoff' ? '외부 터미널에서 실행 중 · 같은 대화로 이어받기 가능'
+      : mode === 'resume' ? '원래 터미널이 종료됨 · 같은 세션으로 복구 가능'
+        : mode === 'origin-resume' ? '쉬는 데스크톱 작업 · 백그라운드 터미널로 이어가기 가능'
+          : mode === 'connect' ? '연결 후 입력 가능 · 현재 세션은 보기 전용'
+            : mode === 'origin' ? '보기 전용 · 원래 앱에서 계속' : '종료된 세션';
+  const help = mode === 'direct' ? '기존 터미널에 바로 보냅니다. 앱 창을 닫아도 백그라운드에서 세션을 계속 유지합니다.'
+    : mode === 'handoff' ? '같은 세션 ID와 대화 내역을 LoadToAgent 관리 터미널로 이어받고 백그라운드에서 유지합니다.'
+      : mode === 'resume' ? '기존 세션 ID와 대화 맥락을 복구하고, 앱 창을 닫아도 백그라운드에서 유지합니다.'
+        : mode === 'origin-resume' ? `원래 ${origin && origin.provider || '데스크톱'} 앱으로 돌아가거나, 같은 세션을 백그라운드 터미널로 이어서 작업할 수 있습니다.`
+          : mode === 'connect' ? `새 터미널에서 loadtoagent run ${session.provider}로 시작하면 창을 닫아도 안전하게 유지됩니다.`
+            : mode === 'origin' ? `이 대화는 ${origin && origin.label || '데스크톱 앱'}에서 현재 실행 중이므로 원래 작업에서 계속합니다.`
+              : (agentResumeSupport(session).reason || '이 제공사의 세션 재개 방식을 확인할 수 없습니다.');
   const picker = targets.length > 1 ? `<label class="agent-command-target"><span>보낼 터미널</span><select data-agent-command-target="${esc(session.id)}"><option value="">터미널을 선택하세요</option>${targets.map(item => `<option value="${esc(item.id)}" ${item.id === targetId ? 'selected' : ''}>${esc(item.label)}</option>`).join('')}</select></label>` : '';
-  const actions = mode === 'direct'
-    ? `<button type="button" data-agent-terminal-open="${esc(session.id)}" ${canSend ? '' : 'disabled'}>터미널에서 열기</button><button type="submit" ${canSend ? '' : 'disabled'}>${sending ? '보내는 중…' : '바로 보내기 ↵'}</button>`
-    : (mode === 'connect'
-      ? `<button type="button" data-agent-bridge-copy="${esc(session.provider)}">연결 명령 복사</button>`
-      : (mode === 'origin' ? `<button type="button" data-agent-open-origin="${esc(session.id)}">원래 Codex 앱에서 계속하기</button>` : ''));
-  const placeholder = mode === 'direct' ? '예: 지금 변경한 파일을 테스트하고 실패 원인을 알려줘' : status;
-  return `<form class="agent-command-panel ${mode === 'direct' ? 'connected' : 'unavailable'} control-${mode}" data-agent-command-form="${esc(session.id)}">
+  const originAction = `<button type="button" data-agent-open-origin="${esc(session.id)}">원래 ${esc(origin && origin.provider || '데스크톱')} 앱에서 계속하기</button>`;
+  const actions = mode === 'direct' ? `<button type="button" data-agent-terminal-open="${esc(session.id)}" ${canSend ? '' : 'disabled'}>터미널에서 열기</button><button type="submit" ${canSend ? '' : 'disabled'}>${sending ? '보내는 중…' : '바로 보내기 ↵'}</button>`
+    : mode === 'resume' ? `<button type="submit" ${canSend ? '' : 'disabled'}>${sending ? '복구하는 중…' : '같은 세션으로 복구해 보내기 ↵'}</button>`
+      : mode === 'handoff' ? `<button type="submit" ${canSend ? '' : 'disabled'}>${sending ? '이어받는 중…' : '관리 터미널로 이어받아 보내기 ↵'}</button>`
+        : mode === 'origin-resume' ? `${originAction}<button type="submit" ${canSend ? '' : 'disabled'}>${sending ? '연결하는 중…' : '백그라운드 터미널로 이어서 보내기 ↵'}</button>`
+          : mode === 'connect' ? `<button type="button" data-agent-bridge-copy="${esc(session.provider)}">연결 명령 복사</button>`
+            : mode === 'origin' ? originAction : '';
+  const editable = mode === 'direct' || mode === 'resume' || mode === 'handoff' || mode === 'origin-resume';
+  const placeholder = editable ? '예: 이전 작업에 이어서 테스트를 실행하고 결과를 알려줘' : status;
+  return `<form class="agent-command-panel ${mode === 'direct' ? 'connected' : (mode === 'resume' || mode === 'handoff' || mode === 'origin-resume' ? 'resume-ready' : 'unavailable')} control-${mode}" data-agent-command-form="${esc(session.id)}">
     <header><span class="agent-command-icon" aria-hidden="true">›_</span><span><b>이 AI에게 바로 지시하기</b><small>${esc(status)}</small></span><i class="${mode === 'direct' ? 'connected' : ''}" aria-hidden="true"></i></header>
     ${picker}
-    <label class="agent-command-input"><span class="sr-only">AI에게 보낼 터미널 지시</span><textarea data-agent-command-draft="${esc(session.id)}" maxlength="8000" rows="3" placeholder="${esc(placeholder)}" ${mode === 'direct' ? '' : 'disabled'}>${mode === 'direct' ? esc(draft) : ''}</textarea></label>
+    <label class="agent-command-input"><span class="sr-only">AI에게 보낼 터미널 지시</span><textarea data-agent-command-draft="${esc(session.id)}" maxlength="8000" rows="3" placeholder="${esc(placeholder)}" ${editable ? '' : 'disabled'}>${editable ? esc(draft) : ''}</textarea></label>
     <div class="agent-command-actions"><small aria-live="polite">${esc(help)}</small>${actions}</div>
   </form>`;
 }
@@ -525,20 +828,28 @@ function agentCommandComposer(session) {
 function focusedGraph(focus, model, motionKind = 'refresh') {
   const parent = focus.parentId ? model.byId.get(focus.parentId) : null;
   const children = graphChildren(focus, model);
+  const { ongoing, completed } = splitSubagents(children);
+  const completedExpanded = state.expandedCompletedSubagents.has(focus.id);
+  const shownChildren = completedExpanded ? [...ongoing, ...completed] : ongoing;
+  const metrics = workflowMetrics(focus, children);
   const upstream = parent
     ? workflowCompactNode(parent, model, 'upstream', parent.parentId ? '이전 AI로 돌아가기' : '메인 AI로 돌아가기')
     : `<div class="agent-workflow-origin"><span class="workflow-origin-icon">◎</span><span><b>사용자 요청</b><small>이 작업이 시작된 곳</small></span><span class="agent-workflow-port output" data-workflow-port="upstream-output" aria-hidden="true"></span></div>`;
-  const downstream = children.length
-    ? children.map(child => workflowCompactNode(child, model, 'downstream', agentRoleLabel(child.agentRole))).join('')
-    : '<div class="agent-workflow-empty">아직 다른 AI에게 나눠 맡긴 일이 없습니다.</div>';
+  const ongoingRows = ongoing.length
+    ? ongoing.map(child => workflowCompactNode(child, model, 'downstream', agentRoleLabel(child.agentRole))).join('')
+    : (children.length ? '<div class="agent-workflow-empty current-clear"><b>현재 작업 중인 서브에이전트가 없습니다</b><span>완료된 기록은 아래에서 필요할 때만 펼쳐볼 수 있습니다.</span></div>' : '<div class="agent-workflow-empty">아직 다른 AI에게 나눠 맡긴 일이 없습니다.</div>');
+  const completedRows = completedExpanded
+    ? `<div class="completed-subagent-list" data-completed-subagent-list>${completed.map(child => workflowCompactNode(child, model, 'downstream', agentRoleLabel(child.agentRole))).join('')}</div>` : '';
+  const downstream = `${ongoingRows}${completedSubagentDisclosure(focus.id, completed, completedExpanded)}${completedRows}`;
   const connectMotion = ['focus', 'focus-back', 'view'].includes(motionKind) ? 'motion-connect' : '';
   return `<div class="agent-workflow-canvas ${connectMotion}" data-workflow-focus="${esc(focus.id)}">
     <svg class="agent-workflow-edges" role="img" aria-label="일을 맡긴 AI에서 선택한 AI를 거쳐 도움 AI로 이어지는 연결"><title>AI 작업 연결</title><desc>왼쪽은 일을 맡긴 곳, 가운데는 선택한 AI, 오른쪽은 나눠 맡긴 AI입니다.</desc><defs><marker id="workflowArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,4 L0,8 Z" fill="context-stroke"></path></marker></defs><g data-workflow-paths></g></svg>
     <div class="agent-workflow-grid">
       <section class="agent-workflow-column upstream-column"><header><b>${parent ? '이 일을 맡긴 AI' : '작업 시작점'}</b><span>${parent ? '왼쪽을 눌러 이전으로 돌아가요' : '사용자가 처음 맡긴 일'}</span></header><div class="agent-workflow-stack">${upstream}</div></section>
-      <section class="agent-workflow-column selected-column"><header><b>지금 선택한 AI</b><span>${focus.parentId ? '도움을 나눠 맡은 AI' : '전체 일을 맡은 메인 AI'}</span></header><div class="agent-workflow-selected-stack"><div class="agent-workflow-selected"><span class="agent-workflow-port input" data-workflow-port="focus-input" aria-hidden="true"></span>${graphNode(focus, { focus: true })}<span class="agent-workflow-port output" data-workflow-port="focus-output" aria-hidden="true"></span></div>${agentCommandComposer(focus)}</div></section>
-      <section class="agent-workflow-column downstream-column"><header><b>이 AI가 나눠 맡긴 일</b><span>${children.length}개 · 오른쪽으로 이어져요</span></header><div class="agent-workflow-stack downstream-stack">${downstream}</div></section>
+      <section class="agent-workflow-column selected-column"><header><b>지금 선택한 AI</b><span>${focus.parentId ? '도움을 나눠 맡은 AI' : '전체 일을 맡은 메인 AI'}</span></header><div class="agent-workflow-selected-stack"><div class="agent-workflow-selected"><span class="agent-workflow-port input" data-workflow-port="focus-input" aria-hidden="true"></span>${graphNode(focus, { focus: true })}${shownChildren.length ? '<span class="agent-workflow-port output" data-workflow-port="focus-output" aria-hidden="true"></span>' : ''}</div>${agentCommandComposer(focus)}</div></section>
+      <section class="agent-workflow-column downstream-column" data-workflow-child-count="${children.length}" data-workflow-visible-child-count="${shownChildren.length}">${shownChildren.length ? '<span class="agent-workflow-port input group-input" data-workflow-port="children-group-input" aria-hidden="true"></span>' : ''}<header><b>서브에이전트 세션</b><span>진행·대기 ${ongoing.length}개 바로 표시 · 완료 ${completed.length}개 기본 숨김</span></header>${workflowChildrenSummary(focus, children)}<div class="agent-workflow-stack downstream-stack ${shownChildren.length > 3 ? 'density-many' : ''}">${downstream}</div></section>
     </div>
+    ${workflowCommunicationPanel(focus, parent, model)}
   </div>`;
 }
 
@@ -567,12 +878,14 @@ function drawAgentWorkflowConnections() {
   const upstream = canvas.querySelector('[data-workflow-port="upstream-output"]');
   const focusInput = canvas.querySelector('[data-workflow-port="focus-input"]');
   const focusOutput = canvas.querySelector('[data-workflow-port="focus-output"]');
-  if (!svg || !paths || !upstream || !focusInput || !focusOutput) return;
+  const childrenGroupInput = canvas.querySelector('[data-workflow-port="children-group-input"]');
+  if (!svg || !paths || !upstream || !focusInput) return;
   const rect = canvas.getBoundingClientRect();
   svg.setAttribute('viewBox', `0 0 ${Math.max(1, rect.width)} ${Math.max(1, rect.height)}`);
-  const edges = [{ from: upstream, to: focusInput, tone: 'upstream' }];
-  canvas.querySelectorAll('[data-workflow-port^="child-input:"]').forEach(port => edges.push({ from: focusOutput, to: port, tone: 'downstream' }));
-  paths.innerHTML = edges.map(edge => `<path class="agent-workflow-edge ${edge.tone}" pathLength="1" d="${workflowCurve(workflowPortPoint(edge.from, rect), workflowPortPoint(edge.to, rect))}" marker-end="url(#workflowArrow)"></path>`).join('');
+  const upstreamPath = `<path class="agent-workflow-edge upstream branch" data-workflow-edge-kind="upstream" pathLength="1" d="${workflowCurve(workflowPortPoint(upstream, rect), workflowPortPoint(focusInput, rect))}" marker-end="url(#workflowArrow)"></path>`;
+  const downstreamPath = focusOutput && childrenGroupInput
+    ? `<path class="agent-workflow-edge downstream group" data-workflow-edge-kind="children-group" pathLength="1" d="${workflowCurve(workflowPortPoint(focusOutput, rect), workflowPortPoint(childrenGroupInput, rect))}" marker-end="url(#workflowArrow)"></path>` : '';
+  paths.innerHTML = `${upstreamPath}${downstreamPath}`;
 }
 
 function scheduleAgentWorkflowConnections() {
@@ -600,13 +913,13 @@ function renderAgentMap(sessions, motionKind = 'refresh') {
     $('#graphResetBtn').classList.remove('hidden');
     scheduleAgentWorkflowConnections();
   } else {
-    const providerOrder = [...new Set([...state.providers.map(item => item.id), ...roots.map(item => item.provider)])];
-    const lanes = providerOrder.map(providerId => ({ providerId, roots: roots.filter(root => root.provider === providerId) })).filter(item => item.roots.length);
-    $('#liveSessionGrid').innerHTML = `<div class="agent-flow-overview">${lanes.map(item => providerFlowLane(item.providerId, item.roots, model)).join('')}</div>`;
-    $('#graphBreadcrumbs').innerHTML = `<span class="map-hint"><b>${roots.length}</b>개 큰 일 · <b>${model.nodes.filter(item => item.parentId).length}</b>개 도움 AI · AI별 최근 6개씩 보여주는 중</span>`;
+    const tmuxEntries = liveTmuxEntries();
+    const standardRoots = roots.filter(root => agentExecutionMode(root).kind !== 'tmux');
+    $('#liveSessionGrid').innerHTML = runtimeSeparatedOverview(roots, model);
+    $('#graphBreadcrumbs').innerHTML = `<span class="map-hint">일반 실행 <b>${standardRoots.length}</b>개 · TMUX AI <b>${tmuxEntries.length}</b>개 · <b>${model.nodes.filter(item => item.parentId).length}</b>개 도움 AI</span>`;
     $('#graphResetBtn').classList.add('hidden');
   }
-  return model.nodes.filter(isLiveSession).length;
+  return model.nodes.filter(isLiveSession).length + liveTmuxEntries().filter(entry => !entry.agent.linkedSessionId).length;
 }
 
 function tmuxEntities(tmux) {
@@ -744,10 +1057,11 @@ function sessionCard(session, opts = {}) {
   const gaugeTone = contextPercent >= 90 ? 'critical' : (contextPercent >= 75 ? 'warning' : 'safe');
   const conversation = recentConversation(session);
   const runtime = session.runtimePresence || [];
-  return `<article class="session-card ${opts.live ? 'live-card' : ''} ${statusClass(session.status)} ${session.parentId ? 'subagent' : ''}" data-session-id="${esc(session.id)}" data-motion-key="session:${esc(session.id)}" data-motion-value="${esc(session.updatedAt || '')}:${usage.total || 0}:${esc(session.status || '')}" style="${providerStyle(session.provider)}">
+  return `<article class="session-card ${opts.live ? 'live-card' : ''} ${statusClass(session.status)} ${session.parentId ? 'subagent' : ''}" data-session-id="${esc(session.id)}" data-motion-key="session:${esc(session.id)}" data-motion-value="${esc(session.updatedAt || '')}:${usage.total || 0}:${esc(session.status || '')}" style="${providerStyle(session.provider)}" role="button" tabindex="0" aria-label="${esc(session.title)} 작업 상세 보기">
     <div class="card-head">
       <span class="provider-mark">${esc(provider.mark)}</span>
       <div class="card-head-main"><div class="card-provider-line"><b>${esc(provider.label)}</b><span>${esc(provider.company)}</span></div></div>
+      ${executionModeBadge(session, true)}
       <span class="status-pill ${statusClass(session.status)}">${esc(STATUS[session.status] || session.status)}</span>
     </div>
     <h3 class="card-title" title="${esc(session.title)}">${esc(session.title)}</h3>
@@ -769,7 +1083,7 @@ function sessionCard(session, opts = {}) {
     <div class="token-row">
       <div><span>받은 글</span><b>${compact(usage.input)}</b></div><div><span>AI가 쓴 글</span><b>${compact(usage.output)}</b></div><div><span>다시 쓴 기억</span><b>${compact(usage.cachedInput)}</b></div><div class="total"><span>전체 사용</span><b>${compact(usage.total)}</b></div>
     </div>
-    ${children.length ? `<div class="child-row"><b>⑂</b><span>도움 AI ${children.length}명과 함께 일함</span><span class="child-dots">${children.slice(0, 4).map(() => '<i></i>').join('')}</span></div>` : ''}
+    ${children.length ? `<div class="child-row"><b>⑂</b><span>서브에이전트 ${children.length}개 누적 생성</span><span class="child-dots">${children.slice(0, 4).map(() => '<i></i>').join('')}</span></div>` : ''}
     <footer class="card-footer"><span class="source-tag">${esc(session.sourceLabel || '내 PC의 작업 기록')}</span><span>${esc(timeAgo(session.updatedAt))}</span></footer>
   </article>`;
 }
@@ -783,7 +1097,7 @@ function renderSessions(motionKind = 'refresh', deferMotion = false) {
   $('#globalStats').classList.toggle('hidden', tmuxView || terminalView);
   $('#providerOverview').classList.toggle('hidden', tmuxView || terminalView);
   $('#sessionSection').classList.toggle('hidden', tmuxView || terminalView);
-  $('#beginnerGuide').classList.toggle('hidden', tmuxView || terminalView);
+  $('#beginnerGuide').classList.toggle('hidden', tmuxView || terminalView || Boolean(state.graphFocusId));
   if (terminalView) {
     $('#liveSection').classList.add('hidden');
     if (window.LoadToAgentTerminal) window.LoadToAgentTerminal.activate(state.snapshot, state.workspaces, 'general');
@@ -845,9 +1159,41 @@ function chosenAgentCommandTarget(session) {
   return targets.length === 1 ? targets[0] : null;
 }
 
+async function resumeAgentTerminal(sessionId, sendDraft = false) {
+  if (state.agentCommandSending.has(sessionId)) return;
+  const session = snapshotSession(sessionId) || state.details.get(sessionId);
+  if (!session || !window.LoadToAgentTerminal) return toast('다시 연결할 AI 세션 정보를 찾지 못했습니다.');
+  const support = agentResumeSupport(session);
+  if (!support.supported) return toast(support.reason || '이 AI 세션은 터미널에서 다시 연결할 수 없습니다.');
+  state.agentCommandSending.add(sessionId);
+  try {
+    if ($('#detailDrawer').classList.contains('open')) closeDrawer();
+    state.view = 'terminal';
+    $$('.nav-item').forEach(item => item.classList.toggle('active', item.dataset.view === 'terminal'));
+    renderSessions('view');
+    const draft = state.agentCommandDrafts.get(sessionId) || '';
+    await window.LoadToAgentTerminal.resumeForAgent(session, draft, sendDraft);
+    if (sendDraft && draft.trim()) state.agentCommandDrafts.delete(sessionId);
+    document.querySelector('.main-stage')?.scrollTo({ top: 0, behavior: 'auto' });
+    toast(`${providerInfo(session.provider).label}의 기존 세션을 터미널에 다시 연결했습니다.`);
+  } catch (error) {
+    toast(error && error.message || 'AI 세션을 다시 연결하지 못했습니다.');
+  } finally {
+    state.agentCommandSending.delete(sessionId);
+  }
+}
+
 async function dispatchAgentCommand(sessionId, form) {
+  if (state.agentCommandSending.has(sessionId)) return;
   const session = snapshotSession(sessionId);
   if (!session || !window.LoadToAgentTerminal) return toast('선택한 AI의 최신 정보를 찾지 못했습니다.');
+  const mode = agentControlMode(session, agentCommandTargets(session));
+  if (mode === 'resume' || mode === 'handoff' || mode === 'origin-resume') {
+    const input = form.querySelector('[data-agent-command-draft]');
+    if (input) state.agentCommandDrafts.set(sessionId, input.value);
+    if (!String(input && input.value || '').trim()) return toast('AI에게 보낼 지시를 입력하세요.');
+    return resumeAgentTerminal(sessionId, true);
+  }
   const target = chosenAgentCommandTarget(session);
   const input = form.querySelector('[data-agent-command-draft]');
   const command = String(input && input.value || '').trim();
@@ -862,7 +1208,20 @@ async function dispatchAgentCommand(sessionId, form) {
     if (input) input.value = '';
     toast(`${target.label}에 지시를 보냈습니다.`);
   } catch (error) {
-    toast(error && error.message || '터미널에 지시를 보내지 못했습니다.');
+    const latest = snapshotSession(sessionId) || session;
+    const support = agentResumeSupport(latest);
+    if (!agentCommandTargets(latest).length && support.supported) {
+      try {
+        state.agentCommandDrafts.set(sessionId, command);
+        await window.LoadToAgentTerminal.resumeForAgent(latest, command, true);
+        state.agentCommandDrafts.delete(sessionId);
+        if (input) input.value = '';
+        toast('원래 터미널 연결이 종료되어 같은 AI 세션으로 복구한 뒤 지시를 보냈습니다.');
+        return;
+      } catch (resumeError) {
+        toast(resumeError && resumeError.message || '터미널 연결이 끊어졌고 세션 복구에도 실패했습니다.');
+      }
+    } else toast(error && error.message || '터미널에 지시를 보내지 못했습니다.');
   } finally {
     state.agentCommandSending.delete(sessionId);
     if (submit && submit.isConnected) { submit.disabled = false; submit.textContent = '바로 보내기 ↵'; }
@@ -879,7 +1238,7 @@ async function openAgentTerminal(sessionId) {
   renderSessions('view');
   try {
     await window.LoadToAgentTerminal.openForAgent(session, target.id, state.agentCommandDrafts.get(sessionId) || '');
-    $('#terminalCommandInput')?.scrollIntoView({ behavior: motionPreference.matches ? 'auto' : 'smooth', block: 'center' });
+    document.querySelector('.main-stage')?.scrollTo({ top: 0, behavior: 'auto' });
   } catch (error) {
     toast(error && error.message || 'AI의 터미널을 열지 못했습니다.');
   }
@@ -899,26 +1258,31 @@ async function copyBridgeCommand(provider) {
 
 async function openSessionOrigin(sessionId) {
   const session = snapshotSession(sessionId);
-  if (!session) return toast('원래 Codex 작업 정보를 찾지 못했습니다.');
+  const origin = originAppInfo(session);
+  if (!session || !origin) return toast('원래 데스크톱 작업 정보를 찾지 못했습니다.');
   try {
     const result = await window.loadtoagent.openSessionOrigin(session);
-    if (!result || !result.ok) return toast('이 작업은 Codex 앱에서 직접 열 수 없습니다.');
-    toast('원래 Codex 작업을 열었습니다.');
+    if (!result || !result.ok) return toast(`이 작업은 ${origin.label}에서 직접 열 수 없습니다.`);
+    toast(`원래 ${origin.provider} 작업을 열었습니다.`);
   } catch (error) {
-    toast(error && error.message || 'Codex 앱을 열지 못했습니다.');
+    toast(error && error.message || `${origin.label}을 열지 못했습니다.`);
   }
 }
 
 async function loadSessionDetail(id, force = false) {
   if (!force && state.details.has(id)) return state.details.get(id);
-  state.detailLoading = true;
+  state.detailErrors.delete(id);
+  state.detailLoadingIds.add(id);
   renderDrawer();
   try {
     const detail = await window.loadtoagent.sessionDetail(id);
     if (detail) state.details.set(id, detail);
     return detail;
+  } catch (error) {
+    state.detailErrors.set(id, error && error.message || '작업 기록을 불러오지 못했습니다.');
+    return null;
   } finally {
-    state.detailLoading = false;
+    state.detailLoadingIds.delete(id);
     if (state.selectedId === id) {
       state.drawerForceLatest = state.drawerTab === 'chat';
       renderDrawer();
@@ -928,6 +1292,7 @@ async function loadSessionDetail(id, force = false) {
 
 function openDrawer(id) {
   state.selectedId = id;
+  state.drawerMode = 'session';
   state.drawerTab = 'chat';
   state.drawerForceLatest = true;
   clearTimeout(motionState.drawerTimer);
@@ -937,6 +1302,31 @@ function openDrawer(id) {
   $('#detailDrawer').setAttribute('aria-hidden', 'false');
   renderDrawer();
   loadSessionDetail(id, true);
+}
+
+async function loadSubagentParentDetail(child) {
+  if (!child || !child.parentId || state.details.has(child.parentId)) return;
+  try {
+    const detail = await window.loadtoagent.sessionDetail(child.parentId);
+    if (detail) state.details.set(child.parentId, detail);
+    if (state.drawerMode === 'subagent' && state.selectedId === child.id) renderDrawer();
+  } catch {}
+}
+
+function openSubagentConversation(id) {
+  const child = snapshotSession(id) || state.details.get(id);
+  if (!child || !child.parentId) return openDrawer(id);
+  state.selectedId = id;
+  state.drawerMode = 'subagent';
+  state.drawerTab = 'chat';
+  state.drawerForceLatest = true;
+  clearTimeout(motionState.drawerTimer);
+  $('#drawerBackdrop').classList.remove('hidden');
+  $('#drawerBackdrop').classList.remove('closing');
+  $('#detailDrawer').classList.add('open');
+  $('#detailDrawer').setAttribute('aria-hidden', 'false');
+  renderDrawer();
+  loadSubagentParentDetail(child);
 }
 
 function closeDrawer() {
@@ -954,12 +1344,21 @@ function closeDrawer() {
 function chatHtml(session) {
   const messages = session.messages || [];
   if (!messages.length) return '<div class="empty-state"><h3>표시할 대화가 없습니다</h3></div>';
-  return `<div class="chat-history-head"><span>시간순 대화 · ${messages.length}개</span><button type="button" data-scroll-latest>가장 최근 대화 ↓</button></div><div class="chat-list">${messages.map(message => {
+  const conversation = messages.filter(message => message.role === 'user' || message.role === 'assistant');
+  const activities = messages.filter(message => message.role !== 'user' && message.role !== 'assistant');
+  const omitted = Number(session.omittedMessages || 0);
+  const notice = omitted || session.truncated ? `<div class="chat-truncated">이 작업의 최근 기록을 표시합니다${omitted ? ` · 이전 ${omitted.toLocaleString('ko-KR')}개 메시지 생략` : ''}</div>` : '';
+  const statusLabel = value => ({ started: '실행 중', running: '실행 중', done: '완료', completed: '완료', failed: '실패' }[value] || value || '');
+  const rows = conversation.map(message => {
     const role = message.role === 'assistant' ? 'assistant' : (message.role === 'tool' ? 'tool' : (message.role === 'system' ? 'system' : 'user'));
     const label = role === 'assistant' ? providerInfo(session.provider).label : (role === 'tool' ? (message.title || '도구') : (message.role === 'system' ? '시스템' : '사용자'));
     const avatar = role === 'assistant' ? providerInfo(session.provider).mark : (role === 'tool' ? '⌘' : (role === 'system' ? 'i' : 'ME'));
-    return `<div class="chat-row ${role}" data-message-id="${esc(message.id || '')}"><span class="chat-avatar">${esc(avatar)}</span><div class="chat-bubble"><div class="chat-bubble-head"><b>${esc(label)}</b><span>${esc(timeOnly(message.timestamp))}</span>${message.status ? `<span>${esc(message.status)}</span>` : ''}</div>${messageContentHtml(message)}</div></div>`;
-  }).join('')}<div class="chat-latest-anchor" aria-label="가장 최근 대화"></div></div>`;
+    const fullTime = new Date(message.timestamp).toLocaleString('ko-KR');
+    return `<div class="chat-row ${role}" data-message-id="${esc(message.id || '')}"><span class="chat-avatar">${esc(avatar)}</span><div class="chat-bubble"><div class="chat-bubble-head"><b>${esc(label)}</b><span title="${esc(fullTime)}">${esc(timeOnly(message.timestamp))}</span>${message.status ? `<span>${esc(statusLabel(message.status))}</span>` : ''}</div>${messageContentHtml(message)}</div></div>`;
+  }).join('');
+  const activityHtml = activities.length ? `<details class="chat-activities"><summary>도구·시스템 활동 ${activities.length}건 보기</summary><div>${activities.map(message => `<article><header><b>${esc(message.title || (message.role === 'tool' ? '도구 실행' : '시스템'))}</b><span>${esc(statusLabel(message.status))} · ${esc(timeOnly(message.timestamp))}</span></header>${messageContentHtml(message)}</article>`).join('')}</div></details>` : '';
+  const emptyConversation = conversation.length ? '' : '<div class="empty-state compact"><h3>사용자와 AI의 대화는 아직 없습니다</h3></div>';
+  return `${notice}<div class="chat-history-head"><span>대화 ${conversation.length}개${activities.length ? ` · 활동 ${activities.length}건` : ''}</span><button type="button" data-scroll-latest>가장 최근 대화 ↓</button></div><div class="chat-list">${rows}${emptyConversation}${activityHtml}<div class="chat-latest-anchor" aria-label="가장 최근 대화"></div></div>`;
 }
 
 function lifecycleHtml(session) {
@@ -990,33 +1389,108 @@ function tokensHtml(session) {
   </div><div class="token-note">${esc(sourceLabel)}입니다. 토큰은 AI가 글을 읽고 쓰는 양을 세는 단위이고, 기억 공간은 AI가 한 번에 기억할 수 있는 양입니다.</div>`;
 }
 
+function subagentCommunicationEvents(session) {
+  if (!session || !session.parentId) return [];
+  const parent = state.details.get(session.parentId) || snapshotSession(session.parentId);
+  const all = parent && parent.collaboration && parent.collaboration.communications || [];
+  const taskName = session.taskName || session.delegation && session.delegation.taskName || agentPathTaskName(session.agentPath);
+  return all.filter(event => ['assignment', 'started', 'followup', 'message', 'result', 'interrupt'].includes(event.kind))
+    .filter(event => event.childId === session.id || (taskName && event.taskName === taskName));
+}
+
+function subagentTextPreview(value, maxCharacters = 360) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (text.length <= maxCharacters) return { text, truncated: false };
+  return { text: `${text.slice(0, maxCharacters).trimEnd()}…`, truncated: true };
+}
+
+function subagentConversationHtml(session) {
+  const events = subagentCommunicationEvents(session);
+  const taskName = session.taskName || session.delegation && session.delegation.taskName || session.title;
+  const childPath = String(session.agentPath || '');
+  const endpointIsChild = value => {
+    const endpoint = String(value || '');
+    return endpoint === childPath || endpoint === session.id || agentPathTaskName(endpoint) === taskName;
+  };
+  const enriched = events.map(event => ({ ...event, fromChild: event.kind === 'result' || endpointIsChild(event.from) }));
+  const received = enriched.filter(event => !event.fromChild && event.kind !== 'started').length;
+  const answered = enriched.filter(event => event.fromChild).length;
+  if (!events.length) return '<div class="empty-state"><h3>메인 AI와 주고받은 기록이 없습니다</h3><p>세션 로그에서 배정·추가 지시·결과 반환 이벤트를 찾지 못했습니다.</p></div>';
+  const provider = providerInfo(session.provider);
+  const rows = enriched.map(event => {
+    const runtime = event.kind === 'started';
+    const role = runtime ? 'system' : (event.fromChild ? 'assistant' : 'user');
+    const label = runtime ? '실행 상태' : (event.fromChild ? `서브 AI · ${session.agentName || taskName}` : '메인 AI');
+    const avatar = runtime ? '↗' : (event.fromChild ? provider.mark : 'M');
+    const route = runtime ? '런타임 → 서브 AI' : (event.fromChild ? '서브 AI → 메인 AI' : '메인 AI → 서브 AI');
+    const text = event.text || (event.protected
+      ? `${taskName || '이 작업'}을 서브에이전트에게 배정했습니다.`
+      : (runtime ? '서브에이전트 실행이 시작되었습니다.' : '내용 없이 통신 상태만 기록되었습니다.'));
+    const preview = subagentTextPreview(text);
+    const eventLabel = `${event.label || event.kind}${event.assignmentSource === 'parent-narration' ? ' · 작업 시작 직전 메인 AI 설명' : ''}`;
+    return `<div class="chat-row ${role} subagent-dialog-row" data-subagent-communication="${esc(event.kind)}">
+      <span class="chat-avatar">${esc(avatar)}</span><div class="chat-bubble"><div class="chat-bubble-head"><b>${esc(label)}</b><span class="subagent-route">${esc(route)}</span><span>${esc(timeOnly(event.timestamp))}</span></div><small class="subagent-event-label">${esc(eventLabel)}</small><div class="chat-content subagent-message-preview${preview.truncated ? ' is-truncated' : ''}" data-subagent-message-preview data-truncated="${preview.truncated ? 'true' : 'false'}"><p>${esc(preview.text)}</p></div></div>
+    </div>`;
+  }).join('');
+  return `<div class="subagent-conversation-summary" data-subagent-dialog-count="${events.length}"><span><small>받은 지시·응답</small><b>${received}</b>건</span><span><small>메인에 보낸 답변</small><b>${answered}</b>건</span><span><small>전체 소통</small><b>${events.length}</b>건</span></div>
+    <div class="chat-history-head"><span><b>${esc(taskName)}</b>와 메인 AI가 주고받은 내용만 표시</span><button type="button" data-scroll-latest>가장 최근 대화 ↓</button></div>
+    <div class="chat-list subagent-dialog-list">${rows}<div class="chat-latest-anchor" aria-label="가장 최근 대화"></div></div>`;
+}
+
 function renderDrawer() {
   const session = selectedSession();
   if (!session) return closeDrawer();
   const provider = providerInfo(session.provider);
+  const subagentMode = state.drawerMode === 'subagent' && Boolean(session.parentId);
+  const detailLoading = !subagentMode && state.detailLoadingIds.has(state.selectedId);
   $('#detailDrawer').style.setProperty('--drawer-provider', provider.accent);
   $('#drawerProviderMark').style.setProperty('--provider', provider.accent);
   $('#drawerProviderMark').textContent = provider.mark;
-  $('#drawerProvider').textContent = `${provider.company} · ${STATUS[session.status] || session.status}`;
-  $('#drawerTitle').textContent = session.title;
-  const stop = session.runId && (session.status === 'running' || session.status === 'starting') ? `<button class="meta-chip stop-run" data-stop-run="${esc(session.runId)}">■ 실행 중지</button>` : '';
+  $('#drawerProvider').textContent = subagentMode ? `${session.agentName || provider.label} · 메인 AI와의 소통` : `${provider.company} · ${STATUS[session.status] || session.status}`;
+  $('#drawerTitle').textContent = subagentMode ? (session.taskName || session.delegation && session.delegation.taskName || session.title) : session.title;
+  const stopping = session.runId && state.stopRequests.has(session.runId);
+  const stop = session.runId && (session.status === 'running' || session.status === 'starting') ? `<button class="meta-chip stop-run" data-stop-run="${esc(session.runId)}" ${stopping ? 'disabled aria-busy="true"' : ''}>${stopping ? '중지 요청 중…' : '■ 실행 중지'}</button>` : '';
   const runtime = session.runtimePresence || [];
-  $('#drawerMeta').innerHTML = `<span class="meta-chip">사용 모델 <b>${esc(session.model || '정보 없음')}</b></span><span class="meta-chip">작업 폴더 <b title="${esc(session.cwd)}">${esc(session.workspace || session.cwd || '알 수 없음')}</b></span><span class="meta-chip">작업 번호 <b>${esc(session.externalId.slice(0, 12))}</b></span>${session.parentId ? '<span class="meta-chip">⑂ <b>도움을 맡은 AI</b></span>' : ''}${runtime.length ? `<span class="meta-chip runtime-meta">● <b>실행 중인 프로그램 ${runtime.length}개</b></span>` : ''}${stop}`;
-  $$('.drawer-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === state.drawerTab));
+  const resume = !isLiveSession(session) && agentResumeSupport(session).supported
+    ? `<button class="meta-chip resume-agent" data-resume-agent="${esc(session.id)}">▶ <b>${originAppInfo(session) ? '백그라운드 터미널로 이어가기' : '터미널로 다시 일 시키기'}</b></button>` : '';
+  const communicationCount = subagentMode ? subagentCommunicationEvents(session).length : 0;
+  $('#drawerMeta').innerHTML = subagentMode
+    ? `<span class="meta-chip work-state ${subagentWorkState(session)}"><b>${esc(subagentWorkLabel(session))}</b></span><span class="meta-chip">사용 모델 <b>${esc(session.model || '정보 없음')}</b></span><span class="meta-chip">메인과 소통 <b>${communicationCount}건</b></span>${resume}`
+    : `<span class="meta-chip">사용 모델 <b>${esc(session.model || '정보 없음')}</b></span><span class="meta-chip">작업 폴더 <b title="${esc(session.cwd)}">${esc(session.workspace || session.cwd || '알 수 없음')}</b></span><span class="meta-chip">작업 번호 <b>${esc(String(session.externalId || '').slice(0, 12) || '정보 없음')}</b></span>${session.parentId ? '<span class="meta-chip">⑂ <b>도움을 맡은 AI</b></span>' : ''}${runtime.length ? `<span class="meta-chip runtime-meta">● <b>실행 중인 프로그램 ${runtime.length}개</b></span>` : ''}${resume}${stop}`;
+  $$('.drawer-tab').forEach(tab => {
+    const hidden = subagentMode && tab.dataset.tab !== 'chat';
+    tab.classList.toggle('hidden', hidden);
+    if (tab.dataset.tab === 'chat') tab.textContent = subagentMode ? '메인과의 대화' : '대화 내용';
+    const active = tab.dataset.tab === state.drawerTab;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    tab.tabIndex = active ? 0 : -1;
+  });
   const content = $('#drawerContent');
   const previousTop = content.scrollTop;
   const wasNearBottom = content.scrollHeight - content.scrollTop - content.clientHeight < 90;
-  const renderKey = `${state.selectedId}:${state.drawerTab}:${state.detailLoading ? 'loading' : 'ready'}`;
+  const renderKey = `${state.drawerMode}:${state.selectedId}:${state.drawerTab}:${detailLoading ? 'loading' : 'ready'}`;
   const shouldAnimateContent = motionState.drawerRenderKey !== renderKey;
   motionState.drawerRenderKey = renderKey;
-  content.innerHTML = state.detailLoading
+  const detailError = state.detailErrors.get(state.selectedId);
+  content.innerHTML = detailLoading
     ? '<div class="drawer-loading"><span></span><b>전체 작업 기록을 불러오는 중</b><small>잠시만 기다리면 대화와 진행 과정을 볼 수 있어요.</small></div>'
-    : (state.drawerTab === 'chat' ? chatHtml(session) : (state.drawerTab === 'lifecycle' ? lifecycleHtml(session) : tokensHtml(session)));
+    : (detailError && !subagentMode ? `<div class="drawer-error"><b>작업 기록을 불러오지 못했습니다</b><span>${esc(detailError)}</span><button type="button" data-retry-detail="${esc(state.selectedId)}">다시 시도</button></div>` : (subagentMode ? subagentConversationHtml(session) : (state.drawerTab === 'chat' ? chatHtml(session) : (state.drawerTab === 'lifecycle' ? lifecycleHtml(session) : tokensHtml(session)))));
   content.classList.toggle('motion-content-in', shouldAnimateContent && !motionPreference.matches);
   clearTimeout(motionState.drawerContentTimer);
   if (shouldAnimateContent) motionState.drawerContentTimer = setTimeout(() => content.classList.remove('motion-content-in'), motionPreference.matches ? 0 : 520);
-  if (!state.detailLoading) requestAnimationFrame(() => {
-    if (state.drawerTab === 'chat' && (state.drawerForceLatest || wasNearBottom)) content.scrollTop = content.scrollHeight;
+  if (!detailLoading) requestAnimationFrame(() => {
+    const forceLatest = state.drawerForceLatest;
+    if (state.drawerTab === 'chat' && forceLatest) {
+      const rows = [...content.querySelectorAll('.chat-row')];
+      const latest = rows[rows.length - 1];
+      if (latest && latest.offsetHeight > content.clientHeight - 90) {
+        const contentTop = content.getBoundingClientRect().top;
+        const stickyHeight = content.querySelector('.chat-history-head')?.getBoundingClientRect().height || 0;
+        content.scrollTop = Math.max(0, content.scrollTop + latest.getBoundingClientRect().top - contentTop - stickyHeight - 12);
+      } else content.scrollTop = content.scrollHeight;
+    }
+    else if (state.drawerTab === 'chat' && wasNearBottom) content.scrollTop = content.scrollHeight;
     else content.scrollTop = Math.min(previousTop, Math.max(0, content.scrollHeight - content.clientHeight));
     state.drawerForceLatest = false;
   });
@@ -1098,6 +1572,7 @@ function bindEvents() {
     state.visibleLimit = 30;
     $$('.nav-item').forEach(item => item.classList.toggle('active', item === button));
     renderSessions('view');
+    document.querySelector('.main-stage')?.scrollTo({ top: 0, behavior: 'auto' });
   });
   $('#providerOverview').addEventListener('click', event => {
     const card = event.target.closest('[data-provider-card]');
@@ -1111,7 +1586,22 @@ function bindEvents() {
     const card = event.target.closest('[data-session-id]');
     if (card) openDrawer(card.dataset.sessionId);
   });
+  $('#sessionGrid').addEventListener('keydown', event => {
+    const card = event.target.closest('[data-session-id]');
+    if (card && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openDrawer(card.dataset.sessionId); }
+  });
   $('#liveSessionGrid').addEventListener('click', event => {
+    const tmuxPane = event.target.closest('.live-tmux-pane[data-tmux-type="pane"][data-tmux-id]');
+    const tmuxOverview = event.target.closest('.live-tmux-overview-open');
+    if (tmuxPane || tmuxOverview) {
+      event.stopPropagation();
+      state.view = 'tmux';
+      if (tmuxPane) state.tmuxFocus = { type: 'pane', id: tmuxPane.dataset.tmuxId };
+      $$('.nav-item').forEach(item => item.classList.toggle('active', item.dataset.view === 'tmux'));
+      renderSessions('view');
+      if (tmuxPane) window.LoadToAgentTerminal?.selectTmuxById(tmuxPane.dataset.tmuxId);
+      return;
+    }
     const bridge = event.target.closest('[data-agent-bridge-copy]');
     if (bridge) {
       event.stopPropagation();
@@ -1130,6 +1620,14 @@ function bindEvents() {
       openAgentTerminal(terminal.dataset.agentTerminalOpen);
       return;
     }
+    const completedToggle = event.target.closest('[data-subagent-completed-toggle]');
+    if (completedToggle) {
+      const ownerId = completedToggle.dataset.subagentCompletedToggle;
+      if (state.expandedCompletedSubagents.has(ownerId)) state.expandedCompletedSubagents.delete(ownerId);
+      else state.expandedCompletedSubagents.add(ownerId);
+      renderSessions('expand');
+      return;
+    }
     const more = event.target.closest('[data-graph-provider-more]');
     if (more) {
       state.graphExpandedProviders.add(more.dataset.graphProviderMore);
@@ -1146,6 +1644,12 @@ function bindEvents() {
     if (open) {
       event.stopPropagation();
       openDrawer(open.dataset.openSession);
+      return;
+    }
+    const subagentChat = event.target.closest('[data-open-subagent-chat]');
+    if (subagentChat) {
+      event.stopPropagation();
+      openSubagentConversation(subagentChat.dataset.openSubagentChat);
       return;
     }
     const node = event.target.closest('[data-graph-focus]');
@@ -1171,7 +1675,7 @@ function bindEvents() {
   });
   $('#liveSessionGrid').addEventListener('keydown', event => {
     const input = event.target.closest('[data-agent-command-draft]');
-    if (!input || event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+    if (!input || event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
     event.preventDefault();
     input.closest('form')?.requestSubmit();
   });
@@ -1263,7 +1767,22 @@ function bindEvents() {
   $('#closeDrawerBtn').addEventListener('click', closeDrawer);
   $('#drawerBackdrop').addEventListener('click', closeDrawer);
   $('.drawer-tabs').addEventListener('click', event => { const tab = event.target.closest('[data-tab]'); if (tab) { state.drawerTab = tab.dataset.tab; state.drawerForceLatest = tab.dataset.tab === 'chat'; renderDrawer(); } });
+  $('.drawer-tabs').addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const tabs = $$('.drawer-tab:not(.hidden)');
+    const current = Math.max(0, tabs.indexOf(event.target.closest('.drawer-tab')));
+    const next = event.key === 'Home' ? 0 : (event.key === 'End' ? tabs.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length);
+    event.preventDefault();
+    state.drawerTab = tabs[next].dataset.tab;
+    state.drawerForceLatest = state.drawerTab === 'chat';
+    renderDrawer();
+    $(`.drawer-tab[data-tab="${state.drawerTab}"]`)?.focus();
+  });
   $('#detailDrawer').addEventListener('click', async event => {
+    const resume = event.target.closest('[data-resume-agent]');
+    if (resume) { await resumeAgentTerminal(resume.dataset.resumeAgent); return; }
+    const retry = event.target.closest('[data-retry-detail]');
+    if (retry) { loadSessionDetail(retry.dataset.retryDetail, true); return; }
     const latest = event.target.closest('[data-scroll-latest]');
     if (latest) {
       const content = $('#drawerContent');
@@ -1272,8 +1791,19 @@ function bindEvents() {
     }
     const stop = event.target.closest('[data-stop-run]');
     if (!stop) return;
-    const result = await window.loadtoagent.stopAgent(stop.dataset.stopRun);
-    toast(result.ok ? '중지 요청을 보냈습니다.' : result.error);
+    const runId = stop.dataset.stopRun;
+    if (state.stopRequests.has(runId)) return;
+    state.stopRequests.add(runId);
+    renderDrawer();
+    try {
+      const result = await window.loadtoagent.stopAgent(runId);
+      toast(result.ok ? '중지 요청을 보냈습니다.' : result.error);
+    } catch (error) {
+      toast(error && error.message || '중지 요청을 보내지 못했습니다.');
+    } finally {
+      state.stopRequests.delete(runId);
+      if (state.selectedId) renderDrawer();
+    }
   });
   document.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
@@ -1305,7 +1835,7 @@ async function init() {
     if (window.LoadToAgentTerminal) window.LoadToAgentTerminal.updateSnapshot(snapshot, state.workspaces);
     $('#lastSync').textContent = timeOnly(snapshot.generatedAt);
     render();
-    if (state.selectedId && $('#detailDrawer').classList.contains('open') && !state.detailLoading) {
+    if (state.selectedId && $('#detailDrawer').classList.contains('open') && !state.detailLoadingIds.has(state.selectedId)) {
       const card = (snapshot.sessions || []).find(session => session.id === state.selectedId);
       const detail = state.details.get(state.selectedId);
       if (card && detail && card.updatedAt !== detail.updatedAt) loadSessionDetail(state.selectedId, true);

@@ -20,8 +20,8 @@
         <button class="nav-item active" data-view="all"><span class="nav-icon">⌂</span><span>홈</span><b id="navAllCount">0</b></button>
         <button class="nav-item" data-view="active"><span class="nav-icon live-dot"></span><span>진행 중</span><b id="navActiveCount">0</b></button>
         <button class="nav-item" data-view="waiting"><span class="nav-icon">!</span><span>내 확인 필요</span><b id="navWaitingCount">0</b></button>
-        <div class="nav-group-label">직접 실행 · tmux 안 씀</div>
-        <button class="nav-item" data-view="terminal"><span class="nav-icon">›_</span><span>일반 명령창</span><b id="navTerminalCount">0</b></button>
+        <div class="nav-group-label">기존 세션에 이어서 입력</div>
+        <button class="nav-item" data-view="terminal"><span class="nav-icon">›_</span><span>세션 터미널</span><b id="navTerminalCount">0</b></button>
         <div class="nav-group-label tmux-only">tmux 전용</div>
         <button class="nav-item tmux-nav-item" data-view="tmux"><span class="nav-icon">▦</span><span>tmux 작업</span><b id="navTmuxCount">0</b></button>
       </nav>
@@ -66,28 +66,31 @@
 
       <section id="terminalSection" class="terminal-section hidden" aria-label="명령창 직접 다루기">
         <div class="terminal-section-head">
-          <div><span class="terminal-logo">›_</span><div><p class="eyebrow">tmux 없이 사용</p><h2>일반 명령창</h2><p id="terminalPlatformExplain" class="section-explain">로컬 명령창을 하나씩 직접 엽니다. 여러 창을 묶는 작업은 tmux 전용 메뉴에서 다룹니다.</p></div></div>
+          <div><span class="terminal-logo">›_</span><div><p class="eyebrow">대화와 실행 화면을 한곳에서</p><h2>세션 터미널</h2><p id="terminalPlatformExplain" class="section-explain">왼쪽에서 세션을 고르면 이전 AI 대화와 실시간 터미널을 나란히 보며 그대로 이어서 작업할 수 있습니다.</p></div></div>
           <div class="terminal-create-actions">
-            <button id="newPowerShellBtn" type="button">＋ Windows 명령창</button>
-            <button id="newWslBtn" type="button">＋ Linux 명령창</button>
+            <button id="newPowerShellBtn" class="accent" type="button">＋ Windows 세션</button>
+            <button id="newWslBtn" type="button">＋ Linux 세션</button>
           </div>
         </div>
         <div class="terminal-layout">
           <aside class="terminal-resource-panel">
-            <div class="terminal-resource-head"><div><b>일반 명령창만</b><span id="terminalSessionSummary">0개 실행 중</span></div></div>
+            <div class="terminal-resource-head"><div><b>내 터미널 세션</b><span id="terminalSessionSummary">0개 실행 중</span></div><span class="terminal-resource-live"><i></i>LIVE</span></div>
             <div id="terminalSessionList" class="terminal-session-list"></div>
+            <div class="terminal-resource-tip"><span>⌘</span><p><b>세션은 화면을 옮겨도 유지됩니다.</b><small>다른 작업을 보고 돌아와도 출력과 작성 중인 명령이 그대로 남아 있어요.</small></p></div>
           </aside>
 
           <div id="terminalWorkbenchMount" class="terminal-workbench-mount"><div id="terminalWorkbench" class="terminal-workbench">
-            <div class="terminal-tabs-row"><div id="terminalTabs" class="terminal-tabs"></div><div id="terminalConnectionState" class="terminal-connection-state">명령창을 선택하세요</div></div>
             <div class="terminal-controlbar">
-              <div id="terminalTargetMeta" class="terminal-target-meta"><b>아직 선택한 명령창이 없습니다</b><span>위 버튼으로 새 명령창을 열거나 왼쪽 목록에서 선택하세요.</span></div>
-              <div class="terminal-key-actions">
-                <button type="button" data-terminal-signal="interrupt">Ctrl+C</button>
-                <button type="button" data-terminal-signal="clear">Ctrl+L</button>
+              <div class="terminal-target-cluster"><span id="terminalTargetIcon" class="terminal-target-icon">›_</span><div id="terminalTargetMeta" class="terminal-target-meta"><b>세션을 선택해 주세요</b><span>왼쪽 목록에서 이어갈 세션을 고르거나 새 세션을 만드세요.</span></div></div>
+              <div class="terminal-workspace-actions">
+                <div id="terminalConnectionState" class="terminal-connection-state"><i></i><span>선택 대기</span></div>
+                <div class="terminal-key-actions">
+                <button type="button" data-terminal-signal="interrupt" title="현재 실행 중인 명령 중단"><span>실행 중단</span><kbd>Ctrl C</kbd></button>
+                <button type="button" data-terminal-signal="clear" title="터미널 화면 정리"><span>화면 정리</span><kbd>Ctrl L</kbd></button>
                 <button id="terminalRestartBtn" type="button">다시 시작</button>
                 <button id="terminalAttachBtn" class="hidden" type="button">직접 조작하기</button>
-                <button id="terminalCloseBtn" type="button">닫기</button>
+                <button id="terminalCloseBtn" class="terminal-danger-button" type="button">세션 종료</button>
+                </div>
               </div>
             </div>
             <div id="terminalTmuxTools" class="terminal-tmux-tools hidden">
@@ -100,13 +103,25 @@
               <button type="button" class="danger" data-tmux-manage="kill-window">창 전체 닫기</button>
               <button type="button" class="danger" data-tmux-manage="kill-session">작업 묶음 끝내기</button>
             </div>
-            <div id="terminalViewport" class="terminal-viewport"><div id="terminalEmpty" class="terminal-empty"><span>›_</span><h3>사용할 명령창을 여세요</h3><p>키보드로 직접 입력하거나 아래 입력칸에 명령을 적어 한 번에 보낼 수 있습니다.</p></div></div>
-            <form id="terminalCommandForm" class="terminal-command-form">
-              <label for="terminalCommandInput">보낼 명령</label>
-              <textarea id="terminalCommandInput" rows="2" placeholder="선택한 명령창에 실행할 내용을 입력하세요" spellcheck="false"></textarea>
-              <button type="submit">실행하기 ↵</button>
-            </form>
-            <div id="terminalNotice" class="terminal-notice">준비됨</div>
+            <div id="terminalStage" class="terminal-stage">
+              <aside id="terminalHistoryPanel" class="terminal-history-panel hidden" aria-label="선택한 AI의 이전 대화">
+                <header class="terminal-history-head">
+                  <div><span>AI 대화 기록</span><b id="terminalHistoryTitle">연결된 AI 세션</b><small id="terminalHistoryMeta">대화 기록을 불러오는 중</small></div>
+                  <button id="terminalHistoryToggle" type="button" aria-expanded="true" title="대화 영역 접기">‹</button>
+                </header>
+                <div id="terminalHistoryList" class="terminal-history-list"></div>
+                <footer><span class="session-lock-dot"></span><b>이 대화가 오른쪽 터미널과 연결되어 있습니다</b></footer>
+              </aside>
+              <section class="terminal-console-pane" aria-label="실시간 터미널과 명령 입력">
+                <header class="terminal-console-head"><div><span class="terminal-console-pulse"></span><div><b>실시간 터미널</b><small id="terminalConsoleCaption">세션을 선택하면 출력이 여기에 표시됩니다</small></div></div><span id="terminalConsoleState" class="terminal-console-state">선택 대기</span></header>
+                <div id="terminalViewport" class="terminal-viewport"><div id="terminalEmpty" class="terminal-empty"><span>›_</span><h3>이어갈 세션을 선택하세요</h3><p>왼쪽 세션을 고르거나 새 세션을 만들면 실시간 출력과 명령 입력창이 열립니다.</p></div></div>
+                <form id="terminalCommandForm" class="terminal-command-form">
+                  <div class="terminal-command-label"><label id="terminalCommandLabel" for="terminalCommandInput">터미널에 명령 보내기</label><span>Enter 전송 · Shift+Enter 줄바꿈</span></div>
+                  <div class="terminal-command-composer"><textarea id="terminalCommandInput" rows="2" placeholder="먼저 왼쪽에서 세션을 선택하세요" spellcheck="false"></textarea><button type="submit"><span>보내기</span><b>↵</b></button></div>
+                </form>
+                <div id="terminalNotice" class="terminal-notice"><span class="terminal-notice-dot"></span><span>세션을 선택하면 바로 입력할 수 있습니다.</span></div>
+              </section>
+            </div>
           </div></div>
         </div>
       </section>
@@ -179,9 +194,9 @@
     </div>
     <div id="drawerMeta" class="drawer-meta"></div>
     <div class="drawer-tabs" role="tablist">
-      <button class="drawer-tab active" data-tab="chat">대화 내용</button>
-      <button class="drawer-tab" data-tab="lifecycle">진행 과정</button>
-      <button class="drawer-tab" data-tab="tokens">사용량</button>
+      <button class="drawer-tab active" role="tab" aria-selected="true" data-tab="chat">대화 내용</button>
+      <button class="drawer-tab" role="tab" aria-selected="false" data-tab="lifecycle">진행 과정</button>
+      <button class="drawer-tab" role="tab" aria-selected="false" data-tab="tokens">사용량</button>
     </div>
     <div id="drawerContent" class="drawer-content"></div>
   </aside>
@@ -211,7 +226,7 @@
       <div class="modal-head"><div><p class="eyebrow">고급 작업</p><h2 id="tmuxCreateTitle">여러 창 작업 만들기</h2></div><button type="button" id="closeTmuxCreateBtn" class="close-button">×</button></div>
       <div class="form-grid">
         <label><span id="tmuxEnvironmentLabel">tmux 환경</span><select id="tmuxCreateDistro" required></select></label>
-        <label><span>작업 묶음 이름</span><input id="tmuxCreateName" required pattern="[A-Za-z0-9_.-]+" placeholder="my-work" /></label>
+        <label><span>작업 묶음 이름</span><input id="tmuxCreateName" required pattern="[A-Za-z0-9_.\-]+" placeholder="my-work" /></label>
       </div>
       <label><span>시작 폴더 <small>선택 사항</small></span><input id="tmuxCreateCwd" placeholder="프로젝트의 절대 경로" /></label>
       <label><span>처음 실행할 명령 <small>선택 사항</small></span><textarea id="tmuxCreateCommand" rows="4" placeholder="예: claude 또는 codex"></textarea></label>

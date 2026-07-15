@@ -239,7 +239,7 @@ function syntheticRuntimeSession(processInfo, now = Date.now()) {
 function bridgeLinkScore(session, bridge, now = Date.now()) {
   if (!session || session.provider !== bridge.provider) return -Infinity;
   if (!session.environment || session.environment.kind !== bridge.environment) return -Infinity;
-  if (session.clientKind === 'codex-desktop' || session.clientKind === 'codex-ide') return -Infinity;
+  if (session.clientKind === 'codex-desktop' || session.clientKind === 'codex-ide' || session.clientKind === 'claude-desktop') return -Infinity;
   let score = session.parentId ? -500 : 3_000;
   const sessionCwd = String(session.cwd || '').replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
   const bridgeCwd = String(bridge.cwd || '').replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();

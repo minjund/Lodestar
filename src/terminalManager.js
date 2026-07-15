@@ -46,6 +46,29 @@ function powershellExecutable() {
   return fs.existsSync(modern) ? modern : 'powershell.exe';
 }
 
+function windowsPathValue(env = process.env) {
+  const key = Object.keys(env).find(name => name.toLowerCase() === 'path');
+  return key ? String(env[key] || '') : '';
+}
+
+function resolveWindowsCommand(command, env = process.env) {
+  const value = String(command || '').trim();
+  if (!value) return '';
+  const hasPath = /[\\/]/.test(value);
+  const directories = hasPath ? [''] : windowsPathValue(env).split(path.delimiter).filter(Boolean);
+  const extension = path.extname(value).toLowerCase();
+  const suffixes = extension ? [''] : ['.exe', '.com', '.ps1', '.cmd', '.bat'];
+  for (const directory of directories) {
+    for (const suffix of suffixes) {
+      const candidate = hasPath ? `${value}${suffix}` : path.join(directory, `${value}${suffix}`);
+      try {
+        if (fs.statSync(candidate).isFile()) return candidate;
+      } catch {}
+    }
+  }
+  return value;
+}
+
 function killPtyTree(handle, pid) {
   if (!handle) return;
   if (process.platform !== 'win32' || !Number.isFinite(Number(pid))) {
@@ -112,6 +135,21 @@ function launchSpec(options, platform = process.platform, agentProviders = AGENT
   }
   if (options.type === 'agent') {
     const provider = agentProviders[options.provider] || AGENT_PROVIDERS[options.provider];
+    if (platform === 'win32') {
+      const command = resolveWindowsCommand(provider.command);
+      if (path.extname(command).toLowerCase() === '.ps1') {
+        return {
+          file: powershellExecutable(),
+          args: ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', command, ...(provider.args || []), ...options.args],
+          cwd: options.cwd,
+          label: provider.label,
+        };
+      }
+      if (/\.(?:cmd|bat)$/i.test(command)) {
+        return { file: process.env.ComSpec || 'cmd.exe', args: ['/D', '/S', '/C', command, ...(provider.args || []), ...options.args], cwd: options.cwd, label: provider.label };
+      }
+      return { file: command, args: [...(provider.args || []), ...options.args], cwd: options.cwd, label: provider.label };
+    }
     return { file: provider.command, args: [...(provider.args || []), ...options.args], cwd: options.cwd, label: provider.label };
   }
   if (options.type === 'wsl') {
@@ -144,6 +182,7 @@ function publicSession(session, includeReplay = false) {
     tmuxPane: session.options.tmuxPane,
     provider: session.options.provider,
     bridgeId: session.options.bridgeId,
+    background: session.options.type === 'agent',
     pid: session.pid,
     status: session.status,
     createdAt: session.createdAt,
@@ -365,4 +404,5 @@ module.exports = {
   numericDimension,
   killPtyTree,
   AGENT_PROVIDERS,
+  resolveWindowsCommand,
 };

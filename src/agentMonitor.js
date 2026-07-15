@@ -60,7 +60,17 @@ function readJsonLines(file, maxBytes = MAX_JSONL_BYTES) {
   const length = stat.size - start;
   const fd = fs.openSync(file, 'r');
   const buffer = Buffer.alloc(length);
-  try { fs.readSync(fd, buffer, 0, length, start); } finally { fs.closeSync(fd); }
+  let headerLine = '';
+  try {
+    fs.readSync(fd, buffer, 0, length, start);
+    if (start > 0) {
+      const headLength = Math.min(stat.size, 2 * 1024 * 1024);
+      const head = Buffer.alloc(headLength);
+      fs.readSync(fd, head, 0, headLength, 0);
+      const newline = head.indexOf(10);
+      if (newline >= 0) headerLine = head.subarray(0, newline).toString('utf8').replace(/\r$/, '');
+    }
+  } finally { fs.closeSync(fd); }
   let text = buffer.toString('utf8');
   if (start > 0) {
     const newline = text.indexOf('\n');
@@ -70,6 +80,12 @@ function readJsonLines(file, maxBytes = MAX_JSONL_BYTES) {
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim()) continue;
     try { rows.push(JSON.parse(line)); } catch {}
+  }
+  if (headerLine) {
+    try {
+      const header = JSON.parse(headerLine);
+      if (header && header.type === 'session_meta') rows.unshift(header);
+    } catch {}
   }
   return { rows, truncated: start > 0 };
 }
@@ -110,6 +126,65 @@ function addMessage(session, message) {
   if (!duplicate) session.messages.push(row);
 }
 
+function jsonObject(value) {
+  if (value && typeof value === 'object') return value;
+  if (typeof value !== 'string' || !value.trim()) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function collaborationTaskName(value) {
+  const normalized = String(value || '').replace(/\\/g, '/').replace(/\/$/, '');
+  return normalized.split('/').filter(Boolean).pop() || '';
+}
+
+function encryptedCollaborationText(value) {
+  return /^gAAAA[A-Za-z0-9_-]+={0,2}$/.test(String(value || '').trim());
+}
+
+function agentEnvelope(value) {
+  const text = compactText(value, 12000);
+  const type = text.match(/(?:^|\n)Message Type:\s*([^\n]+)/i);
+  const task = text.match(/(?:^|\n)Task name:\s*([^\n]+)/i);
+  const sender = text.match(/(?:^|\n)Sender:\s*([^\n]+)/i);
+  const payload = text.match(/(?:^|\n)Payload:\s*\n?([\s\S]*)$/i);
+  return {
+    type: compactText(type && type[1], 40).toUpperCase(),
+    task: compactText(task && task[1], 180),
+    sender: compactText(sender && sender[1], 180),
+    payload: compactText(payload && payload[1], 6000),
+  };
+}
+
+function collaborationCapacity(value) {
+  const text = String(value || '');
+  const match = text.match(/There are\s+(\d+)\s+available concurrency slots[\s\S]{0,240}?including you/i)
+    || text.match(/main(?:\s+agent)?\s+included[^\d]{0,40}(\d+)\s+(?:slots|agents)/i)
+    || text.match(/메인(?:\s*에이전트)?\s*포함[^\d]{0,40}(\d+)개/i);
+  const totalThreads = Number(match && match[1] || 0);
+  return totalThreads > 0 ? { totalThreads, subagents: Math.max(0, totalThreads - 1), source: 'runtime-instruction' } : null;
+}
+
+function retainedAgentsFromValue(value) {
+  const parsed = jsonObject(value);
+  const agents = Array.isArray(parsed.agents) ? parsed.agents : [];
+  return agents.map(agent => {
+    const statusValue = agent && agent.agent_status;
+    const status = typeof statusValue === 'string' ? statusValue : (statusValue && typeof statusValue === 'object' ? Object.keys(statusValue)[0] : 'unknown');
+    const pathValue = compactText(agent && agent.agent_name, 180);
+    return { path: pathValue, taskName: collaborationTaskName(pathValue), name: '', status, observedAt: null };
+  }).filter(agent => agent.path && agent.path !== '/root');
+}
+
+function retainedAgentsFromWorldState(value, observedAt) {
+  const rows = String(value || '').split(/\r?\n/).map(line => line.match(/^\s*-\s*([^:]+):\s*(.+?)\s*$/)).filter(Boolean);
+  return rows.map(match => ({ path: `/root/${match[1].trim()}`, taskName: match[1].trim(), name: match[2].trim(), status: 'retained', observedAt }));
+}
+
 function addLifecycle(session, event) {
   const row = {
     id: String(event.id || `${session.id}:e:${session.lifecycle.length}`),
@@ -123,6 +198,23 @@ function addLifecycle(session, event) {
   if (!duplicate) session.lifecycle.push(row);
 }
 
+function settleLifecycle(session, id, status = 'done', completedAt = null) {
+  const key = String(id || '');
+  if (!key) return;
+  const row = session.lifecycle.find(item => item.id === key || item.id === `tool:${key}`);
+  if (!row) return;
+  row.status = status;
+  if (completedAt) row.completedAt = timestamp(completedAt, row.timestamp);
+}
+
+function settleRunningLifecycle(session, completedAt = null) {
+  for (const row of session.lifecycle) {
+    if (row.status !== 'running') continue;
+    row.status = 'done';
+    if (completedAt) row.completedAt = timestamp(completedAt, row.timestamp);
+  }
+}
+
 function baseSession(provider, externalId, file, stat) {
   const id = `${provider}:${externalId}`;
   const updatedAt = new Date((stat && stat.mtimeMs) || Date.now()).toISOString();
@@ -134,6 +226,9 @@ function baseSession(provider, externalId, file, stat) {
     depth: 0,
     agentName: '',
     agentRole: '',
+    agentPath: '',
+    taskName: '',
+    sharedGoal: '',
     title: '제목을 불러오는 중',
     model: '',
     cwd: '',
@@ -147,6 +242,9 @@ function baseSession(provider, externalId, file, stat) {
     startedAt: updatedAt,
     updatedAt,
     endedAt: null,
+    completedAt: null,
+    completionObserved: false,
+    result: '',
     file,
     truncated: false,
     usage: blankUsage(),
@@ -155,6 +253,14 @@ function baseSession(provider, externalId, file, stat) {
     messages: [],
     lifecycle: [],
     childIds: [],
+    collaboration: {
+      capacity: { totalThreads: 0, subagents: 0, source: 'unknown' },
+      spawns: [],
+      communications: [],
+      retainedAgents: [],
+      retainedObserved: false,
+      metrics: null,
+    },
   };
 }
 
@@ -196,6 +302,7 @@ function claudeContent(session, row, item, index) {
     });
     addLifecycle(session, { id: `tool:${item.id || id}`, type: 'tool', label: name, detail: compactText(item.input, 260), status: 'running', timestamp: row.timestamp });
   } else if (kind === 'tool_result') {
+    settleLifecycle(session, item.tool_use_id, item.is_error ? 'failed' : 'done', row.timestamp);
     addLifecycle(session, { id: `result:${item.tool_use_id || id}`, type: 'tool-result', label: item.is_error ? '도구 실패' : '도구 완료', status: item.is_error ? 'failed' : 'done', timestamp: row.timestamp });
   } else if (kind === 'thinking') {
     addLifecycle(session, { id, type: 'reasoning', label: '추론', status: 'done', timestamp: row.timestamp });
@@ -225,6 +332,13 @@ function parseClaude(fileInfo) {
   session.parentId = subMatch ? `claude:${subMatch[1]}` : null;
   session.depth = subMatch ? 1 : 0;
   session.agentName = subMatch ? `agent-${subMatch[2].slice(0, 8)}` : '';
+  const desktopSignals = new Set(parsed.rows.map(row => String(row && row.type || '')).filter(Boolean));
+  if (!subMatch && (desktopSignals.has('queue-operation') || desktopSignals.has('last-prompt') || desktopSignals.has('ai-title'))) {
+    session.clientKind = 'claude-desktop';
+    session.sourceLabel = 'Claude 데스크톱 앱';
+  } else {
+    session.clientKind = 'claude-cli';
+  }
 
   const requestUsage = new Map();
   let latestUser = '';
@@ -308,8 +422,10 @@ function codexContentText(content) {
 function codexVisibleUserText(value) {
   const raw = compactText(value, 12000);
   if (!raw) return '';
-  const objective = raw.match(/<objective>\s*([\s\S]*?)\s*<\/objective>/i);
+  const objective = raw.match(/<(?:untrusted_)?objective>\s*([\s\S]*?)\s*<\/(?:untrusted_)?objective>/i);
   if (objective) return compactText(objective[1], 6000);
+  const desktopRequest = raw.match(/##\s*My request for Codex:\s*([\s\S]*?)(?:\n{2,}<image\b|$)/i);
+  if (desktopRequest) return compactText(desktopRequest[1], 6000);
   if (/^<(?:permissions instructions|app-context|environment_context|skills_instructions|plugins_instructions|apps_instructions|multi_agent_mode|collaboration_mode)>/i.test(raw)) return '';
   if (/^#\s*Codex desktop context/i.test(raw)) return '';
   if (/^Approved command prefix saved:/i.test(raw)) return '';
@@ -318,6 +434,30 @@ function codexVisibleUserText(value) {
   if (raw.length > 800 && /(?:primary agent in a team of agents|All agents share the same directory|collaboration tools cannot be called|valid channels|Target channel)/i.test(raw)) return '';
   if (raw.length > 2500 && /(?:approval policy|sandbox_mode|workspace dependencies|thread coordination)/i.test(raw)) return '';
   return raw;
+}
+
+function addCodexMessage(session, observations, message, source) {
+  const type = message.type || 'message';
+  const text = compactText(message.text, type === 'tool' ? 1600 : 6000);
+  if (!text && type !== 'tool') return;
+  const normalized = text.replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  const role = message.role || 'system';
+  const at = Date.parse(timestamp(message.timestamp, session.updatedAt));
+  const key = `${role}\u0000${type}\u0000${normalized}`;
+  const candidates = observations.get(key) || [];
+  let match = null;
+  let distance = Infinity;
+  for (const candidate of candidates) {
+    const delta = Math.abs(candidate.at - at);
+    if (candidate.source === source || candidate.matched || delta > 2_000 || delta >= distance) continue;
+    match = candidate;
+    distance = delta;
+  }
+  const observation = { source, at, matched: Boolean(match) };
+  if (match) match.matched = true;
+  candidates.push(observation);
+  observations.set(key, candidates.filter(candidate => Math.abs(candidate.at - at) <= 5_000 || !candidate.matched));
+  if (!match) addMessage(session, { ...message, text });
 }
 
 function parseCodex(fileInfo) {
@@ -347,40 +487,139 @@ function parseCodex(fileInfo) {
     session.depth = Number(spawn.depth || 1);
     session.agentName = spawn.agent_nickname || spawn.agent_role || 'subagent';
     session.agentRole = spawn.agent_role || '';
+    session.agentPath = spawn.agent_path || meta.agent_path || '';
+    session.taskName = collaborationTaskName(session.agentPath);
   }
 
   let latestUser = '';
+  let latestInternalGoal = '';
+  let latestDelegationNarration = '';
   let activeTurn = false;
+  let lastTurnCompleted = false;
+  let lastFinalAnswer = '';
   let latestTs = session.updatedAt;
   let observedWindow = Number(meta.context_window || 0);
-  const seenMessages = new Set();
+  const messageObservations = new Map();
+  const collaborationCalls = new Map();
+  const spawnRecords = new Map();
+  const communications = [];
+  const ensureSpawn = callId => {
+    const key = String(callId || `spawn:${spawnRecords.size}`);
+    if (!spawnRecords.has(key)) spawnRecords.set(key, {
+      callId: key,
+      taskName: '',
+      agentPath: '',
+      childId: '',
+      assignment: '',
+      assignmentObserved: false,
+      assignmentProtected: false,
+      assignmentSource: 'unavailable',
+      sharedGoal: '',
+      status: 'requested',
+      startedAt: null,
+      completedAt: null,
+      result: '',
+      agentName: '',
+      currentlyRetained: false,
+    });
+    return spawnRecords.get(key);
+  };
+  const addCommunication = event => {
+    const row = {
+      id: String(event.id || `communication:${communications.length}`),
+      kind: event.kind || 'message',
+      label: compactText(event.label || '메시지', 100),
+      from: compactText(event.from, 180),
+      to: compactText(event.to, 180),
+      taskName: compactText(event.taskName, 180),
+      childId: compactText(event.childId, 180),
+      text: compactText(event.text, 6000),
+      protected: Boolean(event.protected),
+      assignmentSource: compactText(event.assignmentSource, 80),
+      timestamp: timestamp(event.timestamp, session.updatedAt),
+    };
+    if (!communications.some(item => item.id === row.id)) communications.push(row);
+    return row;
+  };
+  const sessionStartedMs = Date.parse(session.startedAt || '') || 0;
 
   for (const row of parsed.rows) {
     latestTs = timestamp(row.timestamp, latestTs);
     const payload = row.payload || {};
+    const rowMs = Date.parse(timestamp(row.timestamp, session.startedAt)) || 0;
+    const ownCollaborationRow = !session.depth || !sessionStartedMs || !rowMs || rowMs >= sessionStartedMs;
     if (row.type === 'turn_context') {
       session.model = payload.model || session.model;
       session.cwd = payload.cwd || session.cwd;
     }
+    if (row.type === 'world_state') {
+      const retainedText = payload.state && payload.state.environments && payload.state.environments.subagents;
+      const retained = retainedAgentsFromWorldState(retainedText, row.timestamp);
+      if (retainedText !== undefined) {
+        session.collaboration.retainedAgents = retained;
+        session.collaboration.retainedObserved = true;
+      }
+    }
     if (row.type === 'event_msg') {
       if (payload.type === 'task_started') {
         activeTurn = true;
+        lastTurnCompleted = false;
+        latestDelegationNarration = '';
         addLifecycle(session, { id: payload.turn_id, type: 'turn-start', label: '턴 시작', status: 'running', timestamp: payload.started_at || row.timestamp });
       } else if (payload.type === 'task_complete') {
         activeTurn = false;
+        lastTurnCompleted = true;
+        settleRunningLifecycle(session, payload.completed_at || row.timestamp);
+        session.completedAt = timestamp(payload.completed_at || row.timestamp, session.updatedAt);
+        session.completionObserved = true;
+        if (payload.last_agent_message) lastFinalAnswer = compactText(payload.last_agent_message, 6000);
         addLifecycle(session, { id: payload.turn_id, type: 'turn-complete', label: '턴 완료', detail: payload.duration_ms ? `${payload.duration_ms} ms` : '', status: 'done', timestamp: payload.completed_at || row.timestamp });
+      } else if (payload.type === 'sub_agent_activity') {
+        const activityMs = Date.parse(timestamp(payload.occurred_at_ms || row.timestamp, session.startedAt)) || rowMs;
+        if (!ownCollaborationRow || (session.depth && sessionStartedMs && activityMs && activityMs < sessionStartedMs)) continue;
+        if (session.depth && session.agentPath) {
+          const activityPath = String(payload.agent_path || '').replace(/\/$/, '');
+          const nestedPrefix = `${String(session.agentPath).replace(/\/$/, '')}/`;
+          if (!activityPath.startsWith(nestedPrefix)) continue;
+        }
+        const childId = payload.agent_thread_id ? `codex:${payload.agent_thread_id}` : '';
+        const agentPath = payload.agent_path || '';
+        let record = [...spawnRecords.values()].find(item => (childId && item.childId === childId)
+          || (agentPath && item.agentPath === agentPath));
+        if (!record) record = ensureSpawn(payload.kind === 'started'
+          ? (payload.event_id || payload.agent_thread_id)
+          : (`activity:${payload.agent_thread_id || payload.agent_path || payload.event_id}`));
+        record.childId = childId || record.childId;
+        record.agentPath = payload.agent_path || record.agentPath;
+        record.taskName = record.taskName || collaborationTaskName(record.agentPath);
+        record.status = payload.kind === 'started' ? 'running' : (payload.kind || record.status);
+        if (payload.kind === 'started' || !record.startedAt) record.startedAt = timestamp(payload.occurred_at_ms || row.timestamp, record.startedAt || session.updatedAt);
+        if (payload.kind === 'completed' || payload.kind === 'interrupted') record.completedAt = timestamp(payload.occurred_at_ms || row.timestamp, record.completedAt || session.updatedAt);
+        addCommunication({
+          id: `activity:${payload.event_id || payload.agent_thread_id}:${payload.kind}`,
+          kind: payload.kind === 'started' ? 'started' : 'status',
+          label: payload.kind === 'started' ? '서브에이전트 실행 시작' : '서브에이전트 상태 변경',
+          from: 'Codex 런타임',
+          to: record.agentPath,
+          taskName: record.taskName,
+          childId: record.childId,
+          text: payload.kind || '',
+          timestamp: payload.occurred_at_ms || row.timestamp,
+        });
       } else if (payload.type === 'user_message') {
-        const text = codexVisibleUserText(payload.message || payload.text_elements);
+        const rawUser = compactText(payload.message || payload.text_elements, 12000);
+        const text = codexVisibleUserText(rawUser);
         if (!text) continue;
+        if (/<codex_internal_context(?:\s|>)/i.test(rawUser)) { latestInternalGoal = text; continue; }
         latestUser = text;
         const key = `u:${payload.client_id || row.timestamp}:${text}`;
-        if (!seenMessages.has(key)) addMessage(session, { id: key, role: 'user', text, timestamp: row.timestamp });
-        seenMessages.add(key);
+        addCodexMessage(session, messageObservations, { id: key, role: 'user', text, timestamp: row.timestamp }, 'event');
       } else if (payload.type === 'agent_message') {
         const text = compactText(payload.message);
+        if (text) latestDelegationNarration = text;
+        if (payload.phase === 'final_answer') lastFinalAnswer = text;
         const key = `a:${row.timestamp}:${text}`;
-        if (!seenMessages.has(key)) addMessage(session, { id: key, role: 'assistant', text, timestamp: row.timestamp });
-        seenMessages.add(key);
+        addCodexMessage(session, messageObservations, { id: key, role: 'assistant', text, timestamp: row.timestamp }, 'event');
       } else if (payload.type === 'agent_reasoning') {
         addLifecycle(session, { id: `r:${row.timestamp}`, type: 'reasoning', label: '판단 중', detail: '다음 작업을 판단하고 결과를 정리하는 중', status: 'running', timestamp: row.timestamp });
       } else if (payload.type === 'token_count' && payload.info) {
@@ -396,25 +635,142 @@ function parseCodex(fileInfo) {
     if (row.type === 'response_item') {
       if (payload.type === 'function_call' || payload.type === 'custom_tool_call') {
         const name = payload.name || 'tool';
-        addMessage(session, { id: payload.call_id || payload.id, role: 'tool', type: 'tool', title: name, text: compactText(payload.arguments || payload.input, 1000), status: payload.status || 'started', timestamp: row.timestamp });
-        addLifecycle(session, { id: payload.call_id || payload.id, type: 'tool', label: name, detail: compactText(payload.arguments || payload.input, 240), status: payload.status === 'completed' ? 'done' : 'running', timestamp: row.timestamp });
+        const callId = payload.call_id || payload.id;
+        const args = jsonObject(payload.arguments || payload.input);
+        const collaborationTool = payload.namespace === 'collaboration' || ['spawn_agent', 'followup_task', 'send_message', 'interrupt_agent', 'wait_agent', 'list_agents'].includes(name);
+        if (collaborationTool && !ownCollaborationRow) continue;
+        collaborationCalls.set(String(callId || ''), { name, args, timestamp: row.timestamp });
+        if (name === 'spawn_agent') {
+          const record = ensureSpawn(callId);
+          record.taskName = compactText(args.task_name, 180);
+          record.agentPath = record.taskName ? `${session.agentPath || '/root'}/${record.taskName}`.replace(/\/+/g, '/') : record.agentPath;
+          const rawAssignment = compactText(args.message, 6000);
+          record.assignmentProtected = encryptedCollaborationText(rawAssignment);
+          const directAssignment = rawAssignment && !record.assignmentProtected ? rawAssignment : '';
+          record.assignment = directAssignment || (record.assignmentProtected ? latestDelegationNarration : '');
+          record.assignmentObserved = Boolean(record.assignment);
+          record.assignmentSource = directAssignment ? 'spawn-message' : (record.assignment ? 'parent-narration' : 'unavailable');
+          record.sharedGoal = compactText(latestUser, 6000);
+          record.startedAt = timestamp(row.timestamp, record.startedAt || session.updatedAt);
+          addCommunication({
+            id: `assign:${callId}`,
+            kind: 'assignment',
+            label: record.assignmentSource === 'parent-narration' ? '메인 AI 작업 지시' : '새 작업 배정',
+            from: session.agentPath || '/root',
+            to: record.agentPath,
+            taskName: record.taskName,
+            text: record.assignment,
+            protected: record.assignmentProtected && !record.assignment,
+            assignmentSource: record.assignmentSource,
+            timestamp: row.timestamp,
+          });
+        } else if (name === 'send_message' || name === 'followup_task') {
+          const target = compactText(args.target, 180);
+          addCommunication({
+            id: `${name}:${callId}`,
+            kind: name === 'followup_task' ? 'followup' : 'message',
+            label: name === 'followup_task' ? '추가 작업 지시' : '메시지 전달',
+            from: session.agentPath || '/root',
+            to: target,
+            taskName: collaborationTaskName(target),
+            text: compactText(args.message, 6000),
+            protected: encryptedCollaborationText(args.message),
+            timestamp: row.timestamp,
+          });
+        } else if (name === 'interrupt_agent') {
+          const target = compactText(args.target, 180);
+          addCommunication({ id: `interrupt:${callId}`, kind: 'interrupt', label: '작업 중단 요청', from: session.agentPath || '/root', to: target, taskName: collaborationTaskName(target), timestamp: row.timestamp });
+        }
+        const toolText = collaborationTool
+          ? (name === 'spawn_agent' ? `담당 작업: ${args.task_name || '이름 미상'}` : compactText(args.message || args.target || '', 1000))
+          : compactText(payload.arguments || payload.input, 1000);
+        addMessage(session, { id: callId, role: 'tool', type: 'tool', title: name, text: toolText, status: payload.status || 'started', timestamp: row.timestamp });
+        addLifecycle(session, { id: callId, type: collaborationTool ? 'collaboration' : 'tool', label: name, detail: toolText, status: payload.status === 'completed' ? 'done' : 'running', timestamp: row.timestamp });
       } else if (payload.type === 'function_call_output' || payload.type === 'custom_tool_call_output') {
+        settleLifecycle(session, payload.call_id, 'done', row.timestamp);
+        const call = collaborationCalls.get(String(payload.call_id || ''));
+        const output = jsonObject(payload.output);
+        if (call && call.name === 'spawn_agent') {
+          const record = ensureSpawn(payload.call_id);
+          record.agentPath = compactText(output.task_name, 180) || record.agentPath;
+          record.taskName = record.taskName || collaborationTaskName(record.agentPath);
+        }
+        if (call && call.name === 'list_agents') {
+          const retained = retainedAgentsFromValue(payload.output).map(agent => ({ ...agent, observedAt: timestamp(row.timestamp, session.updatedAt) }));
+          session.collaboration.retainedAgents = retained;
+          session.collaboration.retainedObserved = true;
+        }
         addLifecycle(session, { id: `out:${payload.call_id}`, type: 'tool-result', label: '도구 완료', status: 'done', timestamp: row.timestamp });
+      } else if (payload.type === 'agent_message') {
+        if (!ownCollaborationRow) continue;
+        const rawText = codexContentText(payload.content);
+        const envelope = agentEnvelope(rawText);
+        const from = compactText(payload.author || envelope.sender, 180);
+        const to = compactText(payload.recipient || envelope.task, 180);
+        const taskName = collaborationTaskName(from === (session.agentPath || '/root') ? to : from);
+        const kind = envelope.type === 'FINAL_ANSWER' ? 'result' : (envelope.type === 'NEW_TASK' ? 'assignment' : 'message');
+        const text = envelope.payload || (envelope.type ? '' : rawText);
+        const communication = addCommunication({
+          id: payload.id || `agent-message:${row.timestamp}:${from}:${to}`,
+          kind,
+          label: kind === 'result' ? '결과 반환' : (kind === 'assignment' ? '작업 전달' : '에이전트 메시지'),
+          from,
+          to,
+          taskName,
+          text,
+          protected: !text && /encrypted_content/.test(JSON.stringify(payload.content || [])),
+          timestamp: row.timestamp,
+        });
+        if (kind === 'result') {
+          const record = [...spawnRecords.values()].find(item => item.agentPath === from || item.taskName === taskName);
+          if (record) {
+            record.status = 'completed';
+            record.completedAt = timestamp(row.timestamp, record.completedAt || session.updatedAt);
+            record.result = text;
+            communication.childId = record.childId;
+          }
+        }
       } else if (payload.type === 'message') {
-        const role = payload.role === 'assistant' ? 'assistant' : 'user';
+        if (payload.role === 'developer') {
+          const capacity = collaborationCapacity(codexContentText(payload.content));
+          if (capacity) session.collaboration.capacity = capacity;
+          continue;
+        }
+        if (payload.role !== 'assistant' && payload.role !== 'user') continue;
+        const role = payload.role;
         const rawText = codexContentText(payload.content);
         const text = role === 'user' ? codexVisibleUserText(rawText) : rawText;
         if (!text) continue;
-        const key = payload.id || `message:${role}:${row.timestamp}:${text.slice(0, 80)}`;
-        if (!seenMessages.has(key)) addMessage(session, { id: key, role, text, timestamp: row.timestamp });
-        seenMessages.add(key);
+        if (role === 'user' && /<codex_internal_context(?:\s|>)/i.test(rawText)) { latestInternalGoal = text; continue; }
         if (role === 'user') latestUser = text;
+        if (role === 'assistant') latestDelegationNarration = text;
+        const key = payload.id || `message:${role}:${row.timestamp}:${text.slice(0, 80)}`;
+        addCodexMessage(session, messageObservations, { id: key, role, text, timestamp: row.timestamp }, 'response');
       }
     }
   }
 
   session.updatedAt = latestTs;
-  session.title = compactText(latestUser, 180) || (session.depth ? `${session.agentName} 서브에이전트` : 'GPT 작업 세션');
+  session.sharedGoal = session.depth ? compactText(latestUser, 6000) : '';
+  session.title = session.depth
+    ? (session.taskName || `${session.agentName} 서브에이전트`)
+    : (compactText(latestUser || latestInternalGoal, 180) || 'GPT 작업 세션');
+  session.result = lastFinalAnswer;
+  const retainedByTask = new Map((session.collaboration.retainedAgents || []).map(agent => [agent.taskName, agent]));
+  for (const record of spawnRecords.values()) {
+    const retained = retainedByTask.get(record.taskName);
+    if (retained) {
+      record.currentlyRetained = true;
+      record.agentName = retained.name || record.agentName;
+    }
+    for (const communication of communications) {
+      if (communication.childId) continue;
+      if ((record.agentPath && (communication.from === record.agentPath || communication.to === record.agentPath))
+        || (record.taskName && communication.taskName === record.taskName)) communication.childId = record.childId;
+    }
+  }
+  session.collaboration.spawns = [...spawnRecords.values()].sort((a, b) => Date.parse(a.startedAt || 0) - Date.parse(b.startedAt || 0));
+  session.collaboration.communications = communications.slice(-240);
   const windowInfo = modelContextWindow('codex', session.model, observedWindow);
   session.context = contextInfo(session.turnUsage.total || session.turnUsage.input, windowInfo);
   if (session.status !== 'failed') {
@@ -423,6 +779,10 @@ function parseCodex(fileInfo) {
       session.status = 'running';
       session.statusDetail = '턴 실행 중';
       session.statusObserved = true;
+    } else if (session.depth && lastTurnCompleted) {
+      session.status = 'completed';
+      session.statusDetail = '작업 완료';
+      session.statusObserved = false;
     } else {
       session.status = 'idle';
       session.statusDetail = activeTurn ? '마지막 턴 기록이 종료됨' : '다음 요청 대기';
@@ -445,18 +805,21 @@ function genericUsage(raw = {}) {
   });
 }
 
-function flattenGenericRows(value, out = [], depth = 0) {
+function flattenGenericRows(value, out = [], depth = 0, seen = new Set()) {
   if (depth > 6 || value == null) return out;
   if (Array.isArray(value)) {
-    for (const item of value) flattenGenericRows(item, out, depth + 1);
+    for (const item of value) flattenGenericRows(item, out, depth + 1, seen);
     return out;
   }
   if (typeof value !== 'object') return out;
+  if (seen.has(value)) return out;
+  seen.add(value);
   const role = value.role || value.author || value.sender;
-  const text = compactText(value.text || value.content || value.message || value.response || value.prompt);
-  if (role && text) out.push(value);
+  const deltaText = typeof value.delta === 'string' ? value.delta : '';
+  const text = compactText(value.text || value.content || value.message || value.response || value.prompt || deltaText);
+  if (role && text) out.push({ value, order: out.length });
   for (const key of ['messages', 'history', 'turns', 'events', 'conversation']) {
-    if (value[key]) flattenGenericRows(value[key], out, depth + 1);
+    if (value[key]) flattenGenericRows(value[key], out, depth + 1, seen);
   }
   return out;
 }
@@ -494,18 +857,32 @@ function parseGeneric(fileInfo, provider) {
       addLifecycle(session, { id: event.id, type: 'tool', label: tool, status: 'running', timestamp: event.timestamp });
       running = true;
     }
-    if (/tool_result|tool-result|tool_end/.test(type)) addLifecycle(session, { id: `result:${event.id || event.tool_call_id}`, type: 'tool-result', label: '도구 완료', status: event.error ? 'failed' : 'done', timestamp: event.timestamp });
+    if (/tool_result|tool-result|tool_end/.test(type)) {
+      settleLifecycle(session, event.tool_call_id || event.tool_use_id || event.id, event.error ? 'failed' : 'done', event.timestamp);
+      addLifecycle(session, { id: `result:${event.id || event.tool_call_id}`, type: 'tool-result', label: '도구 완료', status: event.error ? 'failed' : 'done', timestamp: event.timestamp });
+    }
     if (type === 'result' || /session_end|completed/.test(type)) running = false;
     if (type === 'error' || event.error) failed = true;
     const usage = genericUsage(event);
     if (usage.total) session.usage = usage;
   }
 
-  for (const item of flattenGenericRows(root)) {
+  const normalizedMessages = new Map();
+  for (const row of flattenGenericRows(root)) {
+    const item = row.value;
+    const eventType = String(item.type || item.event || item.kind || '').toLowerCase();
+    if (/tool_use|tool-call|tool_start|tool_result|tool-result|tool_end/.test(eventType)) continue;
     const rawRole = String(item.role || item.author || item.sender || '').toLowerCase();
     const role = /assistant|model|agent/.test(rawRole) ? 'assistant' : (rawRole === 'user' ? 'user' : 'system');
-    const text = compactText(item.text || item.content || item.message || item.response || item.prompt);
-    addMessage(session, { id: item.id || item.uuid, role, text, timestamp: item.timestamp || item.created_at });
+    const deltaText = typeof item.delta === 'string' ? item.delta : '';
+    const text = compactText(item.text || item.content || item.message || item.response || item.prompt || deltaText);
+    const id = item.id || item.uuid || '';
+    const recordedAt = timestamp(item.timestamp || item.created_at, session.updatedAt);
+    const key = id ? `${role}:${id}` : `${role}:${text}:${recordedAt}`;
+    const previous = normalizedMessages.get(key);
+    const isDelta = item.is_delta === true || item.delta === true || typeof item.delta === 'string' || /(?:^|[_-])delta(?:$|[_-])/.test(eventType);
+    const mergedText = previous && isDelta ? `${previous.text}${text}` : text;
+    if (!previous || isDelta || text.length >= previous.text.length) normalizedMessages.set(key, { id, role, text: mergedText, timestamp: recordedAt, order: previous ? previous.order : row.order });
     if (role === 'user' && !firstUser) firstUser = text;
     const usage = genericUsage(item);
     if (usage.total) {
@@ -513,6 +890,9 @@ function parseGeneric(fileInfo, provider) {
       messageUsage.push(usage);
     }
   }
+  [...normalizedMessages.values()]
+    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) || a.order - b.order)
+    .forEach(message => addMessage(session, message));
 
   if (!session.usage.total && messageUsage.length) session.usage = sumUsage(messageUsage);
   session.title = firstUser || `${provider === 'gemini' ? 'Gemini' : 'Grok'} 세션`;
@@ -538,6 +918,8 @@ function contextInfo(used, windowInfo) {
 }
 
 function trimSession(session) {
+  session.omittedMessages = Math.max(0, session.messages.length - MAX_MESSAGES);
+  session.omittedLifecycle = Math.max(0, session.lifecycle.length - MAX_LIFECYCLE);
   session.messages = session.messages.slice(-MAX_MESSAGES);
   session.lifecycle = session.lifecycle.slice(-MAX_LIFECYCLE);
   if (!session.messages.length) addMessage(session, { id: `${session.id}:empty`, role: 'system', text: '표시할 대화 메시지가 아직 없습니다.', timestamp: session.updatedAt });
@@ -578,6 +960,168 @@ function attachHierarchy(sessions) {
     if (!session.parentId) continue;
     const parent = byId.get(session.parentId);
     if (parent && !parent.childIds.includes(session.id)) parent.childIds.push(session.id);
+  }
+  const parents = [...sessions].filter(session => session.collaboration
+    && ((Array.isArray(session.collaboration.spawns) && session.collaboration.spawns.length)
+      || (Array.isArray(session.childIds) && session.childIds.length)));
+  for (const parent of parents) {
+    const collaboration = parent.collaboration;
+    const retainedByTask = new Map((collaboration.retainedAgents || []).map(agent => [agent.taskName, agent]));
+    for (const record of collaboration.spawns) {
+      let child = record.childId ? byId.get(record.childId) : null;
+      if (!child) {
+        child = sessions.find(candidate => candidate.parentId === parent.id
+          && ((record.agentPath && candidate.agentPath === record.agentPath)
+            || (record.taskName && candidate.taskName === record.taskName)));
+      }
+      if (!child) {
+        const externalId = String(record.childId || `${parent.externalId}:spawn:${record.callId}`).replace(/^codex:/, '');
+        child = baseSession('codex', externalId, '', { mtimeMs: Date.parse(record.completedAt || record.startedAt || parent.updatedAt) || Date.now() });
+        child.id = record.childId || child.id;
+        child.parentId = parent.id;
+        child.depth = Number(parent.depth || 0) + 1;
+        child.agentPath = record.agentPath;
+        child.taskName = record.taskName;
+        child.agentName = record.agentName || record.taskName || 'subagent';
+        child.title = record.assignmentObserved ? compactText(record.assignment, 180) : (record.taskName || '서브에이전트 작업');
+        child.sharedGoal = record.sharedGoal || parent.title;
+        child.status = record.status === 'completed' ? 'completed' : (record.status === 'running' ? 'running' : 'idle');
+        child.statusDetail = child.status === 'completed' ? '작업 완료 기록' : (child.status === 'running' ? '실행 시작 관측' : '상태 기록만 확인됨');
+        child.startedAt = timestamp(record.startedAt, parent.startedAt);
+        child.updatedAt = timestamp(record.completedAt || record.startedAt, parent.updatedAt);
+        child.completedAt = timestamp(record.completedAt, null);
+        child.completionObserved = child.status === 'completed';
+        child.result = record.result || '';
+        child.source = 'collaboration-history';
+        child.sourceLabel = 'Codex 협업 이벤트';
+        child.clientKind = parent.clientKind;
+        child.model = parent.model;
+        child.cwd = parent.cwd;
+        child.workspace = parent.workspace;
+        child.environment = parent.environment;
+        if (child.result) addMessage(child, { id: `${child.id}:result`, role: 'assistant', text: child.result, timestamp: child.completedAt || child.updatedAt });
+        trimSession(child);
+        sessions.push(child);
+        byId.set(child.id, child);
+      }
+      record.childId = child.id;
+      record.agentPath = record.agentPath || child.agentPath;
+      record.taskName = record.taskName || child.taskName || collaborationTaskName(child.agentPath);
+      record.agentName = child.agentName || record.agentName;
+      record.result = record.result || child.result || '';
+      if (child.status === 'running' || child.status === 'starting') record.status = 'running';
+      else if (child.status === 'completed' || child.completionObserved || record.result) record.status = 'completed';
+      if (!record.completedAt && child.completedAt) record.completedAt = child.completedAt;
+      const retained = retainedByTask.get(record.taskName);
+      record.currentlyRetained = Boolean(retained);
+      if (retained && retained.name && (!child.agentName || child.agentName === child.taskName)) child.agentName = retained.name;
+      child.taskName = child.taskName || record.taskName;
+      child.sharedGoal = child.sharedGoal || record.sharedGoal || parent.title;
+      child.delegation = {
+        taskName: record.taskName,
+        assignment: record.assignment,
+        assignmentObserved: record.assignmentObserved,
+        assignmentProtected: record.assignmentProtected,
+        assignmentSource: record.assignmentSource,
+        sharedGoal: record.sharedGoal || child.sharedGoal || parent.title,
+        result: record.result,
+        startedAt: record.startedAt,
+        completedAt: record.completedAt,
+        currentlyRetained: record.currentlyRetained,
+      };
+      if (!parent.childIds.includes(child.id)) parent.childIds.push(child.id);
+      for (const communication of collaboration.communications || []) {
+        if (communication.childId) continue;
+        if ((record.agentPath && (communication.from === record.agentPath || communication.to === record.agentPath))
+          || (record.taskName && communication.taskName === record.taskName)) communication.childId = child.id;
+      }
+    }
+
+    for (const childId of parent.childIds) {
+      const child = byId.get(childId);
+      if (!child || collaboration.spawns.some(record => record.childId === child.id)) continue;
+      const inferredRecord = {
+        callId: `inferred:${child.id}`,
+        taskName: child.taskName || collaborationTaskName(child.agentPath) || child.agentName,
+        agentPath: child.agentPath,
+        childId: child.id,
+        assignment: '',
+        assignmentObserved: false,
+        assignmentProtected: false,
+        assignmentSource: 'unavailable',
+        sharedGoal: child.sharedGoal || parent.title,
+        status: child.status === 'completed' ? 'completed' : (child.status === 'running' ? 'running' : 'idle'),
+        startedAt: child.startedAt,
+        completedAt: child.completedAt,
+        result: child.result || '',
+        agentName: child.agentName,
+        currentlyRetained: false,
+        inferred: true,
+      };
+      collaboration.spawns.push(inferredRecord);
+      child.delegation = {
+        taskName: inferredRecord.taskName,
+        assignment: '',
+        assignmentObserved: false,
+        assignmentProtected: true,
+        assignmentSource: 'unavailable',
+        sharedGoal: child.sharedGoal || parent.title,
+        result: child.result || '',
+        startedAt: child.startedAt,
+        completedAt: child.completedAt,
+        currentlyRetained: false,
+      };
+      const communications = collaboration.communications || (collaboration.communications = []);
+      const hasChildCommunication = communications.some(event => event.childId === child.id);
+      if (!hasChildCommunication) {
+        communications.push({
+          id: `inferred-assignment:${child.id}`,
+          kind: 'assignment',
+          label: '작업 배정 확인',
+          from: parent.agentPath || '/root',
+          to: child.agentPath || child.id,
+          taskName: inferredRecord.taskName,
+          childId: child.id,
+          text: '',
+          protected: true,
+          timestamp: child.startedAt || parent.updatedAt,
+        });
+        communications.push({
+          id: `inferred-started:${child.id}`,
+          kind: 'started',
+          label: '서브에이전트 실행 시작',
+          from: 'Codex 런타임',
+          to: child.agentPath || child.id,
+          taskName: inferredRecord.taskName,
+          childId: child.id,
+          text: '',
+          protected: false,
+          timestamp: child.startedAt || parent.updatedAt,
+        });
+        if (child.result || child.status === 'completed') communications.push({
+          id: `inferred-result:${child.id}`,
+          kind: 'result',
+          label: '결과 반환 확인',
+          from: child.agentPath || child.id,
+          to: parent.agentPath || '/root',
+          taskName: inferredRecord.taskName,
+          childId: child.id,
+          text: child.result || '작업을 완료하고 메인 AI에 결과를 반환했습니다.',
+          protected: false,
+          timestamp: child.completedAt || child.updatedAt,
+        });
+      }
+    }
+    const spawns = collaboration.spawns;
+    collaboration.metrics = {
+      cumulativeCreated: spawns.length,
+      simultaneousCapacity: Number(collaboration.capacity && collaboration.capacity.subagents || 0),
+      currentlyRunning: spawns.filter(record => record.status === 'running').length,
+      completedRecords: spawns.filter(record => record.status === 'completed').length,
+      retainedCount: collaboration.retainedObserved ? (collaboration.retainedAgents || []).length : null,
+      capacitySource: collaboration.capacity && collaboration.capacity.source || 'unknown',
+      cumulativeSource: spawns.some(record => !record.inferred) ? 'spawn-events' : 'child-sessions',
+    };
   }
 }
 
@@ -722,7 +1266,11 @@ class AgentMonitor extends EventEmitter {
       }
 
       const managed = this.managedSessions();
-      const byId = new Map(sessions.map(session => [session.id, session]));
+      const byId = new Map();
+      for (const session of sessions) {
+        const existing = byId.get(session.id);
+        if (!existing || Date.parse(session.updatedAt || 0) > Date.parse(existing.updatedAt || 0)) byId.set(session.id, session);
+      }
       for (const session of managed) byId.set(session.id, session);
       const merged = [...byId.values()]
         .map(session => ({ ...session, workspace: workspaceLabel(session.cwd) }))
@@ -761,4 +1309,5 @@ module.exports = {
   readJsonLines,
   buildSummary,
   contextInfo,
+  attachHierarchy,
 };

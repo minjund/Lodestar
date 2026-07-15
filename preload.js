@@ -4,6 +4,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('loadtoagent', {
   bootstrap: () => ipcRenderer.invoke('app:bootstrap'),
+  backgroundState: () => ipcRenderer.invoke('app:background-state'),
+  showApp: () => ipcRenderer.invoke('app:show'),
   snapshot: () => ipcRenderer.invoke('agents:snapshot'),
   sessionDetail: sessionId => ipcRenderer.invoke('agents:detail', sessionId),
   runAgent: options => ipcRenderer.invoke('agents:run', options),

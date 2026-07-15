@@ -83,6 +83,49 @@ function selectCardMessages(messages) {
   return [...selected].sort((a, b) => a - b).map(index => cardMessage(list[index]));
 }
 
+function cardCollaboration(value) {
+  const collaboration = value || {};
+  return {
+    capacity: collaboration.capacity || { totalThreads: 0, subagents: 0, source: 'unknown' },
+    retainedObserved: Boolean(collaboration.retainedObserved),
+    retainedAgents: (collaboration.retainedAgents || []).slice(-30).map(agent => ({
+      path: clip(agent.path, 180), taskName: clip(agent.taskName, 180), name: clip(agent.name, 120), status: agent.status, observedAt: agent.observedAt,
+    })),
+    metrics: collaboration.metrics || null,
+    spawns: (collaboration.spawns || []).slice(-160).map(record => ({
+      callId: record.callId,
+      taskName: clip(record.taskName, 180),
+      agentPath: clip(record.agentPath, 180),
+      childId: record.childId,
+      assignment: clip(record.assignment, 1200),
+      assignmentObserved: Boolean(record.assignmentObserved),
+      assignmentProtected: Boolean(record.assignmentProtected),
+      assignmentSource: clip(record.assignmentSource, 80),
+      sharedGoal: clip(record.sharedGoal, 1200),
+      status: record.status,
+      startedAt: record.startedAt,
+      completedAt: record.completedAt,
+      result: clip(record.result, 1200),
+      agentName: clip(record.agentName, 120),
+      currentlyRetained: Boolean(record.currentlyRetained),
+      inferred: Boolean(record.inferred),
+    })),
+    communications: (collaboration.communications || []).slice(-120).map(event => ({
+      id: event.id,
+      kind: event.kind,
+      label: clip(event.label, 100),
+      from: clip(event.from, 180),
+      to: clip(event.to, 180),
+      taskName: clip(event.taskName, 180),
+      childId: event.childId,
+      text: clip(event.text, 1200),
+      protected: Boolean(event.protected),
+      assignmentSource: clip(event.assignmentSource, 80),
+      timestamp: event.timestamp,
+    })),
+  };
+}
+
 function cardSession(session) {
   return {
     id: session.id,
@@ -92,6 +135,9 @@ function cardSession(session) {
     depth: session.depth,
     agentName: session.agentName,
     agentRole: session.agentRole,
+    agentPath: session.agentPath || '',
+    taskName: session.taskName || '',
+    sharedGoal: clip(session.sharedGoal, 1200),
     environment: session.environment,
     title: clip(session.title, 180),
     model: session.model,
@@ -107,12 +153,28 @@ function cardSession(session) {
     startedAt: session.startedAt,
     updatedAt: session.updatedAt,
     endedAt: session.endedAt,
+    completedAt: session.completedAt,
+    completionObserved: Boolean(session.completionObserved),
+    result: clip(session.result, 1200),
+    delegation: session.delegation ? {
+      taskName: clip(session.delegation.taskName, 180),
+      assignment: clip(session.delegation.assignment, 1200),
+      assignmentObserved: Boolean(session.delegation.assignmentObserved),
+      assignmentProtected: Boolean(session.delegation.assignmentProtected),
+      assignmentSource: clip(session.delegation.assignmentSource, 80),
+      sharedGoal: clip(session.delegation.sharedGoal, 1200),
+      result: clip(session.delegation.result, 1200),
+      startedAt: session.delegation.startedAt,
+      completedAt: session.delegation.completedAt,
+      currentlyRetained: Boolean(session.delegation.currentlyRetained),
+    } : null,
     truncated: session.truncated,
     runId: session.runId,
     usage: session.usage,
     context: session.context,
     childIds: session.childIds,
     runtimePresence: session.runtimePresence || [],
+    collaboration: cardCollaboration(session.collaboration),
     messages: selectCardMessages(session.messages),
     lifecycle: (session.lifecycle || []).slice(-2).map(cardLifecycle),
   };
@@ -126,6 +188,9 @@ function fingerprint(snapshot, tmux) {
     session.usage && session.usage.total,
     session.context && session.context.used,
     session.childIds && session.childIds.length,
+    session.collaboration && session.collaboration.metrics && Object.values(session.collaboration.metrics).join(':'),
+    session.collaboration && session.collaboration.communications && session.collaboration.communications.length,
+    session.collaboration && session.collaboration.communications && session.collaboration.communications.at(-1) && session.collaboration.communications.at(-1).id,
     (session.runtimePresence || []).map(item => `${item.id}:${item.pid}:${item.terminalId || ''}`).join(','),
   ]);
   const tmuxState = (tmux.distros || []).flatMap(distro => (distro.sessions || []).flatMap(tmuxSession => (tmuxSession.windows || []).flatMap(window => (window.panes || []).map(pane => [
