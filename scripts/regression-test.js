@@ -308,11 +308,13 @@ test('Codex 내부 지침 대신 실제 사용자 목표를 카드 제목으로 
     { timestamp: '2026-07-14T02:00:01Z', type: 'event_msg', payload: { type: 'user_message', message: '<permissions instructions>Filesystem sandboxing defines which files can be read or written</permissions instructions>' } },
     { timestamp: '2026-07-14T02:00:01Z', type: 'event_msg', payload: { type: 'user_message', message: 'You are `/root`, the primary agent in a team of agents collaborating to fulfill the user goals. All agents share the same directory and collaboration tools cannot be called from inside another tool.' } },
     { timestamp: '2026-07-14T02:00:01Z', type: 'event_msg', payload: { type: 'user_message', message: '완료된 서브에이전트는 기본으로 숨기고 펼쳐서 보게 해줘' } },
+    { timestamp: '2026-07-14T02:00:01Z', type: 'event_msg', payload: { type: 'user_message', message: '<skill><name>efficiency-alarm-overnight-loop</name><instructions>내부 스킬 지침</instructions></skill>' } },
     { timestamp: '2026-07-14T02:00:02Z', type: 'event_msg', payload: { type: 'user_message', message: '<codex_internal_context source="goal"><objective>실시간 토큰 게이지를 크게 보여줘</objective></codex_internal_context>' } },
     { timestamp: '2026-07-14T02:00:03Z', type: 'response_item', payload: { id: 'later-user', type: 'message', role: 'user', content: [{ type: 'input_text', text: '<codex_internal_context source="goal"><objective>서브에이전트 관계를 마인드맵으로 보여줘</objective></codex_internal_context>' }] } },
   ]));
   assert.equal(session.title, '완료된 서브에이전트는 기본으로 숨기고 펼쳐서 보게 해줘');
   assert.equal(session.messages.some(item => /Filesystem sandboxing/.test(item.text)), false);
+  assert.equal(session.messages.some(item => /efficiency-alarm-overnight-loop/.test(item.text)), false);
   assert.equal(session.messages.some(item => /실시간 토큰 게이지|서브에이전트 관계/.test(item.text)), false);
 });
 

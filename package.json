@@ -47,6 +47,7 @@
     "test:bridge": "electron scripts/bridge-integration-test.js",
     "test:tmux": "node scripts/tmux-integration-test.js",
     "test:visual": "electron scripts/visual-check.js",
+    "test:responsive": "electron scripts/responsive-check.js",
     "test:interaction": "electron scripts/interaction-check.js",
     "demo:readme": "electron scripts/readme-demo.js",
     "dist": "electron-builder",

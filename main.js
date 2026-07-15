@@ -135,8 +135,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1600,
     height: 980,
-    minWidth: 1080,
-    minHeight: 700,
+    minWidth: 360,
+    minHeight: 520,
     title: 'LoadToAgent · AI Agent Observatory',
     backgroundColor: '#080b12',
     show: false,

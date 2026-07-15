@@ -427,6 +427,7 @@ function codexVisibleUserText(value) {
   const desktopRequest = raw.match(/##\s*My request for Codex:\s*([\s\S]*?)(?:\n{2,}<image\b|$)/i);
   if (desktopRequest) return compactText(desktopRequest[1], 6000);
   if (/^<(?:permissions instructions|app-context|environment_context|skills_instructions|plugins_instructions|apps_instructions|multi_agent_mode|collaboration_mode)>/i.test(raw)) return '';
+  if (/^<skill(?:\s|>)/i.test(raw)) return '';
   if (/^#\s*Codex desktop context/i.test(raw)) return '';
   if (/^Approved command prefix saved:/i.test(raw)) return '';
   if (/^You are (?:`?\/root|Codex, an agent based on)/i.test(raw)) return '';

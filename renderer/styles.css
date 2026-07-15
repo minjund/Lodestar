@@ -358,3 +358,222 @@ button:not(:disabled):active,.provider-overview-card:active,.session-card:active
 /* Live work is split by execution runtime so tmux jobs never blend into app/terminal sessions. */
 .agent-runtime-split{display:grid;gap:16px}.runtime-segment{min-width:0;overflow:hidden;border:1px solid #24323e;border-radius:16px;background:rgba(6,10,15,.66)}.runtime-segment>header{min-height:70px;display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid #1e2b35;background:linear-gradient(90deg,rgba(21,31,41,.92),rgba(10,16,23,.72))}.runtime-segment>header>span:nth-child(2){min-width:0;flex:1}.runtime-segment>header small,.runtime-segment>header b,.runtime-segment>header em{display:block}.runtime-segment>header small{color:#718395;font-size:9px;font-weight:800;letter-spacing:.08em}.runtime-segment>header b{margin-top:3px;color:#e2eaf0;font-size:15px}.runtime-segment>header em{margin-top:3px;color:#67788a;font-size:10px;font-style:normal}.runtime-segment>header>strong{min-width:43px;padding:7px 9px;border:1px solid #30404d;border-radius:9px;background:#101922;color:#9bacbc;font-size:12px;text-align:center}.runtime-segment-icon{width:39px;height:39px;display:grid;place-items:center;flex:0 0 auto;border:1px solid #31424f;border-radius:10px;background:#111c26;color:#91a2b3;font-family:"Cascadia Code",Consolas,monospace;font-size:11px;font-weight:800}.runtime-segment .agent-flow-overview{padding:12px}.runtime-segment-empty{min-height:112px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px;text-align:center}.runtime-segment-empty b{color:#aebbc7;font-size:12px}.runtime-segment-empty span{margin-top:6px;color:#617183;font-size:10px}.tmux-runtime{border-color:rgba(72,211,169,.32);background:radial-gradient(circle at 94% 0,rgba(54,198,158,.09),transparent 35%),rgba(5,12,15,.76)}.tmux-runtime>header{border-color:rgba(69,176,145,.2);background:linear-gradient(90deg,rgba(20,56,47,.6),rgba(8,19,22,.82))}.tmux-runtime .runtime-segment-icon{border-color:#386d5d;background:#12362d;color:#70e4bb}.tmux-runtime>header small{color:#5cd9ad}.tmux-runtime>header>strong{border-color:#2e6858;background:#102f28;color:#72e0b8}.live-tmux-overview-open{height:34px;padding:0 11px;border:1px solid #347460;border-radius:9px;background:#153d31;color:#82e8c2;font-size:10px;font-weight:750;cursor:pointer}.live-tmux-overview-open:hover{background:#1a4b3b}.live-tmux-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;padding:12px}.live-tmux-card{--provider:#52d9ae;min-width:0;overflow:hidden;border:1px solid color-mix(in srgb,var(--provider) 28%,#29413d);border-radius:13px;background:linear-gradient(150deg,color-mix(in srgb,var(--provider) 5%,#101820),#091017)}.live-tmux-card.active{box-shadow:inset 3px 0 color-mix(in srgb,var(--provider) 76%,#55dcae)}.live-tmux-card.dead{opacity:.58}.live-tmux-pane{width:100%;display:block;padding:12px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}.live-tmux-pane:hover{background:rgba(255,255,255,.018)}.live-tmux-card-head{display:flex;align-items:center;gap:9px}.live-tmux-card-head>span:nth-child(2){min-width:0;flex:1}.live-tmux-card-head small,.live-tmux-card-head b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.live-tmux-card-head small{color:#5ccfa8;font-size:8px;letter-spacing:.1em}.live-tmux-card-head b{margin-top:2px;color:#dce9e4;font-size:12px}.live-tmux-card-head em{padding:4px 6px;border-radius:7px;background:#12352d;color:#69dcb6;font-size:8px;font-style:normal;white-space:nowrap}.live-tmux-symbol{width:30px;height:30px;display:grid;place-items:center;flex:0 0 auto;border-radius:8px;background:#123a30;color:#76e7c0;font-size:12px}.live-tmux-title{display:block;margin-top:11px;overflow:hidden;color:#eef5f2;font-size:13px;text-overflow:ellipsis;white-space:nowrap}.live-tmux-agent{display:flex;align-items:center;gap:6px;margin-top:9px}.live-tmux-agent i{width:23px;height:20px;display:grid;place-items:center;border-radius:5px;background:color-mix(in srgb,var(--provider) 12%,#17222b);color:var(--provider);font-size:7px;font-style:normal;font-weight:800}.live-tmux-agent b{color:#b8c7ce;font-size:10px}.live-tmux-agent small{color:#647687;font-size:9px}.live-tmux-location{display:flex;align-items:center;gap:5px;margin-top:10px;overflow:hidden;color:#798b99;font-size:9px;white-space:nowrap}.live-tmux-location b{color:#74dcb8}.live-tmux-location i{color:#3d5d55;font-style:normal}.live-tmux-location span{overflow:hidden;text-overflow:ellipsis}.live-tmux-cwd{display:block;margin-top:6px;overflow:hidden;color:#5b6d7e;font-family:"Cascadia Code",Consolas,monospace;font-size:8px;text-overflow:ellipsis;white-space:nowrap}.live-tmux-card footer{min-height:36px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 10px 5px 12px;border-top:1px solid #1b2b31;background:rgba(5,10,13,.5)}.live-tmux-card footer>span:first-child{color:#638074;font-size:8px}.live-tmux-card footer>span:last-child{display:flex;gap:5px}.live-tmux-card footer button{width:auto;padding:6px 7px;border:0;border-radius:7px;background:transparent;color:#77d9b5;font-size:8px;cursor:pointer}.live-tmux-card footer button:hover{background:#133229;color:#9af0cf}.live-tmux-fallback{padding-top:0!important}
 @media(max-width:900px){.runtime-segment>header{flex-wrap:wrap}.runtime-segment>header em{display:none}.live-tmux-overview-open{margin-left:51px}.live-tmux-grid{grid-template-columns:1fr}.runtime-segment .agent-flow-overview{grid-template-columns:1fr}}
+
+/* 3.2 — viewport-safe responsive shell
+   The desktop rail becomes a thumb-friendly bottom navigation on compact
+   windows, while every dense workspace keeps its own vertical flow. */
+html,body,.app-shell,.main-stage{max-width:100%}
+.app-shell,.main-stage,.topbar>div,.sessions-section,.session-tools,.live-section,.tmux-section,.terminal-section,.terminal-layout,.terminal-workbench-mount{min-width:0}
+img,svg,video,canvas{max-width:100%}
+pre,code{overflow-wrap:anywhere}
+.topbar h1,.subtitle,.section-explain,.beginner-guide b,.beginner-guide small{word-break:keep-all;overflow-wrap:break-word}
+
+@media(max-width:1100px){
+  .sessions-heading{align-items:flex-start;flex-direction:column}
+  .session-tools{width:100%;justify-content:flex-start}
+  .search-box{flex:1 1 240px;width:auto}
+  .tmux-control-layout{display:block}
+  .tmux-control-layout .terminal-resource-panel{max-height:240px;border-right:0;border-bottom:1px solid #1c2a34}
+}
+
+@media(max-width:720px){
+  :root{--sidebar:0px;--radius:14px}
+  html,body{width:100%;height:100%;overflow:hidden}
+  .app-shell{display:block;width:100%;height:100vh;height:100dvh;min-height:0}
+  .main-stage{width:100%;height:100vh;height:100dvh;padding:20px 14px calc(92px + env(safe-area-inset-bottom));overscroll-behavior:contain}
+
+  .sidebar{position:fixed;z-index:18;inset:auto 0 0;height:calc(66px + env(safe-area-inset-bottom));padding:6px max(6px,env(safe-area-inset-right)) env(safe-area-inset-bottom) max(6px,env(safe-area-inset-left));overflow:visible;border-top:1px solid #273142;border-right:0;background:rgba(10,14,22,.96);box-shadow:0 -16px 40px rgba(0,0,0,.34);backdrop-filter:blur(18px)}
+  .sidebar>.brand,.sidebar>.sidebar-section,.sidebar>.sidebar-footer,.nav-group-label{display:none!important}
+  .sidebar>.view-nav{width:100%;height:60px;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px}
+  .nav-item{min-width:0;height:54px;display:grid;grid-template-columns:1fr;grid-template-rows:23px 15px;place-items:center;gap:2px;padding:5px 1px;border-radius:10px;text-align:center}
+  .sidebar .nav-item>span:nth-child(2){display:block;max-width:100%;overflow:hidden;color:inherit;font-size:9px;font-weight:700;letter-spacing:-.04em;text-overflow:ellipsis;white-space:nowrap}
+  .nav-item b{display:none!important}
+  .nav-icon{height:21px;display:grid;place-items:center;font-size:15px}
+  .nav-icon.live-dot{width:8px;height:8px;margin:6px auto 7px}
+  .nav-item.active,.tmux-nav-item.active{background:linear-gradient(180deg,rgba(77,183,226,.13),rgba(77,183,226,.04));box-shadow:inset 0 2px var(--cyan)}
+  .tmux-nav-item.active{background:linear-gradient(180deg,rgba(55,196,155,.15),rgba(55,196,155,.04));box-shadow:inset 0 2px #55d6aa}
+
+  .topbar h1{font-size:clamp(25px,7.5vw,30px);line-height:1.15;overflow-wrap:anywhere}
+  .subtitle{font-size:12px;line-height:1.6}
+  .top-actions{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;margin-top:17px;padding-top:0}
+  .sync-state{min-width:0;padding:7px 9px}
+  #newRunBtn{width:100%;min-width:0;padding-inline:10px;white-space:nowrap}
+  .beginner-guide{margin-top:16px;padding:13px}
+
+  .global-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .global-stat{min-width:0;padding:13px 12px;border-right:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft)}
+  .global-stat:nth-child(2n){border-right:0}
+  .global-stat:last-child{grid-column:1/-1;border-right:0;border-bottom:0}
+  .provider-overview{grid-template-columns:1fr}
+  .sessions-section{margin-top:24px}
+  .session-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
+  .search-box{grid-column:1/-1;width:100%}
+  .session-tools select{width:100%;min-width:0;padding-left:9px}
+  .session-card{min-height:0;contain-intrinsic-size:390px}
+  .session-card.subagent{margin-left:0}
+  .card-head{flex-wrap:wrap;padding-inline:13px}
+  .card-title{padding-inline:13px;white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+  .card-subtitle,.now-strip,.conversation-preview,.context-meter,.token-row,.child-row{margin-left:13px;margin-right:13px}
+  .card-footer{padding-inline:13px}
+  .token-row>div{padding-inline:6px}
+
+  .live-section,.tmux-section{padding:13px;border-radius:15px}
+  .live-section-head,.tmux-section-head{gap:14px}
+  .live-section-head>div,.tmux-section-head>div{min-width:0;align-items:flex-start}
+  .tmux-logo,.terminal-logo{width:42px;height:42px;flex:0 0 auto}
+  .tmux-section-head h2,.terminal-section-head h2{overflow-wrap:anywhere}
+  .tmux-section-actions,.terminal-create-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .tmux-section-actions button,.terminal-create-actions button{width:100%;min-width:0;padding-inline:8px;white-space:nowrap}
+  .tmux-session-node,.tmux-window-node,.tmux-pane-node,.agent-node,.agent-flow-row{max-width:100%;min-width:0}
+  .tmux-window-stack,.tmux-pane-stack{padding-left:8px}
+  .tmux-pane-main{padding-inline:11px}
+  .tmux-pane-node footer{padding-inline:11px}
+  .tmux-map,.agent-workflow-canvas{max-width:100%;overflow:hidden}
+  .agent-flow-overview,.agent-relation-rail,.workflow-metric-grid{grid-template-columns:1fr}
+  .agent-workflow-canvas{padding:12px}
+  .focus-relation{width:100%;min-width:0}
+
+  #terminalSection .terminal-layout{width:100%}
+  #terminalSection .terminal-workbench{width:100%;min-width:0}
+  .terminal-section-head>div:first-child{min-width:0;align-items:flex-start}
+  .terminal-resource-panel{min-width:0}
+  .terminal-session-item,.terminal-target-cluster,.terminal-workspace-actions,.terminal-key-actions{max-width:100%;min-width:0}
+  .terminal-controlbar{min-width:0}
+  .terminal-target-meta{max-width:100%}
+  .terminal-target-meta span{overflow-wrap:anywhere;word-break:break-word}
+  .terminal-key-actions button{min-width:0;padding-inline:8px}
+  .terminal-key-actions kbd{display:none}
+  .terminal-tmux-tools{max-width:100%;overscroll-behavior-inline:contain}
+  .terminal-stage{max-width:100%}
+  .terminal-empty{padding-inline:14px}
+  .terminal-empty p{margin-inline:0}
+  .terminal-command-composer{grid-template-columns:minmax(0,1fr) 42px}
+
+  .detail-drawer{width:100vw;height:100vh;height:100dvh;border-left:0}
+  .drawer-head{padding:16px 14px 13px}
+  .drawer-meta{padding:0 14px 13px}
+  .drawer-tabs{padding:0 8px;overflow-x:auto}
+  .drawer-tab{min-width:0;flex:1;padding-inline:8px;white-space:nowrap}
+  .drawer-content{padding:15px 14px calc(24px + env(safe-area-inset-bottom))}
+  .chat-row{grid-template-columns:29px minmax(0,1fr);gap:8px}
+  .lifecycle-event{grid-template-columns:23px minmax(0,1fr)}
+  .lifecycle-event time{grid-column:2;margin-top:-6px}
+
+  .modal-backdrop{align-items:end;padding:0}
+  .run-modal{width:100%;max-width:none;max-height:94vh;max-height:94dvh;padding:19px 16px calc(18px + env(safe-area-inset-bottom));border-right:0;border-bottom:0;border-left:0;border-radius:20px 20px 0 0}
+  .form-grid{grid-template-columns:1fr}
+  .run-provider-picker{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .path-field{min-width:0}
+  .path-field input{min-width:0}
+  .modal-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .modal-actions button{width:100%;padding-inline:8px}
+  .toast{width:max-content;max-width:calc(100vw - 28px);bottom:calc(78px + env(safe-area-inset-bottom));text-align:center}
+}
+
+@media(max-width:420px){
+  .main-stage{padding-top:17px;padding-right:11px;padding-left:11px}
+  .eyebrow{margin-bottom:6px}
+  .topbar h1{font-size:24px}
+  .top-actions{grid-template-columns:88px minmax(0,1fr)}
+  .sync-state{gap:6px;padding-inline:7px}
+  .primary-button,.ghost-button{font-size:11px}
+  .beginner-guide li{grid-template-columns:26px minmax(0,1fr);gap:8px}
+  .beginner-guide li>i{width:24px;height:24px}
+  .global-stat strong{font-size:20px}
+  .poc-metrics{gap:2px}
+  .poc-metrics div{padding-right:3px}
+  .session-tools{grid-template-columns:1fr}
+  .search-box{grid-column:auto}
+  .card-head{gap:8px}
+  .card-head .provider-mark{width:32px;height:32px}
+  .status-pill{padding-inline:6px;letter-spacing:0}
+  .token-row span{font-size:8px}
+  .token-row b{font-size:11px}
+  .tmux-section,.live-section{padding:10px}
+  .terminal-create-actions,.tmux-section-actions{grid-template-columns:1fr}
+  .terminal-key-actions{gap:4px}
+  .terminal-controlbar .terminal-key-actions button{padding-inline:7px;font-size:9px}
+  .terminal-console-head small,.terminal-console-state{font-size:8px}
+  .terminal-command-form{padding-inline:8px}
+  .drawer-content{padding-inline:11px}
+  .drawer-head,.drawer-meta{padding-right:11px;padding-left:11px}
+  .chat-row{grid-template-columns:25px minmax(0,1fr);gap:7px}
+  .chat-avatar{width:25px;height:25px;border-radius:7px}
+  .run-modal{padding-right:13px;padding-left:13px}
+}
+
+@media(max-height:620px){
+  .run-modal{max-height:100vh;max-height:100dvh;border-radius:0}
+  .detail-drawer{height:100vh;height:100dvh}
+}
+
+/* 3.3 — coherent focused workflow at every width
+   The command composer belongs to the selected AI. Its output port therefore
+   follows the whole selected stack, so relationship lines never cross inputs. */
+.agent-workflow-selected-stack>.agent-workflow-port.output{
+  right:auto;
+  left:min(calc(50% + 175px),100%);
+  top:38px;
+  bottom:auto;
+  transform:translate(-50%,-50%);
+}
+
+@media(min-width:1401px){
+  .agent-workflow-grid{
+    grid-template-columns:minmax(170px,.55fr) minmax(320px,1fr) minmax(360px,1.35fr);
+    gap:clamp(24px,2vw,42px);
+  }
+  .downstream-column{grid-column:auto}
+  .upstream-column .agent-workflow-port.output{right:-7px;left:auto;top:50%;bottom:auto;transform:translate(50%,-50%)}
+  .agent-workflow-selected>.agent-workflow-port.input{left:-7px;top:38px;bottom:auto;transform:translate(-50%,-50%)}
+  .downstream-column>.agent-workflow-port.group-input{left:-7px;top:96px;bottom:auto;transform:translate(-50%,-50%)}
+}
+
+@media(max-width:1400px){
+  .agent-workflow-canvas{padding:18px;overflow:hidden}
+  .agent-workflow-grid{grid-template-columns:minmax(0,1fr);gap:56px}
+  .agent-workflow-column>header{min-height:0;margin-bottom:10px;text-align:center}
+  .agent-workflow-selected-stack{width:min(620px,100%);margin-inline:auto}
+  .agent-workflow-selected{width:min(520px,100%);max-width:none;margin-inline:auto}
+  .upstream-column .agent-workflow-stack{width:min(520px,100%);margin-inline:auto}
+  .downstream-column{grid-column:1;min-width:0}
+  .downstream-column .agent-workflow-stack{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .upstream-column .agent-workflow-port.output{right:auto;left:50%;top:auto;bottom:-7px;transform:translate(-50%,50%)}
+  .agent-workflow-selected>.agent-workflow-port.input{left:50%;top:-7px;bottom:auto;transform:translate(-50%,-50%)}
+  .agent-workflow-selected-stack>.agent-workflow-port.output{right:auto;left:50%;top:auto;bottom:-7px;transform:translate(-50%,50%)}
+  .downstream-column>.agent-workflow-port.group-input{left:50%;top:-7px;bottom:auto;transform:translate(-50%,-50%)}
+}
+
+@media(max-width:720px){
+  .agent-workflow-canvas{padding:11px}
+  .agent-workflow-grid{gap:50px}
+  .agent-workflow-selected-stack{width:100%}
+  .downstream-column .agent-workflow-stack{grid-template-columns:1fr}
+}
+
+@media(max-width:520px){
+  .agent-workflow-selected .agent-node-main{padding:13px 12px}
+  .agent-node-top{
+    display:grid;
+    grid-template-columns:40px minmax(0,1fr) auto;
+    grid-template-rows:auto auto;
+    align-items:center;
+    column-gap:9px;
+    row-gap:6px;
+  }
+  .agent-node-top .provider-mark{grid-column:1;grid-row:1/3;width:40px;height:40px}
+  .agent-node-top .agent-identity{grid-column:2;grid-row:1}
+  .agent-node-top .status-pill{grid-column:3;grid-row:1;margin:0;justify-self:end}
+  .agent-node-top .execution-mode-badge{grid-column:2/4;grid-row:2;order:initial;margin:0;justify-self:start}
+  .agent-identity b{font-size:12px}
+  .runtime-segment>header{
+    display:grid;
+    grid-template-columns:39px minmax(0,1fr) auto;
+    align-items:center;
+    gap:9px;
+  }
+  .runtime-segment>header>.runtime-segment-icon{grid-column:1;grid-row:1}
+  .runtime-segment>header>span:nth-child(2){grid-column:2;grid-row:1;min-width:0}
+  .runtime-segment>header>strong{grid-column:3;grid-row:1}
+  .runtime-segment>header>.live-tmux-overview-open{grid-column:1/4;grid-row:2;width:100%;margin:0}
+}
