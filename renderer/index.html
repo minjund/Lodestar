@@ -51,7 +51,7 @@
         </div>
         <div class="top-actions">
           <div class="sync-state"><span></span><div><b>LIVE</b><small id="lastSync">연결 중</small></div></div>
-          <button id="newRunBtn" class="primary-button"><span>＋</span> AI에게 새 일 맡기기</button>
+          <button id="newRunBtn" class="primary-button new-run-cta" type="button" aria-label="AI에게 새 일 맡기기" aria-keyshortcuts="Meta+N Control+N"><span class="new-run-cta-icon" aria-hidden="true">＋</span><span class="new-run-cta-copy"><b>새 AI 작업</b><small><kbd>⌘N</kbd></small></span></button>
         </div>
       </header>
 
@@ -202,21 +202,30 @@
   </aside>
 
   <div id="runModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="runModalTitle">
-    <form id="runForm" class="run-modal">
+    <form id="runForm" class="run-modal run-composer">
       <div class="modal-head">
-        <div><p class="eyebrow">새 작업</p><h2 id="runModalTitle">AI에게 새 일 맡기기</h2></div>
-        <button type="button" id="closeRunModalBtn" class="close-button">×</button>
+        <div><p class="eyebrow">AI 작업 시작</p><h2 id="runModalTitle">무슨 일을 맡길까요?</h2><p class="run-modal-intro">할 일을 먼저 적고, 어떤 AI가 어디서 작업할지 선택하세요.</p></div>
+        <button type="button" id="closeRunModalBtn" class="close-button" aria-label="새 작업 창 닫기">×</button>
       </div>
-      <label class="field-label">어떤 AI에게 맡길까요?</label>
-      <div id="runProviderPicker" class="run-provider-picker"></div>
-      <div class="form-grid">
-        <label><span>작업 폴더</span><div class="path-field"><input id="runCwd" required placeholder="D:\\project" /><button type="button" id="pickRunCwdBtn">찾기</button></div></label>
+      <section class="run-step run-request-step" aria-labelledby="runRequestLabel">
+        <div class="run-step-head"><i>1</i><span><b id="runRequestLabel">할 일 적기</b><small>결과와 제약을 함께 적으면 더 정확해요.</small></span></div>
+        <label class="run-prompt-field"><span class="sr-only">AI에게 맡길 일</span><textarea id="runPrompt" required rows="5" maxlength="8000" placeholder="예: 로그인 화면의 오류를 찾아 고치고, 관련 테스트까지 실행해줘"></textarea></label>
+        <div class="run-prompt-tools"><div class="run-prompt-examples" aria-label="빠른 요청 예시"><button type="button" data-run-prompt-example="문제의 원인을 찾아 고치고 관련 테스트까지 실행해줘">오류 수정</button><button type="button" data-run-prompt-example="현재 코드를 검토하고 중요도 순으로 개선해줘">코드 검토</button><button type="button" data-run-prompt-example="현재 기능을 검증하는 테스트를 추가하고 실행해줘">테스트 추가</button></div><span id="runPromptCount" class="run-prompt-count" aria-live="polite">0 / 8,000</span></div>
+      </section>
+      <section class="run-step run-setup-step" aria-labelledby="runSetupLabel">
+        <div class="run-step-head"><i>2</i><span><b id="runSetupLabel">실행 방법 선택</b><small>AI와 작업 폴더만 고르면 준비가 끝납니다.</small></span></div>
+        <label class="field-label">어떤 AI에게 맡길까요?</label>
+        <div id="runProviderPicker" class="run-provider-picker"></div>
+        <label class="run-folder-field"><span>작업 폴더</span><div class="path-field"><input id="runCwd" required placeholder="프로젝트 폴더를 선택하세요" /><button type="button" id="pickRunCwdBtn">폴더 찾기</button></div></label>
+        <div id="runWorkspaceSuggestions" class="run-workspace-suggestions" aria-label="최근 작업 폴더"></div>
+        <label class="permission-toggle"><input id="allowWrites" type="checkbox" /><span class="toggle-track"></span><div><strong>AI가 파일을 고칠 수 있게 허용</strong><small>켜면 선택한 폴더의 파일을 직접 수정합니다.</small></div></label>
+      </section>
+      <details class="run-advanced">
+        <summary><span><b>고급 설정</b><small>특정 모델을 직접 지정할 때만 사용</small></span><i aria-hidden="true">↓</i></summary>
         <label><span>사용 모델 <small>몰라도 비워두세요</small></span><input id="runModel" placeholder="비워두면 AI가 알아서 선택합니다" /></label>
-      </div>
-      <label><span>무엇을 해달라고 할까요?</span><textarea id="runPrompt" required rows="7" placeholder="예: 로그인 화면의 오류를 찾아서 고쳐줘"></textarea></label>
-      <label class="permission-toggle"><input id="allowWrites" type="checkbox" /><span class="toggle-track"></span><div><strong>AI가 파일을 고칠 수 있게 허용</strong><small>켜면 AI가 선택한 폴더의 파일을 직접 수정할 수 있습니다.</small></div></label>
+      </details>
       <div id="runError" class="form-error hidden"></div>
-      <div class="modal-actions"><button type="button" id="cancelRunBtn" class="ghost-button">취소</button><button type="submit" class="primary-button">이 작업 시작하기</button></div>
+      <div class="modal-actions run-modal-actions"><span class="run-shortcut-hint"><kbd>⌘</kbd><kbd>Enter</kbd> 시작</span><button type="button" id="cancelRunBtn" class="ghost-button">취소</button><button type="submit" class="primary-button run-submit-button"><span class="run-submit-icon" aria-hidden="true">↗</span><span id="runSubmitLabel">AI에게 맡기기</span></button></div>
     </form>
   </div>
 

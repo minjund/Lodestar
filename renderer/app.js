@@ -149,6 +149,15 @@ function esc(value) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
+function readablePreview(value, maxCharacters = 120) {
+  const full = String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
+  if (full.length <= maxCharacters) return { full, text: full, truncated: false };
+  const sample = full.slice(0, maxCharacters + 1);
+  const wordBoundary = sample.lastIndexOf(' ');
+  const cut = wordBoundary >= Math.floor(maxCharacters * .72) ? wordBoundary : maxCharacters;
+  return { full, text: `${sample.slice(0, cut).trimEnd()}…`, truncated: true };
+}
+
 function memoryCategoryLabel(value) {
   const labels = { insight: '인사이트', convention: '작업 규칙', failure: '실패 기록', decision: '결정', pattern: '반복 패턴' };
   return labels[String(value || '').toLowerCase()] || String(value || '기록');
@@ -208,6 +217,20 @@ function markdownHtml(value) {
   return `<div class="chat-content markdown">${output.join('')}</div>`;
 }
 
+function roadmapHtml(value) {
+  const text = String(value || '').trim();
+  const lines = text.replace(/\r\n/g, '\n').split('\n').map(line => line.trim()).filter(Boolean);
+  const hasRoadmapSignal = /(?:로드맵|작업\s*계획|roadmap|implementation\s+plan|milestone|phase\s*\d+)/i.test(text);
+  const steps = lines.filter(line => /^(?:[-*]\s+|\d+[.)]\s+|#{2,3}\s+(?!로드맵|roadmap))/i.test(line));
+  if (!hasRoadmapSignal || (text.length < 420 && steps.length < 6)) return '';
+  const heading = lines.find(line => /^#{1,3}\s+/.test(line));
+  const title = readablePreview((heading || '작업 로드맵').replace(/^#{1,3}\s+/, ''), 72).text;
+  const previewSteps = (steps.length ? steps : lines.filter(line => !/^#{1,3}\s+/.test(line))).slice(0, 3)
+    .map(line => readablePreview(line.replace(/^(?:[-*]\s+|\d+[.)]\s+|#{2,3}\s+)/, '').replace(/\*\*/g, ''), 92).text);
+  const countLabel = steps.length ? `${steps.length}개 단계` : '긴 계획';
+  return `<details class="chat-roadmap" data-roadmap-collapsed="true"><summary><span class="chat-roadmap-mark" aria-hidden="true">MAP</span><span><b>${esc(title)}</b><small>${esc(countLabel)} · 접어서 표시</small></span><i aria-hidden="true">↓</i></summary><ol class="chat-roadmap-preview">${previewSteps.map(step => `<li>${esc(step)}</li>`).join('')}</ol><div class="chat-roadmap-full">${markdownHtml(text)}</div></details>`;
+}
+
 function messageContentHtml(message) {
   const text = String(message && message.text || '').trim();
   if (!text) return '<div class="chat-content empty">표시할 내용이 없습니다.</div>';
@@ -220,6 +243,8 @@ function messageContentHtml(message) {
       return `<div class="structured-json"><div class="structured-heading"><b>구조화된 데이터</b><span>${Array.isArray(parsed) ? `${parsed.length}개 항목` : 'JSON'}</span></div>${jsonValueHtml(parsed)}</div>`;
     } catch {}
   }
+  const roadmap = message && message.role === 'assistant' ? roadmapHtml(text) : '';
+  if (roadmap) return roadmap;
   return markdownHtml(text);
 }
 
@@ -429,15 +454,19 @@ function graphNode(session, options = {}) {
   const delegation = session.delegation || {};
   const displayedTask = session.parentId && delegation.assignmentObserved && delegation.assignment
     ? delegation.assignment : (session.parentId && (delegation.taskName || session.taskName) ? (delegation.taskName || session.taskName) : session.title);
+  const goalPreview = readablePreview(displayedTask, options.focus ? 118 : 96);
+  const currentWork = latestWorkCopy(session);
+  const currentPreview = readablePreview(currentWork, options.focus ? 132 : 108);
   const role = session.parentId
     ? `도움 AI${session.agentName ? ` · ${session.agentName}` : ''}${session.agentRole ? ` / ${agentRoleLabel(session.agentRole)}` : ''}`
     : '일을 맡은 AI';
   return `<article class="agent-node ${running ? 'running' : ''} ${session.parentId ? 'child-agent' : 'root-agent'} ${options.focus ? 'is-focus' : ''}" data-motion-key="agent:${esc(session.id)}" data-motion-value="${esc(session.updatedAt || '')}:${usage.total || 0}:${esc(session.status || '')}" style="${providerStyle(session.provider)}">
     <button class="agent-node-main" type="button" data-graph-focus="${esc(session.id)}" aria-label="${esc(role)} 관계 중심으로 보기">
       <span class="agent-node-top"><span class="provider-mark">${esc(provider.mark)}</span><span class="agent-identity"><b>${esc(role)}</b><small>${esc(provider.label)} · ${esc(session.model || '모델 정보 없음')}</small></span>${executionModeBadge(session, true)}<span class="status-pill ${statusClass(session.status)}">${esc(STATUS[session.status] || session.status)}</span></span>
-      <span class="agent-task-label">${session.parentId ? `담당 작업${delegation.assignmentSource === 'parent-narration' ? ' · 메인 AI 설명 기반' : ''}` : '전체 목표'}</span>
-      <strong class="agent-task">${esc(displayedTask)}</strong>
-      <span class="agent-current"><span><i>${statusIcon(activity.type)}</i><b>지금 하는 일</b></span><strong>${esc(latestWorkCopy(session))}</strong></span>
+      <span class="agent-task-label">${session.parentId ? `담당 작업${delegation.assignmentSource === 'parent-narration' ? ' · 메인 AI 설명 기반' : ''}` : '지금 목표'}</span>
+      <strong class="agent-task" title="${esc(goalPreview.full)}">${esc(goalPreview.text)}</strong>
+      ${goalPreview.truncated ? '<span class="agent-goal-note">요약 표시 · 전체 내용은 대화 상세에서 확인</span>' : ''}
+      <span class="agent-current"><span><i>${statusIcon(activity.type)}</i><b>지금 하는 일</b></span><strong title="${esc(currentPreview.full)}">${esc(currentPreview.text)}</strong></span>
       <span class="agent-node-metrics"><span><small>기억 공간 사용</small><b>${context.window ? `${percent.toFixed(1)}%` : '--'}</b></span><span><small>사용 토큰</small><b>${compact(usage.total)}</b></span><span><small>마지막 활동</small><b>${esc(timeAgo(session.updatedAt))}</b></span></span>
       <span class="agent-node-gauge"><i style="width:${percent}%"></i></span>
     </button>
@@ -545,6 +574,7 @@ function compactGraphNode(session, model, label = '') {
   const sharedGoal = delegation.sharedGoal || session.sharedGoal || '';
   const outcome = delegation.result || session.result || '';
   const outcomeText = outcome || latestWorkCopy(session);
+  const assignedWorkPreview = readablePreview(assignedWork, session.parentId ? 110 : 104);
   const taskLabel = session.parentId ? `${label || agentRoleLabel(session.agentRole)}${taskName ? ` · 담당 ${taskName}` : ''}` : label;
   const assignmentSourceNote = session.parentId && delegation.assignmentSource === 'parent-narration' ? '<span class="agent-flow-assignment-source">메인 AI가 작업 시작 직전에 설명한 내용</span>' : '';
   const sharedGoalCopy = session.parentId && sharedGoal && sharedGoal !== assignedWork ? `<span class="agent-flow-shared">공유 목표 · ${esc(sharedGoal)}</span>` : '';
@@ -572,7 +602,7 @@ function compactGraphNode(session, model, label = '') {
   }
   return `<button type="button" class="agent-flow-row ${isLiveSession(session) ? 'running' : ''} ${statusClass(session.status)}" data-graph-focus="${esc(session.id)}" data-motion-key="agent:${esc(session.id)}" data-motion-value="${esc(session.updatedAt || '')}:${usage.total || 0}:${esc(session.status || '')}" style="${providerStyle(session.provider)}">
     <span class="agent-flow-state" aria-hidden="true"></span>
-    <span class="agent-flow-copy">${taskLabel ? `<small>${esc(taskLabel)}</small>` : ''}<b>${esc(assignedWork)}</b><em>${esc(identity)} · ${directChildren ? `도움 AI ${directChildren}명 · ` : ''}${esc(timeAgo(session.updatedAt))}</em>${assignmentSourceNote}${sharedGoalCopy}${outcomeCopy}</span>
+    <span class="agent-flow-copy">${taskLabel ? `<small>${esc(taskLabel)}</small>` : ''}<b title="${esc(assignedWorkPreview.full)}">${esc(assignedWorkPreview.text)}</b><em>${esc(identity)} · ${directChildren ? `도움 AI ${directChildren}명 · ` : ''}${esc(timeAgo(session.updatedAt))}</em>${assignmentSourceNote}${sharedGoalCopy}${outcomeCopy}</span>
     <span class="agent-flow-provider"><i>${esc(provider.mark)}</i><small>${esc(STATUS[session.status] || session.status)}</small></span>
   </button>`;
 }
@@ -910,7 +940,11 @@ function renderAgentMap(sessions, motionKind = 'refresh') {
   if (focus) {
     $('#liveSessionGrid').innerHTML = focusedGraph(focus, model, motionKind);
     const path = graphPath(focus, model.byId);
-    $('#graphBreadcrumbs').innerHTML = `<button type="button" data-graph-reset>작업 목록</button>${path.map(item => `<i>›</i><button type="button" data-graph-focus="${esc(item.id)}" class="${item.id === focus.id ? 'current' : ''}">${esc(item.parentId ? (item.agentName || agentRoleLabel(item.agentRole)) : item.title)}</button>`).join('')}`;
+    $('#graphBreadcrumbs').innerHTML = `<button type="button" data-graph-reset>작업 목록</button>${path.map(item => {
+      const label = item.parentId ? (item.agentName || agentRoleLabel(item.agentRole)) : item.title;
+      const preview = readablePreview(label, item.parentId ? 42 : 72);
+      return `<i>›</i><button type="button" data-graph-focus="${esc(item.id)}" class="${item.id === focus.id ? 'current' : ''}" title="${esc(preview.full)}">${esc(preview.text)}</button>`;
+    }).join('')}`;
     $('#graphResetBtn').classList.remove('hidden');
     scheduleAgentWorkflowConnections();
   } else {
@@ -1038,9 +1072,9 @@ function recentConversation(session) {
   const assistant = [...messages].reverse().find(message => message.role === 'assistant');
   const tool = [...messages].reverse().find(message => message.role === 'tool');
   const rows = [];
-  if (user) rows.push({ label: '나', text: user.text, tone: 'user' });
-  if (assistant) rows.push({ label: providerInfo(session.provider).label, text: assistant.text, tone: 'assistant' });
-  else if (tool) rows.push({ label: tool.title || '도구', text: tool.text, tone: 'tool' });
+  if (user) rows.push({ label: '나', text: readablePreview(user.text, 140).text, tone: 'user' });
+  if (assistant) rows.push({ label: providerInfo(session.provider).label, text: readablePreview(assistant.text, 140).text, tone: 'assistant' });
+  else if (tool) rows.push({ label: tool.title || '도구', text: readablePreview(tool.text, 140).text, tone: 'tool' });
   if (!rows.length) rows.push({ label: '상태', text: session.statusDetail || '대화 이벤트를 기다리는 중입니다.', tone: 'system' });
   return rows.slice(-2);
 }
@@ -1058,6 +1092,9 @@ function sessionCard(session, opts = {}) {
   const gaugeTone = contextPercent >= 90 ? 'critical' : (contextPercent >= 75 ? 'warning' : 'safe');
   const conversation = recentConversation(session);
   const runtime = session.runtimePresence || [];
+  const titlePreview = readablePreview(session.title, 96);
+  const activityCopy = latestWorkCopy(session) || session.statusDetail || '새 이벤트 대기';
+  const activityPreview = readablePreview(activityCopy, 116);
   return `<article class="session-card ${opts.live ? 'live-card' : ''} ${statusClass(session.status)} ${session.parentId ? 'subagent' : ''}" data-session-id="${esc(session.id)}" data-motion-key="session:${esc(session.id)}" data-motion-value="${esc(session.updatedAt || '')}:${usage.total || 0}:${esc(session.status || '')}" style="${providerStyle(session.provider)}" role="button" tabindex="0" aria-label="${esc(session.title)} 작업 상세 보기">
     <div class="card-head">
       <span class="provider-mark">${esc(provider.mark)}</span>
@@ -1065,11 +1102,11 @@ function sessionCard(session, opts = {}) {
       ${executionModeBadge(session, true)}
       <span class="status-pill ${statusClass(session.status)}">${esc(STATUS[session.status] || session.status)}</span>
     </div>
-    <h3 class="card-title" title="${esc(session.title)}">${esc(session.title)}</h3>
+    <h3 class="card-title" title="${esc(titlePreview.full)}">${esc(titlePreview.text)}</h3>
     <div class="card-subtitle"><span>${esc(model)}</span><i></i><span title="${esc(session.cwd)}">${esc(session.workspace || '작업 폴더 미상')}</span>${session.agentName ? `<i></i><span>${esc(session.agentName)}</span>` : ''}</div>
     <div class="now-strip ${running ? 'is-live' : ''}">
       <span class="now-strip-icon">${statusIcon(activity.type)}</span>
-      <div><b>${running ? '지금: ' : ''}${esc(activity.title)}</b><span>${esc(latestWorkCopy(session) || session.statusDetail || '새 이벤트 대기')}</span></div>
+      <div><b>${running ? '지금: ' : ''}${esc(activity.title)}</b><span title="${esc(activityPreview.full)}">${esc(activityPreview.text)}</span></div>
       ${running ? '<span class="activity-wave"><i></i><i></i><i></i><i></i><i></i></span>' : ''}
     </div>
     ${runtime.length ? `<div class="runtime-strip"><span class="runtime-pulse"></span><b>실제로 실행 중인 프로그램 ${runtime.length}개</b><span>${esc(runtime.map(item => item.label || `프로그램 ${item.pid}`).join(' · '))}</span></div>` : ''}
@@ -1500,8 +1537,38 @@ function renderDrawer() {
 function providerPickerHtml() {
   return state.providers.map(provider => {
     const installed = !!state.availability[provider.id];
-    return `<button type="button" class="run-provider-option ${state.runProvider === provider.id ? 'selected' : ''}" data-run-provider="${esc(provider.id)}" style="${providerStyle(provider.id)}" ${installed ? '' : 'disabled'}><span class="provider-mini-mark">${esc(provider.mark)}</span><small>${esc(provider.label)}${installed ? '' : ' · 미설치'}</small></button>`;
+    const selected = state.runProvider === provider.id;
+    return `<button type="button" class="run-provider-option ${selected ? 'selected' : ''}" data-run-provider="${esc(provider.id)}" style="${providerStyle(provider.id)}" aria-pressed="${selected ? 'true' : 'false'}" ${installed ? '' : 'disabled'}><span class="provider-mini-mark">${esc(provider.mark)}</span><span class="run-provider-copy"><b>${esc(provider.label)}</b><small>${esc(installed ? provider.company : '설치 필요')}</small></span><span class="run-provider-check" aria-hidden="true">✓</span></button>`;
   }).join('');
+}
+
+function runWorkspaceSuggestionsHtml() {
+  const selected = String($('#runCwd') && $('#runCwd').value || '');
+  return state.workspaces.slice(0, 4).map(workspace => {
+    const path = workspace.path || workspace.name || '';
+    const active = path === selected;
+    return `<button type="button" data-run-workspace="${esc(path)}" class="${active ? 'selected' : ''}" title="${esc(path)}"><span aria-hidden="true">⌘</span>${esc(workspace.name || path.split(/[\\/]/).filter(Boolean).pop() || '작업 폴더')}</button>`;
+  }).join('');
+}
+
+function syncRunComposer() {
+  const prompt = $('#runPrompt');
+  const count = $('#runPromptCount');
+  if (prompt && count) count.textContent = `${prompt.value.length.toLocaleString('ko-KR')} / 8,000`;
+  const submitLabel = $('#runSubmitLabel');
+  const submit = $('#runForm button[type="submit"]');
+  if (submitLabel && submit && !submit.disabled) submitLabel.textContent = `${providerInfo(state.runProvider).label}에게 맡기기`;
+  const suggestions = $('#runWorkspaceSuggestions');
+  if (suggestions) suggestions.innerHTML = runWorkspaceSuggestionsHtml();
+}
+
+function setRunSubmitting(submitting) {
+  const submit = $('#runForm button[type="submit"]');
+  if (!submit) return;
+  submit.disabled = submitting;
+  submit.setAttribute('aria-busy', submitting ? 'true' : 'false');
+  const label = $('#runSubmitLabel');
+  if (label) label.textContent = submitting ? 'AI 작업을 준비하는 중…' : `${providerInfo(state.runProvider).label}에게 맡기기`;
 }
 
 function openRunModal() {
@@ -1509,7 +1576,11 @@ function openRunModal() {
   if (!state.availability[state.runProvider] && installed) state.runProvider = installed.id;
   $('#runProviderPicker').innerHTML = providerPickerHtml();
   if (!$('#runCwd').value) $('#runCwd').value = state.workspace !== 'all' ? state.workspace : (state.workspaces[0] && state.workspaces[0].path || '');
+  $('#runCwd').placeholder = state.platform.id === 'win32' ? 'D:\\project' : '/Users/me/project';
+  const advanced = $('#runForm .run-advanced');
+  if (advanced) advanced.open = Boolean($('#runModel').value.trim());
   $('#runError').classList.add('hidden');
+  syncRunComposer();
   clearTimeout(motionState.modalTimer);
   $('#runModal').classList.remove('hidden', 'closing');
   setTimeout(() => $('#runPrompt').focus(), 0);
@@ -1542,8 +1613,7 @@ function toast(message) {
 
 async function handleRun(event) {
   event.preventDefault();
-  const submit = $('#runForm button[type="submit"]');
-  submit.disabled = true;
+  setRunSubmitting(true);
   $('#runError').classList.add('hidden');
   try {
     const result = await window.loadtoagent.runAgent({
@@ -1556,12 +1626,13 @@ async function handleRun(event) {
     if (!result.ok) throw new Error(result.error || '실행을 시작하지 못했습니다.');
     closeRunModal();
     $('#runPrompt').value = '';
+    syncRunComposer();
     toast(`${providerInfo(state.runProvider).label} 작업을 시작했습니다.`);
   } catch (error) {
     $('#runError').textContent = error.message;
     $('#runError').classList.remove('hidden');
   } finally {
-    submit.disabled = false;
+    setRunSubmitting(false);
   }
 }
 
@@ -1762,8 +1833,33 @@ function bindEvents() {
     if (!button || button.disabled) return;
     state.runProvider = button.dataset.runProvider;
     $('#runProviderPicker').innerHTML = providerPickerHtml();
+    syncRunComposer();
   });
-  $('#pickRunCwdBtn').addEventListener('click', async () => { const folder = await window.loadtoagent.pickWorkspace(); if (folder) $('#runCwd').value = folder; });
+  $('#runPrompt').addEventListener('input', syncRunComposer);
+  $('.run-prompt-examples').addEventListener('click', event => {
+    const example = event.target.closest('[data-run-prompt-example]');
+    if (!example) return;
+    const input = $('#runPrompt');
+    const text = example.dataset.runPromptExample;
+    if (!input.value.trim()) input.value = text;
+    else input.setRangeText(`${input.selectionStart ? '\n\n' : ''}${text}`, input.selectionStart, input.selectionEnd, 'end');
+    syncRunComposer();
+    input.focus();
+  });
+  $('#runWorkspaceSuggestions').addEventListener('click', event => {
+    const workspace = event.target.closest('[data-run-workspace]');
+    if (!workspace) return;
+    $('#runCwd').value = workspace.dataset.runWorkspace;
+    syncRunComposer();
+  });
+  $('#runCwd').addEventListener('input', syncRunComposer);
+  $('#pickRunCwdBtn').addEventListener('click', async () => { const folder = await window.loadtoagent.pickWorkspace(); if (folder) { $('#runCwd').value = folder; syncRunComposer(); } });
+  $('#runForm').addEventListener('keydown', event => {
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      $('#runForm').requestSubmit();
+    }
+  });
   $('#runForm').addEventListener('submit', handleRun);
   $('#closeDrawerBtn').addEventListener('click', closeDrawer);
   $('#drawerBackdrop').addEventListener('click', closeDrawer);
@@ -1807,6 +1903,11 @@ function bindEvents() {
     }
   });
   document.addEventListener('keydown', event => {
+    if (event.key.toLowerCase() === 'n' && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
+      event.preventDefault();
+      if ($('#runModal').classList.contains('hidden')) openRunModal();
+      return;
+    }
     if (event.key !== 'Escape') return;
     if (!$('#runModal').classList.contains('hidden')) closeRunModal(); else closeDrawer();
   });

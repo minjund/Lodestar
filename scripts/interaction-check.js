@@ -56,6 +56,8 @@ const ACTION_MANIFEST = [
   { selector: '#cancelRunBtn', action: 'run:cancel' },
   { selector: '#runForm button[type="submit"]', action: 'run:submit' },
   { selector: '[data-run-provider]', action: 'run:provider' },
+  { selector: '[data-run-prompt-example]', action: 'run:prompt-example' },
+  { selector: '[data-run-workspace]', action: 'run:workspace-suggestion' },
   { selector: '#tmuxCreateForm', action: 'tmux:modal-submit' },
   { selector: '#tmuxCreateDistro', action: 'tmux:modal-submit' },
   { selector: '#closeTmuxCreateBtn', action: 'tmux:modal-close-x' },
@@ -235,12 +237,31 @@ async function exerciseDashboardControls(win, round) {
 }
 
 async function exerciseRunModal(win, round) {
+  await win.webContents.executeJavaScript(`state.workspaces = [{ name: 'fixture', path: 'D:\\\\fixture' }]`);
   await click(win, '#newRunBtn', 'run:open');
   await waitFor(win, `!document.querySelector('#runModal').classList.contains('hidden')`, '새 작업 모달이 열리지 않았습니다.');
+  const composer = await win.webContents.executeJavaScript(`(() => {
+    const prompt = document.querySelector('#runPrompt');
+    const providers = document.querySelector('#runProviderPicker');
+    const suggestion = document.querySelector('[data-run-workspace]');
+    return {
+      promptFirst: Boolean(prompt && providers && (prompt.compareDocumentPosition(providers) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      promptFocused: document.activeElement === prompt,
+      promptCount: document.querySelector('#runPromptCount')?.textContent.trim(),
+      workspaceSelected: suggestion?.classList.contains('selected') || false,
+    };
+  })()`);
+  assert(composer.promptFirst && composer.promptFocused && composer.promptCount === '0 / 8,000' && composer.workspaceSelected, `새 작업 입력 흐름의 기본 상태가 올바르지 않습니다: ${JSON.stringify(composer)}`);
+  await click(win, '[data-run-prompt-example]', 'run:prompt-example');
+  await waitFor(win, `document.querySelector('#runPrompt').value.length > 0 && document.querySelector('#runPromptCount').textContent !== '0 / 8,000'`, '빠른 요청 예시가 입력과 글자 수에 반영되지 않았습니다.');
+  await click(win, '[data-run-workspace]', 'run:workspace-suggestion');
+  await waitFor(win, `document.querySelector('[data-run-workspace]').classList.contains('selected') && document.querySelector('#runCwd').value === 'D:\\\\fixture'`, '최근 작업 폴더 선택이 입력에 반영되지 않았습니다.');
   await click(win, '[data-run-provider="gpt"]', 'run:provider');
+  await waitFor(win, `document.querySelector('[data-run-provider="gpt"]').getAttribute('aria-pressed') === 'true' && document.querySelector('#runSubmitLabel').textContent.includes('GPT')`, 'AI 선택이 실행 버튼에 반영되지 않았습니다.');
 
-  await win.webContents.executeJavaScript(`(() => { document.querySelector('#runCwd').value = ''; document.querySelector('#runPrompt').value = ''; window.interactionTest.clearCalls(); })()`);
-  await click(win, '#runForm button[type="submit"]', 'run:submit');
+  await win.webContents.executeJavaScript(`(() => { document.querySelector('#runCwd').value = ''; document.querySelector('#runPrompt').value = ''; document.querySelector('#runPrompt').dispatchEvent(new Event('input', { bubbles: true })); window.interactionTest.clearCalls(); })()`);
+  await win.webContents.executeJavaScript(`document.querySelector('#runPrompt').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }))`);
+  mark('run:keyboard-submit');
   const nativeInvalid = await win.webContents.executeJavaScript(`(() => ({ calls: window.interactionTest.getCalls().filter(item => item.name === 'runAgent').length, cwd: document.querySelector('#runCwd').matches(':invalid'), prompt: document.querySelector('#runPrompt').matches(':invalid'), visible: !document.querySelector('#runModal').classList.contains('hidden') }))()`);
   assert(nativeInvalid.calls === 0 && nativeInvalid.cwd && nativeInvalid.prompt && nativeInvalid.visible, `필수 필드 검증이 submit을 막지 못했습니다: ${JSON.stringify(nativeInvalid)}`);
   mark('run:required-validation');
@@ -285,7 +306,12 @@ async function exerciseRunModal(win, round) {
   await click(win, '#newRunBtn', 'run:open');
   await click(win, '#runModal', 'run:backdrop');
   await waitFor(win, `document.querySelector('#runModal').classList.contains('hidden')`, '배경 클릭으로 모달이 닫히지 않았습니다.');
+  await win.webContents.executeJavaScript(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ctrlKey: true, bubbles: true, cancelable: true }))`);
+  await waitFor(win, `!document.querySelector('#runModal').classList.contains('hidden') && document.activeElement === document.querySelector('#runPrompt')`, '새 작업 단축키가 입력창을 열고 포커스하지 않았습니다.');
+  await click(win, '#cancelRunBtn', 'run:cancel-shortcut');
+  await waitFor(win, `document.querySelector('#runModal').classList.contains('hidden')`, '단축키로 연 새 작업 창이 닫히지 않았습니다.');
   round.observed.runAgentCalls = 1;
+  round.observed.runComposer = true;
 }
 
 async function exerciseDrawer(win, round) {
@@ -297,6 +323,22 @@ async function exerciseDrawer(win, round) {
     await click(win, `[data-tab="${tab}"]`, `drawer:tab-${tab}`);
     await waitFor(win, `state.drawerTab === ${JSON.stringify(tab)} && document.querySelector('[data-tab="${tab}"]').classList.contains('active')`, `${tab} 탭 전환 실패`);
   }
+  await waitFor(win, `document.querySelector('.chat-roadmap') && !document.querySelector('.chat-roadmap').open`, '긴 로드맵이 기본 접힘 상태로 표시되지 않았습니다.');
+  const roadmap = await win.webContents.executeJavaScript(`(() => {
+    const details = document.querySelector('.chat-roadmap');
+    return {
+      previewCount: details?.querySelectorAll('.chat-roadmap-preview li').length || 0,
+      fullPreserved: details?.querySelector('.chat-roadmap-full')?.textContent.includes('수평 스크롤과 카드 넘침이 없는지 자동 테스트합니다') || false,
+      userMessagePreserved: [...document.querySelectorAll('.chat-row.user .chat-content')].some(item => item.innerText.includes('상세 대화에서 생략하지 말고 전체 내용을 보여주되')),
+    };
+  })()`);
+  assert(roadmap.previewCount === 3 && roadmap.fullPreserved && roadmap.userMessagePreserved, `로드맵 요약 또는 상세 원문 보존이 올바르지 않습니다: ${JSON.stringify(roadmap)}`);
+  fs.mkdirSync(path.join(__dirname, '..', 'artifacts'), { recursive: true });
+  await sleep(120);
+  fs.writeFileSync(path.join(__dirname, '..', 'artifacts', 'loadtoagent-collapsed-roadmap.png'), (await win.webContents.capturePage()).toPNG());
+  await click(win, '.chat-roadmap > summary', 'drawer:expand-roadmap');
+  await waitFor(win, `document.querySelector('.chat-roadmap').open && getComputedStyle(document.querySelector('.chat-roadmap-full')).display !== 'none'`, '긴 로드맵 전체 보기가 펼쳐지지 않았습니다.');
+  mark('drawer:roadmap-summary');
   await win.webContents.executeJavaScript(`(() => {
     const chat = document.querySelector('[data-tab="chat"]');
     chat.focus();
@@ -344,6 +386,16 @@ async function focusRoot(win) {
 
 async function exerciseGraph(win, round) {
   await focusRoot(win);
+  const goalSummary = await win.webContents.executeJavaScript(`(() => {
+    const goal = document.querySelector('.agent-workflow-selected .agent-task');
+    const breadcrumb = document.querySelector('#graphBreadcrumbs .current');
+    return { text: goal?.textContent || '', full: goal?.title || '', note: Boolean(document.querySelector('.agent-workflow-selected .agent-goal-note')), breadcrumbText: breadcrumb?.textContent || '', breadcrumbFull: breadcrumb?.title || '' };
+  })()`);
+  assert(goalSummary.note && goalSummary.text.endsWith('…') && goalSummary.full.length > goalSummary.text.length && goalSummary.breadcrumbText.endsWith('…') && goalSummary.breadcrumbFull.length > goalSummary.breadcrumbText.length, `긴 지금 목표가 읽기 좋은 요약으로 표시되지 않았습니다: ${JSON.stringify(goalSummary)}`);
+  fs.mkdirSync(path.join(__dirname, '..', 'artifacts'), { recursive: true });
+  await sleep(120);
+  fs.writeFileSync(path.join(__dirname, '..', 'artifacts', 'loadtoagent-readable-goal.png'), (await win.webContents.capturePage()).toPNG());
+  mark('graph:goal-summary');
   const firstReset = await win.webContents.executeJavaScript(`(() => {
     const toolbar = document.querySelector('#graphResetBtn:not(.hidden)');
     if (toolbar) return '#graphResetBtn';

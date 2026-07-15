@@ -22,7 +22,7 @@ const messages = [
 
 const rootSession = {
   id: 'fixture-root', externalId: 'fixture-root-external', provider: 'claude', model: 'claude-fixture',
-  title: '상호작용 검증 메인 작업', cwd: 'D:\\fixture', workspace: 'fixture', status: 'running',
+  title: '현재 프로그램의 모든 화면에서 긴 사용자 요청이 카드 전체를 밀어내지 않도록 지금 목표를 읽기 좋은 길이로 요약하고 원문은 상세 대화에 보존하면서 작은 화면과 큰 화면 모두에서 버튼과 상태 정보가 안정적으로 보이게 상호작용을 검증해줘', cwd: 'D:\\fixture', workspace: 'fixture', status: 'running',
   statusDetail: '버튼 동작을 확인하는 중', updatedAt: now, parentId: null, childIds: ['fixture-child', 'fixture-resting'],
   messages, usage, turnUsage: usage, context, runId: 'fixture-run',
   lifecycle: [{ type: 'start', status: 'running', label: '검증 시작', detail: 'DOM 이벤트 확인', timestamp: now }],
@@ -66,6 +66,19 @@ const endedSession = {
   ...rootSession, id: 'fixture-ended', externalId: 'fixture-ended-external', provider: 'gpt', model: 'gpt-fixture',
   title: '완료된 대화 상세 검증', status: 'completed', statusDetail: '검증 완료', parentId: null, childIds: [],
   runtimePresence: [], runId: '',
+  messages: [
+    { id: 'ended-user', role: 'user', text: '이 요청은 상세 대화에서 생략하지 말고 전체 내용을 보여주되, AI가 만든 긴 로드맵은 처음부터 전부 펼치지 말고 읽기 좋은 형태로 정리해줘.', timestamp: now },
+    { id: 'ended-roadmap', role: 'assistant', text: `## 반응형 UI 개선 로드맵
+
+1. 현재 목표 카드에서 긴 사용자 요청을 의미가 보존되는 한 줄 요약으로 표시합니다.
+2. 요약된 목표의 전체 원문은 제목 속성과 상세 대화 기록에서 언제든 확인할 수 있게 유지합니다.
+3. 세션 상세에 생성된 긴 로드맵은 기본 상태에서 핵심 세 단계만 미리 보여줍니다.
+4. 사용자가 로드맵 헤더를 누르면 모든 단계와 설명이 손실 없이 펼쳐지도록 구성합니다.
+5. 새 AI 작업 창에서는 할 일 입력을 가장 먼저 배치하고 AI와 폴더 선택을 다음 단계로 분리합니다.
+6. 작은 화면에서는 제공사 선택과 폴더 입력, 하단 실행 버튼이 화면 밖으로 밀려나지 않는지 확인합니다.
+7. 키보드 단축키와 빠른 요청 예시, 글자 수 표시가 실제 입력 흐름에서 정확하게 작동하는지 검증합니다.
+8. 마지막으로 데스크톱과 모바일 크기에서 수평 스크롤과 카드 넘침이 없는지 자동 테스트합니다.`, timestamp: now },
+  ],
   lifecycle: [
     { type: 'start', status: 'completed', label: '작업 시작', detail: '상세 화면 확인', timestamp: now },
     { type: 'complete', status: 'completed', label: '작업 완료', detail: '정상 완료', timestamp: now },

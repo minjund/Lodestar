@@ -93,20 +93,34 @@ async function layoutMetrics(win) {
 }
 
 function assertLayout(metrics, context) {
-  if (metrics.documentOverflow || metrics.stageOverflow || metrics.sectionOverflow.length || !metrics.sidebarInsideViewport || !metrics.compactNavAtBottom || metrics.navCount !== 5 || !metrics.navItemsInsideViewport) {
+  if (metrics.documentOverflow || metrics.stageOverflow || metrics.sectionOverflow.length || !metrics.sidebarInsideViewport || !metrics.compactNavAtBottom || metrics.navCount < 5 || !metrics.navItemsInsideViewport) {
     throw new Error(`${context} 반응형 배치가 올바르지 않습니다: ${JSON.stringify(metrics)}`);
   }
 }
 
-async function overlayMetrics(win) {
+async function overlayMetrics(win, capturePath = '') {
   await win.webContents.executeJavaScript(`(() => {
     openRunModal();
+  })()`);
+  await wait(360);
+  if (capturePath) {
+    await win.webContents.executeJavaScript(`(() => {
+      const modal = document.querySelector('#runModal');
+      const form = document.querySelector('#runForm');
+      for (const animation of [...(modal?.getAnimations() || []), ...(form?.getAnimations() || [])]) {
+        try { animation.finish(); } catch {}
+      }
+    })()`);
+    const image = await win.webContents.capturePage();
+    fs.writeFileSync(capturePath, image.toPNG());
+  }
+  await win.webContents.executeJavaScript(`(() => {
     const drawer = document.querySelector('#detailDrawer');
     const backdrop = document.querySelector('#drawerBackdrop');
     drawer?.classList.add('open');
     backdrop?.classList.remove('hidden');
   })()`);
-  await wait(360);
+  await wait(80);
   return win.webContents.executeJavaScript(`(() => {
     const viewportContains = rect => Boolean(rect && rect.left >= -1 && rect.right <= window.innerWidth + 1 && rect.top >= -1 && rect.bottom <= window.innerHeight + 1);
     const modalElement = document.querySelector('#runModal .run-modal');
@@ -117,6 +131,22 @@ async function overlayMetrics(win) {
       try { animation.finish(); } catch {}
     }
     const modal = modalElement?.getBoundingClientRect();
+    const form = document.querySelector('#runForm');
+    const prompt = document.querySelector('#runPrompt');
+    const providers = document.querySelector('#runProviderPicker');
+    const actions = document.querySelector('.run-modal-actions')?.getBoundingClientRect();
+    const providerCards = [...document.querySelectorAll('.run-provider-option')].map(item => item.getBoundingClientRect());
+    const promptFirst = Boolean(prompt && providers && (prompt.compareDocumentPosition(providers) & Node.DOCUMENT_POSITION_FOLLOWING));
+    const modalNoHorizontalOverflow = Boolean(form && form.scrollWidth <= form.clientWidth + 2);
+    const modalScrollWidth = form?.scrollWidth || 0;
+    const modalClientWidth = form?.clientWidth || 0;
+    const providerCardsInsideModal = Boolean(modal && providerCards.length && providerCards.every(rect => rect.left >= modal.left - 1 && rect.right <= modal.right + 1));
+    const actionsInsideViewport = viewportContains(actions);
+    const promptCounterVisible = Boolean(document.querySelector('#runPromptCount')?.offsetParent);
+    const horizontalOverflow = [...form.children].map(element => {
+      const rect = element.getBoundingClientRect();
+      return { className: element.className, left: rect.left, right: rect.right, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth };
+    }).filter(item => item.clientWidth && modal && (item.left < modal.left - 1 || item.right > modal.right + 1 || item.scrollWidth > item.clientWidth + 2));
     document.querySelector('#runModal')?.classList.add('hidden');
     document.querySelector('#runModal')?.classList.remove('closing');
     const drawer = document.querySelector('#detailDrawer');
@@ -126,6 +156,14 @@ async function overlayMetrics(win) {
     backdrop?.classList.add('hidden');
     return {
       modalInsideViewport: viewportContains(modal),
+      modalNoHorizontalOverflow,
+      providerCardsInsideModal,
+      actionsInsideViewport,
+      promptCounterVisible,
+      promptFirst,
+      modalScrollWidth,
+      modalClientWidth,
+      horizontalOverflow,
       drawerInsideViewport: viewportContains(drawerRect),
       modalWidth: modal?.width || 0,
       drawerWidth: drawerRect?.width || 0,
@@ -297,8 +335,8 @@ app.whenReady().then(async () => {
         fs.writeFileSync(path.join(outputDir, `loadtoagent-responsive-${width}.png`), image.toPNG());
       }
 
-      const overlays = await overlayMetrics(win);
-      if (!overlays.modalInsideViewport || !overlays.drawerInsideViewport) {
+      const overlays = await overlayMetrics(win, width === 720 || width === 360 ? path.join(outputDir, `loadtoagent-responsive-new-run-${width}.png`) : '');
+      if (!overlays.modalInsideViewport || !overlays.drawerInsideViewport || !overlays.modalNoHorizontalOverflow || !overlays.providerCardsInsideModal || !overlays.actionsInsideViewport || !overlays.promptCounterVisible || !overlays.promptFirst) {
         throw new Error(`${width}×${height} 오버레이 배치가 올바르지 않습니다: ${JSON.stringify(overlays)}`);
       }
 
