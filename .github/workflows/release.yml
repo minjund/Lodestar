@@ -109,3 +109,4 @@ jobs:
           else
             gh release create "$RELEASE_TAG" release-assets/* --verify-tag --generate-notes --title "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"
           fi
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease=false --latest --repo "$GITHUB_REPOSITORY"
