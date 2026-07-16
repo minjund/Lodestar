@@ -42,10 +42,15 @@ jobs:
         if: steps.npm_version.outputs.published == 'true'
         run: echo "This version is already available on npm; desktop builds will continue."
       - name: Publish npm package
+        id: publish_npm
         if: steps.npm_version.outputs.published != 'true'
+        continue-on-error: true
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Report skipped npm publication
+        if: steps.publish_npm.outcome == 'failure'
+        run: echo "::warning::npm publication failed; desktop release creation will continue."
 
   build-desktop:
     strategy:
