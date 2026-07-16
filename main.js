@@ -22,6 +22,11 @@ const { registerTmuxIpc } = require('./src/ipc/registerTmuxIpc');
 const { registerWorkspaceIpc } = require('./src/ipc/registerWorkspaceIpc');
 const { reportRecoverableError } = require('./src/diagnostics');
 
+const PRODUCT_NAME = 'LoadToAgent';
+app.setName(PRODUCT_NAME);
+process.title = PRODUCT_NAME;
+if (process.platform === 'win32') app.setAppUserModelId('com.wincube.loadtoagent');
+
 const demoCapture = process.env.LOADTOAGENT_DEMO_CAPTURE === '1';
 let mainWindow = null;
 let monitorWorker = null;

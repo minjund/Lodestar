@@ -176,15 +176,15 @@ const initialTerminals = [
 ];
 
 const availableUpdate = {
-  status: 'available', currentVersion: '3.0.0', latestVersion: '3.1.0', tag: 'v3.1.0',
-  releaseUrl: 'https://github.com/minjund/LodeToAgent/releases/tag/v3.1.0', publishedAt: now,
+  status: 'available', currentVersion: '1.0.0', latestVersion: '1.1.0', tag: 'v1.1.0',
+  releaseUrl: 'https://github.com/minjund/LodeToAgent/releases/tag/v1.1.0', publishedAt: now,
   notes: '설정 화면과 업데이트 흐름 상호작용 검증', progress: 0, downloadedBytes: 0, totalBytes: 8_192,
   downloadedPath: '', error: '', platform: 'win32', arch: 'x64', installType: 'desktop',
-  asset: { name: 'LoadToAgent-Setup-3.1.0.exe', size: 8_192, url: 'https://github.com/minjund/LodeToAgent/releases/download/v3.1.0/LoadToAgent-Setup-3.1.0.exe', digest: '' },
+  asset: { name: 'LoadToAgent-Setup-1.1.0.exe', size: 8_192, url: 'https://github.com/minjund/LodeToAgent/releases/download/v1.1.0/LoadToAgent-Setup-1.1.0.exe', digest: '' },
 };
 
 const currentUpdate = {
-  ...availableUpdate, status: 'current', latestVersion: '3.0.0', tag: 'v3.0.0', asset: null,
+  ...availableUpdate, status: 'current', latestVersion: '1.0.0', tag: 'v1.0.0', asset: null,
   notes: '현재 설치된 버전이 최신 정식 버전입니다.', totalBytes: 0,
 };
 

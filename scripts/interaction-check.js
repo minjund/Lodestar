@@ -208,14 +208,14 @@ async function exerciseGuideAndMobileTools(win, round) {
 async function exerciseUpdates(win, round) {
   await win.webContents.executeJavaScript('window.interactionTest.restoreCurrentUpdate()');
   await click(win, '[data-view="settings"]', 'nav:settings');
-  await waitFor(win, `window.LoadToAgentApp.state.update.status === 'current' && document.querySelector('#currentVersion').textContent === 'v3.0.0' && document.querySelector('#sidebarAppVersion').textContent === 'v3.0.0' && document.querySelector('#updateStateTitle').textContent === '현재 최신 버전입니다.' && document.querySelector('#checkUpdateBtn').textContent === '업데이트 확인'`, '현재 버전과 최신 상태가 설정 화면에 명확히 표시되지 않았습니다.');
+  await waitFor(win, `window.LoadToAgentApp.state.update.status === 'current' && document.querySelector('#currentVersion').textContent === 'v1.0.0' && document.querySelector('#sidebarAppVersion').textContent === 'v1.0.0' && document.querySelector('#updateStateTitle').textContent === '현재 최신 버전입니다.' && document.querySelector('#checkUpdateBtn').textContent === '업데이트 확인'`, '현재 버전과 최신 상태가 설정 화면에 명확히 표시되지 않았습니다.');
   await clearCalls(win);
   await click(win, '#checkUpdateBtn', 'update:check');
   await waitFor(win, `window.interactionTest.getCalls().some(item => item.name === 'checkForUpdate') && window.LoadToAgentApp.state.update.status === 'available'`, '업데이트 확인 버튼이 최신 릴리스를 확인하지 않았습니다.');
   await click(win, '[data-view="all"]', 'nav:all');
   await waitFor(win, `window.LoadToAgentApp.state.update.status === 'available' && !document.querySelector('#updateNotice').classList.contains('hidden') && !document.querySelector('#navUpdateBadge').classList.contains('hidden')`, '새 버전 알림이 표시되지 않았습니다.');
   await click(win, '#updateNoticeBtn', 'update:notice-open');
-  await waitFor(win, `window.LoadToAgentApp.state.view === 'settings' && !document.querySelector('#settingsSection').classList.contains('hidden') && document.querySelector('#latestVersion').textContent === 'v3.1.0'`, '업데이트 알림이 설정 화면을 열지 못했습니다.');
+  await waitFor(win, `window.LoadToAgentApp.state.view === 'settings' && !document.querySelector('#settingsSection').classList.contains('hidden') && document.querySelector('#latestVersion').textContent === 'v1.1.0'`, '업데이트 알림이 설정 화면을 열지 못했습니다.');
   await clearCalls(win);
   await click(win, '#installUpdateBtn', 'update:download');
   await waitFor(win, `window.interactionTest.getCalls().some(item => item.name === 'downloadUpdate') && window.LoadToAgentApp.state.update.status === 'downloaded' && document.querySelector('#installUpdateBtn').textContent.includes('설치 파일 열기')`, '업데이트 파일 다운로드 완료 상태가 반영되지 않았습니다.');
@@ -335,7 +335,22 @@ async function exerciseRunModal(win, round) {
     app.state.availability = Object.fromEntries(app.state.providers.map(provider => [provider.id, false]));
   })()`);
   await click(win, '#newRunBtn', 'run:open');
-  await waitFor(win, `!document.querySelector('#runModal').classList.contains('hidden')`, '새 작업 모달이 열리지 않았습니다.');
+  await waitFor(
+    win,
+    `!document.querySelector('#runModal').classList.contains('hidden') && document.activeElement === document.querySelector('#runPrompt')`,
+    '새 작업 모달이 입력창을 열고 포커스하지 않았습니다.',
+  );
+  const composer = await win.webContents.executeJavaScript(`(() => {
+    const prompt = document.querySelector('#runPrompt');
+    const providers = document.querySelector('#runProviderPicker');
+    const suggestion = document.querySelector('[data-run-workspace]');
+    return {
+      promptFirst: Boolean(prompt && providers && (prompt.compareDocumentPosition(providers) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      promptCount: document.querySelector('#runPromptCount')?.textContent.trim(),
+      workspaceSelected: suggestion?.classList.contains('selected') || false,
+    };
+  })()`);
+  assert(composer.promptFirst && composer.promptCount === '0 / 8,000' && composer.workspaceSelected, `새 작업 입력 흐름의 기본 상태가 올바르지 않습니다: ${JSON.stringify(composer)}`);
   const unavailable = await win.webContents.executeJavaScript(`(() => ({
     docs: document.querySelectorAll('[data-provider-docs]').length,
     disabledProviders: document.querySelectorAll('[data-run-provider]:disabled').length,
@@ -363,18 +378,6 @@ async function exerciseRunModal(win, round) {
       && !document.querySelector('#runForm button[type="submit"]').disabled`,
     'AI CLI 재확인이 설치 상태와 실행 가능 상태를 갱신하지 못했습니다.',
   );
-  const composer = await win.webContents.executeJavaScript(`(() => {
-    const prompt = document.querySelector('#runPrompt');
-    const providers = document.querySelector('#runProviderPicker');
-    const suggestion = document.querySelector('[data-run-workspace]');
-    return {
-      promptFirst: Boolean(prompt && providers && (prompt.compareDocumentPosition(providers) & Node.DOCUMENT_POSITION_FOLLOWING)),
-      promptFocused: document.activeElement === prompt,
-      promptCount: document.querySelector('#runPromptCount')?.textContent.trim(),
-      workspaceSelected: suggestion?.classList.contains('selected') || false,
-    };
-  })()`);
-  assert(composer.promptFirst && composer.promptFocused && composer.promptCount === '0 / 8,000' && composer.workspaceSelected, `새 작업 입력 흐름의 기본 상태가 올바르지 않습니다: ${JSON.stringify(composer)}`);
   await click(win, '[data-run-prompt-example]', 'run:prompt-example');
   await waitFor(win, `document.querySelector('#runPrompt').value.length > 0 && document.querySelector('#runPromptCount').textContent !== '0 / 8,000'`, '빠른 요청 예시가 입력과 글자 수에 반영되지 않았습니다.');
   await click(win, '[data-run-workspace]', 'run:workspace-suggestion');

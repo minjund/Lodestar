@@ -91,6 +91,7 @@
       "node_modules/node-pty/**/*"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "portable",
@@ -107,6 +108,7 @@
       ]
     },
     "mac": {
+      "icon": "build/icon.png",
       "category": "public.app-category.developer-tools",
       "target": [
         {

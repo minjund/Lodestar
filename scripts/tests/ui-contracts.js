@@ -696,12 +696,12 @@ function registerUiContractTests(context) {
       'terminal.js',
     ]);
     assertIncludesAll(terminal, TERMINAL_RUNTIME_CONTRACTS);
-    const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
+    const mainEntry = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
     const ipcSource = IPC_MODULE_FILES
       .map(file => fs.readFileSync(path.join(root, 'src', 'ipc', file), 'utf8'))
       .join('\n');
     assertIncludesAll(
-      main,
+      mainEntry,
       MAIN_PROCESS_CONTRACTS,
       contract => `${contract} 메인 프로세스 계약이 없습니다.`,
     );
@@ -723,6 +723,11 @@ function registerUiContractTests(context) {
     assert.ok(html.includes('Content-Security-Policy'));
     assert.ok(html.includes('@xterm/xterm/lib/xterm.js'));
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    assert.equal(pkg.build.productName, 'LoadToAgent');
+    assert.equal(pkg.build.win.icon, 'build/icon.ico');
+    assert.equal(pkg.build.mac.icon, 'build/icon.png');
+    assert.ok(mainEntry.includes("app.setName(PRODUCT_NAME)"));
+    assert.ok(mainEntry.includes("app.setAppUserModelId('com.wincube.loadtoagent')"));
     assert.ok(pkg.dependencies['node-pty']);
     assert.ok(pkg.dependencies['@xterm/xterm']);
     assert.ok(pkg.dependencies['@xterm/addon-fit']);
