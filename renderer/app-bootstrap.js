@@ -10,6 +10,7 @@
 
   [
     "createCore",
+    "createProviderVisibility",
     "createDashboard",
     "createGraphModel",
     "createGraphView",

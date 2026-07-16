@@ -41,6 +41,10 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
   }
 
   function runProviderHelpHtml() {
+    if (!visibleProviders().length) return `<div class="run-provider-help-copy">
+      <b>${window.LoadToAgentI18n.t("settings.providers.all_hidden_title")}</b>
+      <p>${window.LoadToAgentI18n.t("settings.providers.all_hidden_description")}</p>
+      </div>`;
     const available = visibleProviders().filter((provider) => state.availability[provider.id]);
     if (available.length) return "";
     const docs = visibleProviders()
@@ -97,7 +101,7 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
     if (submitLabel && submit.dataset.submitting !== "true")
       submitLabel.textContent = hasProvider
         ? window.LoadToAgentI18n.t("provider.assign", { provider: providerInfo(state.runProvider).label })
-        : "AI 설치가 필요합니다";
+        : visibleProviders().length ? "AI 설치가 필요합니다" : window.LoadToAgentI18n.t("settings.providers.enable_to_run");
     const writeIntent = /(고치|수정|추가|구현|변경|삭제|작성|리팩터|fix|implement|update|edit|refactor)/i.test((prompt && prompt.value) || "");
     const permissionHint = $("#runPermissionHint");
     const permissionNeeded = writeIntent && !$("#allowWrites").checked;

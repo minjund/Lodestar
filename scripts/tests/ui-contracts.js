@@ -20,6 +20,7 @@ const SYNTAX_CHECK_FILES = [
   'src/processMonitor.js',
   'src/monitorWorker.js',
   'src/attentionNotifier.js',
+  'src/providerVisibilityStore.js',
   'src/ipc/registerAppIpc.js',
   'src/ipc/registerAgentIpc.js',
   'src/ipc/registerTerminalIpc.js',
@@ -29,6 +30,7 @@ const SYNTAX_CHECK_FILES = [
   'renderer/i18n.js',
   'renderer/shared.js',
   'renderer/app.js',
+  'renderer/app-provider-visibility.js',
   'renderer/app-dashboard.js',
   'renderer/app-graph-model.js',
   'renderer/app-graph-view.js',
@@ -151,6 +153,7 @@ const MONITOR_WORKER_CONTRACTS = [
 
 const APP_MODULES = [
   'app.js',
+  'app-provider-visibility.js',
   'app-dashboard.js',
   'app-graph-model.js',
   'app-graph-view.js',
@@ -778,7 +781,10 @@ function registerUiContractTests(context) {
   });
 
   test('AI 표시 설정은 기본값·저장값·세션과 tmux 투영을 일관되게 적용한다', () => {
-    const source = fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8');
+    const source = [
+      fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8'),
+      fs.readFileSync(path.join(root, 'renderer', 'app-provider-visibility.js'), 'utf8'),
+    ].join('\n');
     const values = new Map();
     const sandbox = {
       localStorage: {
@@ -798,6 +804,7 @@ function registerUiContractTests(context) {
     };
     vm.runInNewContext(source, sandbox, { filename: 'app.js' });
     const core = sandbox.window.LoadToAgentAppFactories.createCore({});
+    Object.assign(core, sandbox.window.LoadToAgentAppFactories.createProviderVisibility(core));
     core.state.providers = ['claude', 'codex', 'gemini', 'grok'].map(id => ({ id }));
     core.loadProviderVisibility();
     assert.deepStrictEqual(Array.from(core.state.hiddenProviders), []);

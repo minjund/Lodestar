@@ -22,6 +22,7 @@ const { registerTmuxIpc } = require('./src/ipc/registerTmuxIpc');
 const { registerWorkspaceIpc } = require('./src/ipc/registerWorkspaceIpc');
 const { reportRecoverableError } = require('./src/diagnostics');
 const { AttentionNotifier } = require('./src/attentionNotifier');
+const { ProviderVisibilityStore } = require('./src/providerVisibilityStore');
 
 const PRODUCT_NAME = 'LoadToAgent';
 app.setName(PRODUCT_NAME);
@@ -40,7 +41,7 @@ let updateManager = null;
 let attentionNotifier = null;
 let isQuitting = false;
 let appLocale = 'ko';
-let hiddenProviders = new Set();
+let providerVisibilityStore = null;
 const tmuxController = new TmuxController({ platform: process.platform });
 let availability = {};
 let detailRequestId = 0;
@@ -135,29 +136,23 @@ function listWorkspaces() {
 }
 
 function isProviderVisible(providerId) {
-  return !hiddenProviders.has(String(providerId || ''));
+  return providerVisibilityStore ? providerVisibilityStore.isVisible(providerId) : true;
 }
 
 function loadProviderVisibility() {
-  try {
-    const saved = JSON.parse(fs.readFileSync(userFile('provider-visibility.json'), 'utf8'));
-    const known = new Set(providerList().map(provider => provider.id));
-    hiddenProviders = new Set((saved.hidden || []).filter(id => known.has(id)));
-  } catch (error) {
-    if (error && error.code !== 'ENOENT') reportRecoverableError('provider-visibility-load', error);
-    hiddenProviders = new Set();
-  }
-  return { hidden: [...hiddenProviders] };
+  providerVisibilityStore = new ProviderVisibilityStore(
+    userFile('provider-visibility.json'),
+    providerList().map(provider => provider.id),
+    error => reportRecoverableError('provider-visibility-load', error),
+  );
+  return providerVisibilityStore.load();
 }
 
 function saveProviderVisibility(value = {}) {
-  const known = new Set(providerList().map(provider => provider.id));
-  hiddenProviders = new Set((Array.isArray(value.hidden) ? value.hidden : []).filter(id => known.has(id)));
-  const target = userFile('provider-visibility.json');
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, JSON.stringify({ hidden: [...hiddenProviders] }, null, 2), 'utf8');
+  if (!providerVisibilityStore) loadProviderVisibility();
+  const saved = providerVisibilityStore.save(value);
   updateBackgroundTrayMenu();
-  return { hidden: [...hiddenProviders] };
+  return saved;
 }
 
 function visibleSnapshotSessions(snapshot = lastSnapshot) {
@@ -445,7 +440,7 @@ function bootstrapState() {
     },
     bridgeCli: bridgeLauncher,
     update: updateManager ? updateManager.getState() : null,
-    providerVisibility: { hidden: [...hiddenProviders] },
+    providerVisibility: providerVisibilityStore ? providerVisibilityStore.snapshot() : { hidden: [] },
   };
 }
 
