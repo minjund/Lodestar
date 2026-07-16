@@ -723,8 +723,13 @@ function registerUiContractTests(context) {
     assert.ok(html.includes('Content-Security-Policy'));
     assert.ok(html.includes('@xterm/xterm/lib/xterm.js'));
     assert.ok(
+      html.indexOf('class="topbar"') < html.indexOf('id="beginnerGuide"')
+        && html.indexOf('id="beginnerGuide"') < html.indexOf('id="providerOverview"'),
+      '시작 가이드는 홈 화면 콘텐츠의 최상단에 있어야 합니다.',
+    );
+    assert.ok(
       html.indexOf('id="providerOverview"') < html.indexOf('id="updateNotice"'),
-      'AI 제공사 요약 카드는 홈 화면 콘텐츠의 최상단에 있어야 합니다.',
+      'AI 제공사 요약 카드는 시작 가이드 바로 아래에 있어야 합니다.',
     );
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
     assert.equal(pkg.build.productName, 'LoadToAgent');

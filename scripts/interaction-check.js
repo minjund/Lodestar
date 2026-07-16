@@ -193,6 +193,23 @@ async function exerciseGuideAndMobileTools(win, round) {
   await click(win, '[data-view="all"]', 'nav:all');
   await click(win, '#dismissGuideBtn', 'guide:dismiss');
   await waitFor(win, `document.querySelector('#beginnerGuide').classList.contains('hidden')`, '시작 가이드 접기 실패');
+  await win.webContents.executeJavaScript(`(() => {
+    const stage = document.querySelector('.main-stage');
+    stage.dispatchEvent(new WheelEvent('wheel', { deltaY: 320, bubbles: true, cancelable: true }));
+    stage.scrollTop = Math.min(stage.scrollHeight - stage.clientHeight, stage.scrollTop + 320);
+    window.LoadToAgentApp.renderSessions('refresh');
+  })()`);
+  await sleep(350);
+  assert(
+    await win.webContents.executeJavaScript(`(() => {
+      const saved = JSON.parse(localStorage.getItem('loadtoagent:start-guide:v1') || '{}');
+      return window.LoadToAgentApp.state.guideExpanded === false
+        && saved.expanded === false
+        && document.querySelector('#beginnerGuide').classList.contains('hidden');
+    })()`),
+    '접은 시작 가이드가 휠 스크롤 뒤 다시 열렸습니다.',
+  );
+  mark('guide:wheel-closed');
   await click(win, '#guideBtn', 'guide:toggle');
   await waitFor(win, `!document.querySelector('#beginnerGuide').classList.contains('hidden')`, '시작 가이드 다시 열기 실패');
   await click(win, '[data-guide-action="active"]', 'guide:step');
@@ -443,6 +460,7 @@ async function exerciseRunModal(win, round) {
 async function exerciseDrawer(win, round) {
   await click(win, '[data-view="all"]', 'nav:all');
   await waitFor(win, `window.LoadToAgentApp.state.view === 'all' && document.querySelector('[data-session-id="fixture-ended"]')`, '완료 세션 카드가 없습니다.');
+  await win.webContents.executeJavaScript(`document.querySelector('[data-session-id="fixture-ended"]').focus({ preventScroll: true })`);
   await click(win, '[data-session-id="fixture-ended"]', 'drawer:open-card');
   await waitFor(win, `document.querySelector('#detailDrawer').classList.contains('open') && !document.querySelector('.drawer-loading')`, '상세 drawer 로드 실패');
   for (const tab of ['lifecycle', 'tokens', 'chat']) {
@@ -479,7 +497,35 @@ async function exerciseDrawer(win, round) {
   const latest = await win.webContents.executeJavaScript(`Boolean(document.querySelector('[data-scroll-latest]'))`);
   if (latest) await click(win, '[data-scroll-latest]', 'drawer:latest');
   await click(win, '#closeDrawerBtn', 'drawer:close');
-  await waitFor(win, `!document.querySelector('#detailDrawer').classList.contains('open') && document.querySelector('#drawerBackdrop').classList.contains('hidden')`, 'drawer 닫기 실패');
+  await waitFor(win, `!document.querySelector('#detailDrawer').classList.contains('open')`, 'drawer 닫기 시작 실패');
+  const closeScrollProbe = await win.webContents.executeJavaScript(`(() => {
+    const backdrop = document.querySelector('#drawerBackdrop');
+    const drawer = document.querySelector('#detailDrawer');
+    const stage = document.querySelector('.main-stage');
+    const target = Math.min(240, Math.max(0, stage.scrollHeight - stage.clientHeight));
+    stage.dispatchEvent(new WheelEvent('wheel', { deltaY: 240, bubbles: true, cancelable: true }));
+    stage.scrollTop = target;
+    return {
+      target,
+      backdropPointerEvents: getComputedStyle(backdrop).pointerEvents,
+      drawerPointerEvents: getComputedStyle(drawer).pointerEvents,
+    };
+  })()`);
+  assert(
+    closeScrollProbe.backdropPointerEvents === 'none' && closeScrollProbe.drawerPointerEvents === 'none',
+    `닫히는 drawer가 휠 입력을 가로챕니다: ${JSON.stringify(closeScrollProbe)}`,
+  );
+  await sleep(350);
+  const closeScrollAfter = await win.webContents.executeJavaScript(`(() => ({
+    top: document.querySelector('.main-stage').scrollTop,
+    drawerOpen: document.querySelector('#detailDrawer').classList.contains('open'),
+    backdropHidden: document.querySelector('#drawerBackdrop').classList.contains('hidden'),
+  }))()`);
+  assert(
+    !closeScrollAfter.drawerOpen && closeScrollAfter.backdropHidden && Math.abs(closeScrollAfter.top - closeScrollProbe.target) <= 1,
+    `drawer를 닫고 휠을 내린 뒤 창 또는 스크롤 위치가 되돌아왔습니다: ${JSON.stringify({ closeScrollProbe, closeScrollAfter })}`,
+  );
+  mark('drawer:close-scroll');
 
   await win.webContents.executeJavaScript(`window.interactionTest.clearCalls(); window.interactionTest.configure({ failures: { sessionDetail: 1 } })`);
   await click(win, '[data-session-id="fixture-history-0"]', 'drawer:open-card');
@@ -860,11 +906,30 @@ async function exerciseTmux(win, round) {
   mark('tmux:layout');
   await waitFor(win, `window.interactionTest.getCalls().some(item => item.name === 'tmuxSelectLayout')`, 'tmux layout 변경 호출 실패');
 
-  for (const [action, apiName] of [['kill-pane', 'tmuxKillPane'], ['kill-window', 'tmuxKillWindow'], ['kill-session', 'tmuxKillSession']]) {
-    await openTmuxControl(win);
-    await verifyOneCall(win, `tmux:${action}`, `[data-tmux-manage="${action}"]`, apiName);
-    await sleep(80);
-  }
+  await openTmuxControl(win);
+  await verifyOneCall(win, 'tmux:kill-pane', '[data-tmux-manage="kill-pane"]', 'tmuxKillPane');
+  await sleep(80);
+
+  await openTmuxControl(win);
+  await verifyOneCall(win, 'tmux:kill-window', '[data-tmux-manage="kill-window"]', 'tmuxKillWindow');
+  await waitFor(win, `document.querySelector('[data-terminal-screen="__tmux_remote__"]').classList.contains('hidden') && document.querySelector('#terminalTmuxTools').classList.contains('hidden') && !document.querySelector('#terminalEmpty').classList.contains('hidden')`, 'tmux 창 종료 후 이전 화면이 즉시 닫히지 않았습니다.');
+  await clearCalls(win);
+  await win.webContents.executeJavaScript(`(() => {
+    document.querySelector('[data-terminal-screen="__tmux_remote__"]').dispatchEvent(new WheelEvent('wheel', { deltaY: 480, bubbles: true }));
+    window.LoadToAgentApp.renderSessions('refresh');
+  })()`);
+  await waitFor(win, `document.querySelector('[data-terminal-screen="__tmux_remote__"]').classList.contains('hidden') && document.querySelector('#terminalTmuxTools').classList.contains('hidden') && !document.querySelector('#terminalEmpty').classList.contains('hidden') && !document.querySelector('.terminal-tmux-pane.active') && document.querySelector('#terminalCloseBtn').disabled`, 'stale tmux 갱신이 닫은 창을 다시 선택했습니다.');
+  await sleep(1_150);
+  assert(
+    await callCount(win, 'tmuxCapture') === 0
+      && await win.webContents.executeJavaScript(`document.querySelector('[data-terminal-screen="__tmux_remote__"]').classList.contains('hidden') && document.querySelector('#terminalTmuxTools').classList.contains('hidden')`),
+    '닫은 tmux 창이 휠 입력 또는 반복 캡처 뒤 다시 열렸습니다.',
+  );
+  mark('tmux:kill-window-wheel-closed');
+
+  await openTmuxControl(win);
+  await verifyOneCall(win, 'tmux:kill-session', '[data-tmux-manage="kill-session"]', 'tmuxKillSession');
+  await sleep(80);
   await openTmuxControl(win);
   await clearCalls(win);
   await click(win, '#terminalAttachBtn', 'terminal:attach');
@@ -920,9 +985,9 @@ app.whenReady().then(async () => {
     for (let index = 1; index <= 3; index += 1) await runRound(win, index);
     const required = [...new Set([
       ...ACTION_MANIFEST.map(item => item.action),
-      'nav:scroll-reset', 'run:required-validation', 'run:failure-preserve', 'run:backdrop',
+      'nav:scroll-reset', 'guide:wheel-closed', 'run:required-validation', 'run:failure-preserve', 'run:backdrop',
       'drawer:tabs-keyboard', 'drawer:backdrop', 'terminal:ime-enter', 'terminal:duplicate-enter', 'terminal:history-expand',
-      'terminal:reorder', 'tmux:scroll-preserve',
+      'drawer:close-scroll', 'terminal:reorder', 'tmux:scroll-preserve', 'tmux:kill-window-wheel-closed',
     ])];
     for (const action of required) {
       const count = Number(coverage.get(action) || 0);

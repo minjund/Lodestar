@@ -455,7 +455,17 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
     if (!operation) return;
     const result = await guarded(operation, message);
     if (result) {
-      if (action.startsWith('kill-')) state.selectedTmux = null;
+      if (action.startsWith('kill-')) {
+        stopCapture();
+        state.captureGeneration += 1;
+        state.selectedTmux = null;
+        state.remoteCapture = '';
+        state.remoteViewportAnchor = null;
+        state.remoteViewportAtBottom = false;
+        if (state.remoteTerminal) state.remoteTerminal.terminal.reset();
+        renderAll();
+        await showSelection();
+      }
       setTimeout(refreshSnapshot, 300);
     }
   }

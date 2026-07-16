@@ -277,7 +277,7 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
   function restoreDialogTrigger() {
     const trigger = motionState.activeDialogTrigger;
     motionState.activeDialogTrigger = null;
-    if (trigger && trigger.isConnected) trigger.focus();
+    if (trigger && trigger.isConnected) trigger.focus({ preventScroll: true });
   }
   window.LoadToAgentA11y = { rememberDialogTrigger, restoreDialogTrigger };
   function readablePreview(value, maxCharacters = 120) {

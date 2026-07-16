@@ -406,15 +406,21 @@
   }
 
   async function activate(snapshot, workspaces, mode = 'general') {
+    const nextMode = mode === 'tmux' ? 'tmux' : 'general';
+    const enteringMode = !state.active || state.mode !== nextMode;
     state.active = true;
-    state.mode = mode === 'tmux' ? 'tmux' : 'general';
+    state.mode = nextMode;
     moveWorkbench(state.mode);
     if (state.mode === 'general') state.selectedTmux = null;
     if (state.selectedId && !modeSessions().some(item => item.id === state.selectedId)) state.selectedId = null;
     updateSnapshot(snapshot, workspaces);
-    if (!state.initialized) return;
+    if (!state.initialized) {
+      state.active = false;
+      return;
+    }
     await refreshSessions();
-    if (!state.selectedId && !state.selectedTmux) {
+    if (!state.active || state.mode !== nextMode) return;
+    if (enteringMode && !state.selectedId && !state.selectedTmux) {
       const visible = modeSessions();
       if (visible.length) state.selectedId = visible[0].id;
       else if (state.mode === 'tmux') state.selectedTmux = tmuxRows()[0] || null;

@@ -153,6 +153,7 @@
 
 .drawer-backdrop.closing {
   animation: motion-backdrop-out 260ms ease both;
+  pointer-events: none;
 }
 
 .detail-drawer {
@@ -174,6 +175,10 @@
 .detail-drawer.open {
   transform: translateX(0);
   box-shadow: -32px 0 88px rgba(0,0,0,.52);
+}
+
+.detail-drawer:not(.open) {
+  pointer-events: none;
 }
 
 .modal-backdrop:not(.hidden) {
