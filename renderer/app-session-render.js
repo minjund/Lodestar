@@ -1,0 +1,241 @@
+"use strict";
+
+window.LoadToAgentAppFactories = window.LoadToAgentAppFactories || {};
+
+window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRenderer(context = {}) {
+  const {
+    $,
+    esc,
+    state,
+    STATUS,
+    VIEW_TITLES,
+    captureMotionLayout,
+    playMotionLayout,
+    animateVisibleSections,
+    renderGuide,
+    syncViewChrome,
+    readablePreview,
+    compact,
+    fullNumber,
+    timeAgo,
+    providerInfo,
+    providerStyle,
+    statusClass,
+    currentActivity,
+    isLiveSession,
+    latestWorkCopy,
+    statusIcon,
+    renderProviderRail,
+    isProjectlessSession,
+    sessionWorkspaceLabel,
+    renderWorkspaces,
+    renderGlobalStats,
+    renderUpdateSettings,
+    renderProviderOverview,
+    filteredSessions,
+    graphFilteredSessions,
+    executionModeBadge,
+    renderAgentMap,
+    renderTmuxMap,
+  } = context;
+
+  function recentConversation(session) {
+    const messages = (session.messages || []).filter((message) => message && message.text && message.role !== "system");
+    const user = [...messages].reverse().find((message) => message.role === "user");
+    const assistant = [...messages].reverse().find((message) => message.role === "assistant");
+    const tool = [...messages].reverse().find((message) => message.role === "tool");
+    const rows = [];
+    if (user) rows.push({ label: "나", text: readablePreview(user.text, 140).text, tone: "user" });
+    if (assistant) rows.push({ label: providerInfo(session.provider).label, text: readablePreview(assistant.text, 140).text, tone: "assistant" });
+    else if (tool) rows.push({ label: tool.title || "도구", text: readablePreview(tool.text, 140).text, tone: "tool" });
+    if (!rows.length) rows.push({ label: "상태", text: session.statusDetail || "대화 이벤트를 기다리는 중입니다.", tone: "system" });
+    return rows.slice(-2);
+  }
+
+  function sessionCard(session, opts = {}) {
+    const provider = providerInfo(session.provider);
+    const usage = session.usage || {};
+    const context = session.context || {};
+    const activity = currentActivity(session);
+    const running = session.status === "running" || session.status === "starting";
+    const children = session.childIds || [];
+    const model = session.model || "사용 모델 정보 없음";
+    const contextPercent = Math.max(0, Math.min(100, Number(context.percent || 0)));
+    const remaining = context.window ? Math.max(0, Number(context.window) - Number(context.used || 0)) : 0;
+    const gaugeTone = contextPercent >= 90 ? "critical" : contextPercent >= 75 ? "warning" : "safe";
+    const conversation = recentConversation(session);
+    const runtime = session.runtimePresence || [];
+    const titlePreview = readablePreview(session.title, 96);
+    const activityCopy = latestWorkCopy(session) || session.statusDetail || "새 이벤트 대기";
+    const activityPreview = readablePreview(activityCopy, 116);
+    const accessibleId = `session-${String(session.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+    return `<article class="session-card ${opts.live ? "live-card" : ""} ${statusClass(session.status)} ${session.parentId ? "subagent" : ""}"
+      data-session-id="${esc(session.id)}"
+      data-motion-key="session:${esc(session.id)}"
+      data-motion-value="${esc(session.updatedAt || "")}:${usage.total || 0}:${esc(session.status || "")}"
+      style="${providerStyle(session.provider)}"
+      role="button" tabindex="0"
+      aria-labelledby="${accessibleId}-title" aria-describedby="${accessibleId}-summary">
+      <div class="card-head">
+        <span class="provider-mark">${esc(provider.mark)}</span>
+        <div class="card-head-main"><div class="card-provider-line"><b>${esc(provider.label)}</b><span>${esc(provider.company)}</span></div></div>
+        ${executionModeBadge(session, true)}
+        <span class="status-pill ${statusClass(session.status)}">${esc(STATUS[session.status] || session.status)}</span>
+      </div>
+      <h3 id="${accessibleId}-title" class="card-title" title="${esc(titlePreview.full)}">${esc(titlePreview.text)}</h3>
+      <div class="card-subtitle">
+        <span>${esc(model)}</span>
+        <i>
+        </i>
+        <span title="${esc(isProjectlessSession(session) ? window.LoadToAgentI18n.t("ui.session_not_linked_to_a_specific_project") : session.cwd)}">
+          ${esc(sessionWorkspaceLabel(session))}
+        </span>${
+          session.agentName
+            ? `<i>
+        </i>
+        <span>${esc(session.agentName)}</span>`
+            : ""
+        }</div>
+      <div id="${accessibleId}-summary" class="now-strip ${running ? "is-live" : ""}">
+        <span class="now-strip-icon">${statusIcon(activity.type)}</span>
+        <div><b>${running ? "지금: " : ""}${esc(activity.title)}</b><span title="${esc(activityPreview.full)}">${esc(activityPreview.text)}</span></div>
+        ${running ? '<span class="activity-wave"><i></i><i></i><i></i><i></i><i></i></span>' : ""}
+      </div>
+      ${
+        runtime.length
+          ? `<div class="runtime-strip">
+        <span class="runtime-pulse">
+        </span>
+        <b>실제로 실행 중인 프로그램 ${runtime.length}개</b>
+        <span>${esc(runtime.map((item) => item.label || `프로그램 ${item.pid}`).join(" · "))}</span>
+        </div>`
+          : ""
+      }
+      <div class="conversation-preview">
+        ${conversation.map((row) => `<div class="preview-line ${row.tone}"><b>${esc(row.label)}</b><span>${esc(row.text)}</span></div>`).join("")}
+      </div>
+      <div class="context-meter ${gaugeTone}">
+        <div class="context-meter-head">
+          <div>
+          <span>AI의 기억 공간 사용량</span>
+          <strong>${context.window ? `${fullNumber(context.used)} / ${fullNumber(context.window)}` : `${fullNumber(context.used)} / --`}</strong>
+          </div>
+          <b>${context.window ? `${contextPercent.toFixed(1)}%` : "--"}</b>
+          </div>
+        <div class="context-meter-track"><span style="width:${contextPercent}%"></span><i style="left:75%"></i><i style="left:90%"></i></div>
+        <div class="context-meter-foot">
+          <span>${context.window ? `아직 ${compact(remaining)} 토큰만큼 기억 가능` : "기억 공간 크기 정보 없음"}</span>
+          <span>지금까지 ${compact(usage.total)} 토큰 사용</span>
+          </div>
+      </div>
+      <div class="token-row">
+        <div><span>받은 글</span><b>${compact(usage.input)}</b></div>
+        <div><span>AI가 쓴 글</span><b>${compact(usage.output)}</b></div>
+        <div><span>다시 쓴 기억</span><b>${compact(usage.cachedInput)}</b></div>
+        <div class="total"><span>전체 사용</span><b>${compact(usage.total)}</b></div>
+      </div>
+      ${
+        children.length
+          ? `<div class="child-row">
+        <b>⑂</b>
+        <span>서브에이전트 ${children.length}개 누적 생성</span>
+        <span class="child-dots">${children
+          .slice(0, 4)
+          .map(() => "<i></i>")
+          .join("")}</span>
+        </div>`
+          : ""
+      }
+      <footer class="card-footer">
+        <span class="source-tag">${esc(session.sourceLabel || "내 PC의 작업 기록")}</span>
+        <span>${esc(timeAgo(session.updatedAt))}</span>
+      </footer>
+    </article>`;
+  }
+
+  function renderSessions(motionKind = "refresh", deferMotion = false) {
+    const previousLayout = deferMotion ? null : captureMotionLayout();
+    syncViewChrome();
+    renderGuide();
+    const tmuxView = state.view === "tmux";
+    const terminalView = state.view === "terminal";
+    const settingsView = state.view === "settings";
+    $("#terminalSection").classList.toggle("hidden", !terminalView);
+    $("#tmuxSection").classList.toggle("hidden", !tmuxView);
+    $("#settingsSection").classList.toggle("hidden", !settingsView);
+    $("#globalStats").classList.toggle("hidden", tmuxView || terminalView || settingsView);
+    $("#providerOverview").classList.toggle("hidden", tmuxView || terminalView || settingsView);
+    $("#sessionSection").classList.toggle("hidden", tmuxView || terminalView || settingsView);
+    const guideVisible = state.view === "all" && state.guideExpanded && !state.graphFocusId;
+    $("#beginnerGuide").classList.toggle("hidden", !guideVisible);
+    $("#guideBtn").setAttribute("aria-expanded", guideVisible ? "true" : "false");
+    renderUpdateSettings();
+    if (settingsView) {
+      $("#liveSection").classList.add("hidden");
+      if (window.LoadToAgentTerminal) window.LoadToAgentTerminal.deactivate();
+      if (!deferMotion) playMotionLayout(previousLayout, motionKind);
+      if (motionKind === "view") animateVisibleSections();
+      return;
+    }
+    if (terminalView) {
+      $("#liveSection").classList.add("hidden");
+      if (window.LoadToAgentTerminal) window.LoadToAgentTerminal.activate(state.snapshot, state.workspaces, "general");
+      if (!deferMotion) playMotionLayout(previousLayout, motionKind);
+      if (motionKind === "view") animateVisibleSections();
+      return;
+    }
+    if (tmuxView) {
+      $("#liveSection").classList.add("hidden");
+      renderTmuxMap();
+      if (window.LoadToAgentTerminal) window.LoadToAgentTerminal.activate(state.snapshot, state.workspaces, "tmux");
+      if (!deferMotion) playMotionLayout(previousLayout, motionKind);
+      if (motionKind === "view") animateVisibleSections();
+      return;
+    }
+    if (window.LoadToAgentTerminal) window.LoadToAgentTerminal.deactivate();
+    const sessions = filteredSessions();
+    const showMap = ["all", "active"].includes(state.view);
+    const graphLiveCount = showMap ? renderAgentMap(graphFilteredSessions(), motionKind) : 0;
+    const regular = state.view === "all" ? sessions.filter((session) => !isLiveSession(session)) : state.view === "active" ? [] : sessions;
+    const visible = regular.slice(0, state.visibleLimit);
+    $("#liveSection").classList.toggle("hidden", graphLiveCount === 0);
+    $("#viewTitle").textContent = VIEW_TITLES[state.view] || window.LoadToAgentI18n.t("ui.recent_conversations_and_tasks");
+    $("#sessionGrid").innerHTML = visible.map((session) => sessionCard(session)).join("");
+    $("#sessionGrid").classList.toggle("hidden", visible.length === 0);
+    $("#loadMoreBtn").classList.toggle("hidden", regular.length <= state.visibleLimit);
+    $("#loadMoreBtn").textContent = window.LoadToAgentI18n.t("common.remaining", { count: regular.length - state.visibleLimit });
+    $("#emptyState").classList.toggle("hidden", graphLiveCount + regular.length !== 0);
+    if (graphLiveCount + regular.length === 0) {
+      const emptyCopy = state.search
+        ? [window.LoadToAgentI18n.t("ui.no_search_results"), window.LoadToAgentI18n.t("ui.clear_the_search_or_change_the_ai_and_workspace_filters")]
+        : state.view === "active"
+          ? [window.LoadToAgentI18n.t("ui.no_tasks_are_currently_active"), window.LoadToAgentI18n.t("ui.new_tasks_will_show_their_progress_here_immediately")]
+          : state.view === "waiting"
+            ? [window.LoadToAgentI18n.t("ui.all_caught_up"), window.LoadToAgentI18n.t("ui.no_tasks_are_waiting_for_your_response_or_choice")]
+            : [window.LoadToAgentI18n.t("ui.no_tasks_to_show_yet"), window.LoadToAgentI18n.t("ui.check_ai_readiness_then_start_your_first_task")];
+      $("#emptyState h3").textContent = emptyCopy[0];
+      $("#emptyState p").textContent = emptyCopy[1];
+    }
+    if (!deferMotion) playMotionLayout(previousLayout, motionKind);
+    if (motionKind === "view") animateVisibleSections();
+  }
+
+  function render(motionKind = "refresh") {
+    const previousLayout = captureMotionLayout();
+    renderProviderRail();
+    renderWorkspaces();
+    renderGlobalStats();
+    renderProviderOverview();
+    renderSessions(motionKind, true);
+    if (state.selectedId && $("#detailDrawer").classList.contains("open")) context.renderDrawer();
+    playMotionLayout(previousLayout, motionKind);
+    if (motionKind === "view") animateVisibleSections();
+  }
+
+  return {
+    recentConversation,
+    sessionCard,
+    renderSessions,
+    render,
+  };
+};

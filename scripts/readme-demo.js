@@ -21,7 +21,7 @@ function delay(ms) {
 
 async function waitForRenderer(win, attempts = 80) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const ready = await win.webContents.executeJavaScript("typeof state !== 'undefined' && state.providers.length === 4 && typeof render === 'function'");
+    const ready = await win.webContents.executeJavaScript("window.LoadToAgentApp?.state?.providers?.length === 4 && typeof window.LoadToAgentApp.render === 'function'");
     if (ready) return;
     await delay(100);
   }
@@ -95,7 +95,7 @@ async function installFixture(win) {
       session({ id: 'demo:grok:root', provider: 'grok', title: '느린 테스트 원인 조사', status: 'waiting', offset: 6300 }),
     ];
     const sessions = [root, claude, gemini, grok, ...extra];
-    const summaries = state.providers.map(provider => {
+    const summaries = window.LoadToAgentApp.state.providers.map(provider => {
       const owned = sessions.filter(item => item.provider === provider.id);
       return {
         ...provider,
@@ -130,16 +130,16 @@ async function installFixture(win) {
     };
     window.__ensureLoadToAgentReadmeDemo = (focusId = null) => {
       const demo = window.__loadtoagentReadmeDemo;
-      state.snapshot = demo.snapshot;
-      state.details = new Map(demo.sessions.map(item => [item.id, item]));
-      state.availability = Object.fromEntries(state.providers.map(provider => [provider.id, true]));
-      state.workspaces = [{ path: '/Users/demo/loadtoagent', name: 'LoadToAgent Demo' }];
-      state.view = 'all';
-      state.provider = 'all';
-      state.workspace = 'all';
-      state.search = '';
-      state.graphFocusId = focusId;
-      render();
+      window.LoadToAgentApp.state.snapshot = demo.snapshot;
+      window.LoadToAgentApp.state.details = new Map(demo.sessions.map(item => [item.id, item]));
+      window.LoadToAgentApp.state.availability = Object.fromEntries(window.LoadToAgentApp.state.providers.map(provider => [provider.id, true]));
+      window.LoadToAgentApp.state.workspaces = [{ path: '/Users/demo/loadtoagent', name: 'LoadToAgent Demo' }];
+      window.LoadToAgentApp.state.view = 'all';
+      window.LoadToAgentApp.state.provider = 'all';
+      window.LoadToAgentApp.state.workspace = 'all';
+      window.LoadToAgentApp.state.search = '';
+      window.LoadToAgentApp.state.graphFocusId = focusId;
+      window.LoadToAgentApp.render();
       document.querySelector('.main-stage')?.scrollTo(0, 0);
     };
     const style = document.createElement('style');
@@ -178,7 +178,7 @@ async function setFocus(win, id, targetSelector) {
   await win.webContents.executeJavaScript(`(() => {
     window.__ensureLoadToAgentReadmeDemo(${JSON.stringify(id)});
     window.__readmeDemoPoint(${JSON.stringify(targetSelector)}, true);
-    renderSessions('focus');
+    window.LoadToAgentApp.renderSessions('focus');
     window.__readmeDemoFinishMotion();
   })()`);
   await delay(180);
@@ -189,14 +189,14 @@ async function showDrawer(win, id) {
   await win.webContents.executeJavaScript(`(() => {
     window.__ensureLoadToAgentReadmeDemo(${JSON.stringify(id)});
     window.__readmeDemoPoint('[data-open-session="${id}"]', true);
-    state.selectedId = ${JSON.stringify(id)};
-    state.drawerTab = 'chat';
-    state.drawerForceLatest = true;
-    state.detailLoading = false;
+    window.LoadToAgentApp.state.selectedId = ${JSON.stringify(id)};
+    window.LoadToAgentApp.state.drawerTab = 'chat';
+    window.LoadToAgentApp.state.drawerForceLatest = true;
+    window.LoadToAgentApp.state.detailLoading = false;
     document.querySelector('#drawerBackdrop').classList.remove('hidden', 'closing');
     document.querySelector('#detailDrawer').classList.add('open');
     document.querySelector('#detailDrawer').setAttribute('aria-hidden', 'false');
-    renderDrawer();
+    window.LoadToAgentApp.renderDrawer();
     window.__readmeDemoFinishMotion();
   })()`);
   await delay(180);
@@ -228,9 +228,9 @@ async function buildDemo() {
 
   await win.webContents.executeJavaScript(`(() => {
     window.__readmeDemoPoint('[data-tab="tokens"]', true);
-    state.drawerTab = 'tokens';
-    state.detailLoading = false;
-    renderDrawer();
+    window.LoadToAgentApp.state.drawerTab = 'tokens';
+    window.LoadToAgentApp.state.detailLoading = false;
+    window.LoadToAgentApp.renderDrawer();
     window.__readmeDemoFinishMotion();
   })()`);
   await delay(180);

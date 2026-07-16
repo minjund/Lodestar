@@ -6,6 +6,7 @@ const path = require('path');
 const { AgentMonitor, buildSummary } = require('./agentMonitor');
 const { TmuxMonitor, linkAgentSessions } = require('./tmuxMonitor');
 const { ProcessMonitor, applyRuntimePresence } = require('./processMonitor');
+const { reportRecoverableError } = require('./diagnostics');
 
 const tmuxMonitor = new TmuxMonitor();
 tmuxMonitor.scan();
@@ -38,7 +39,9 @@ for (const root of [
       if (!known) monitor.listCache.clear();
     });
     discoveryWatchers.push(watcher);
-  } catch {}
+  } catch (error) {
+    reportRecoverableError(`session-watch:${root}`, error);
+  }
 }
 
 function clip(value, limit) {
@@ -46,6 +49,7 @@ function clip(value, limit) {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 }
 
+/** Creates the compact renderer projection of a provider-neutral session message. */
 function cardMessage(message) {
   return {
     id: message.id,

@@ -96,7 +96,10 @@ function providerFromPosixProcess(processInfo = {}) {
 function elapsedSeconds(value) {
   const text = String(value || '').trim();
   const match = text.match(/^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/);
-  if (!match) return Number(text || 0);
+  if (!match) {
+    const seconds = Number(text);
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+  }
   return Number(match[1] || 0) * 86400 + Number(match[2] || 0) * 3600 + Number(match[3] || 0) * 60 + Number(match[4] || 0);
 }
 
@@ -105,6 +108,7 @@ function posixProcessRows(value, now = Date.now()) {
     const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s*(.*)$/);
     if (!match) return null;
     const age = elapsedSeconds(match[3]);
+    if (age == null) return null;
     return {
       pid: Number(match[1]),
       parentPid: Number(match[2]),
@@ -346,7 +350,7 @@ class ProcessMonitor {
   constructor(options = {}) {
     this.execFileSync = options.execFileSync || execFileSync;
     this.platform = options.platform || process.platform;
-    this.scanTtlMs = options.scanTtlMs || DEFAULT_SCAN_TTL_MS;
+    this.scanTtlMs = options.scanTtlMs ?? DEFAULT_SCAN_TTL_MS;
     this.lastScanAt = 0;
     this.lastSnapshot = { generatedAt: new Date().toISOString(), available: false, processes: [], error: '' };
   }
@@ -368,7 +372,7 @@ class ProcessMonitor {
       }
       this.lastSnapshot = { generatedAt: new Date().toISOString(), available: true, processes, error: '' };
     } catch (error) {
-      this.lastSnapshot = { ...this.lastSnapshot, generatedAt: new Date().toISOString(), error: String(error.message || error) };
+      this.lastSnapshot = { generatedAt: new Date().toISOString(), available: false, processes: [], error: String(error.message || error) };
     }
     return this.lastSnapshot;
   }

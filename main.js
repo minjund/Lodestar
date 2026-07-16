@@ -14,6 +14,13 @@ const { TmuxController } = require('./src/tmuxController');
 const { normalizeWslList } = require('./src/tmuxMonitor');
 const { BridgeServer } = require('./src/bridgeServer');
 const { UpdateManager } = require('./src/updateManager');
+const { readWorkspaces, removeWorkspace, writeWorkspaces } = require('./src/workspaceStore');
+const { registerAppIpc } = require('./src/ipc/registerAppIpc');
+const { registerAgentIpc } = require('./src/ipc/registerAgentIpc');
+const { registerTerminalIpc } = require('./src/ipc/registerTerminalIpc');
+const { registerTmuxIpc } = require('./src/ipc/registerTmuxIpc');
+const { registerWorkspaceIpc } = require('./src/ipc/registerWorkspaceIpc');
+const { reportRecoverableError } = require('./src/diagnostics');
 
 const demoCapture = process.env.LOADTOAGENT_DEMO_CAPTURE === '1';
 let mainWindow = null;
@@ -86,17 +93,6 @@ function mainText(key, values = {}) {
   return Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), source);
 }
 
-function readJson(file, fallback) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
-}
-
-function writeJson(file, value) {
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(value, null, 2), 'utf8');
-  } catch {}
-}
-
 function shellQuote(value) {
   return `'${String(value || '').replace(/'/g, `'"'"'`)}'`;
 }
@@ -121,23 +117,11 @@ function installBridgeLauncher(home = bridgeHome) {
 }
 
 function listWorkspaces() {
-  return readJson(userFile('workspaces.json'), [])
-    .filter(item => item && item.path && fs.existsSync(item.path))
-    .map(item => ({ ...item, name: item.name || path.basename(item.path) }));
+  return readWorkspaces(userFile('workspaces.json'));
 }
 
 function saveWorkspaces(items) {
-  const unique = [];
-  const seen = new Set();
-  for (const item of items) {
-    const target = path.resolve(String(item.path || ''));
-    const key = target.toLowerCase();
-    if (!target || seen.has(key) || !fs.existsSync(target)) continue;
-    seen.add(key);
-    unique.push({ path: target, name: item.name || path.basename(target) });
-  }
-  writeJson(userFile('workspaces.json'), unique);
-  return unique;
+  return writeWorkspaces(userFile('workspaces.json'), items);
 }
 
 function listWslDistros() {
@@ -149,7 +133,8 @@ function listWslDistros() {
       timeout: 5_000,
       maxBuffer: 256 * 1024,
     }));
-  } catch {
+  } catch (error) {
+    reportRecoverableError('wsl-distro-list', error);
     return [];
   }
 }
@@ -161,7 +146,9 @@ function hydratePlatformPath() {
     const shellPath = process.env.SHELL || '/bin/zsh';
     const loginPath = execFileSync(shellPath, ['-lic', 'printf %s "$PATH"'], { encoding: 'utf8', timeout: 5_000 }).trim();
     additions.unshift(...loginPath.split(path.delimiter));
-  } catch {}
+  } catch (error) {
+    reportRecoverableError('platform-path', error);
+  }
   process.env.PATH = [...new Set([...additions, ...String(process.env.PATH || '').split(path.delimiter)].filter(Boolean))].join(path.delimiter);
 }
 
@@ -229,7 +216,9 @@ async function ensureBackgroundTray() {
     backgroundTray.on('click', showMainWindow);
     backgroundTray.on('double-click', showMainWindow);
     updateBackgroundTrayMenu();
-  } catch {}
+  } catch (error) {
+    reportRecoverableError('background-tray', error);
+  }
   return backgroundTray;
 }
 
@@ -244,9 +233,16 @@ function requireTrustedSender(event) {
   if (!trustedSender(event)) throw new Error('허용되지 않은 터미널 요청입니다.');
 }
 
+function handleTrusted(channel, handler) {
+  ipcMain.handle(channel, (event, ...args) => {
+    requireTrustedSender(event);
+    return handler(...args);
+  });
+}
+
 function sendTerminal(channel, payload) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send(channel, payload); } catch {}
+  try { mainWindow.webContents.send(channel, payload); } catch (error) { reportRecoverableError(`ipc-send:${channel}`, error); }
 }
 
 function refreshMonitor() {
@@ -255,12 +251,12 @@ function refreshMonitor() {
 
 function sendSnapshot(snapshot) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send('agents:snapshot', snapshot); } catch {}
+  try { mainWindow.webContents.send('agents:snapshot', snapshot); } catch (error) { reportRecoverableError('ipc-send:agents:snapshot', error); }
 }
 
 function sendUpdateState(update) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send('app:update-state', update); } catch {}
+  try { mainWindow.webContents.send('app:update-state', update); } catch (error) { reportRecoverableError('ipc-send:app:update-state', error); }
 }
 
 function installationType() {
@@ -282,12 +278,17 @@ function setupRuntime() {
     downloadsDir: path.join(app.getPath('userData'), 'updates'),
   });
   updateManager.on('state', sendUpdateState);
-  updateManager.check().catch(() => {});
+  updateManager.check().catch(error => reportRecoverableError('startup-update-check', error));
   if (demoCapture) {
     availability = Object.fromEntries(providerList().map(provider => [provider.id, true]));
     return;
   }
-  try { bridgeLauncher = installBridgeLauncher(bridgeHome); } catch { bridgeLauncher = null; }
+  try {
+    bridgeLauncher = installBridgeLauncher(bridgeHome);
+  } catch (error) {
+    bridgeLauncher = null;
+    reportRecoverableError('bridge-launcher-install', error);
+  }
   terminalManager.on('data', payload => sendTerminal('terminals:data', payload));
   terminalManager.on('state', payload => {
     sendTerminal('terminals:state', payload);
@@ -339,248 +340,131 @@ function bridgePresence() {
     }));
 }
 
-ipcMain.handle('app:bootstrap', () => ({
-  providers: providerList(),
-  availability,
-  workspaces: listWorkspaces(),
-  snapshot: lastSnapshot,
-  activeRuns: runner ? runner.listActive() : [],
-  versions: { app: app.getVersion(), electron: process.versions.electron, node: process.versions.node },
-  platform: {
-    id: process.platform,
-    label: process.platform === 'darwin' ? 'macOS' : (process.platform === 'win32' ? 'Windows' : 'Linux'),
-    localShell: process.platform === 'win32' ? 'powershell' : 'shell',
-    localShellLabel: process.platform === 'darwin' ? 'Mac 명령창' : (process.platform === 'win32' ? 'Windows 명령창' : 'Linux 명령창'),
-    nativeTmux: process.platform !== 'win32',
-  },
-  bridgeCli: bridgeLauncher,
-  update: updateManager ? updateManager.getState() : null,
-}));
-ipcMain.handle('app:background-state', event => {
-  requireTrustedSender(event);
+/** @returns {import('./src/contracts').BootstrapPayload} */
+function bootstrapState() {
   return {
-    visible: Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()),
-    backgroundSessions: backgroundAgentSessions().length,
-    trayReady: Boolean(backgroundTray),
+    providers: providerList(),
+    availability,
+    workspaces: listWorkspaces(),
+    snapshot: lastSnapshot,
+    activeRuns: runner ? runner.listActive() : [],
+    versions: { app: app.getVersion(), electron: process.versions.electron, node: process.versions.node },
+    platform: {
+      id: process.platform,
+      label: process.platform === 'darwin' ? 'macOS' : (process.platform === 'win32' ? 'Windows' : 'Linux'),
+      localShell: process.platform === 'win32' ? 'powershell' : 'shell',
+      localShellLabel: process.platform === 'darwin' ? 'Mac 명령창' : (process.platform === 'win32' ? 'Windows 명령창' : 'Linux 명령창'),
+      nativeTmux: process.platform !== 'win32',
+    },
+    bridgeCli: bridgeLauncher,
+    update: updateManager ? updateManager.getState() : null,
   };
-});
-ipcMain.handle('app:show', event => {
-  requireTrustedSender(event);
-  showMainWindow();
-  return { ok: true };
-});
-ipcMain.handle('app:set-locale', (event, locale) => {
-  requireTrustedSender(event);
-  appLocale = ['ko', 'en', 'zh-CN'].includes(locale) ? locale : 'ko';
-  updateBackgroundTrayMenu();
-  return { locale: appLocale };
-});
-ipcMain.handle('app:update-check', event => {
-  requireTrustedSender(event);
-  if (!updateManager) throw new Error('업데이트 관리자가 준비되지 않았습니다.');
-  return updateManager.check();
-});
-ipcMain.handle('app:update-download', event => {
-  requireTrustedSender(event);
-  if (!updateManager) throw new Error('업데이트 관리자가 준비되지 않았습니다.');
-  return updateManager.download();
-});
-ipcMain.handle('app:update-open', event => {
-  requireTrustedSender(event);
-  if (!updateManager) throw new Error('업데이트 관리자가 준비되지 않았습니다.');
-  return updateManager.openDownloaded();
-});
-ipcMain.handle('app:update-open-release', event => {
-  requireTrustedSender(event);
-  if (!updateManager) throw new Error('업데이트 관리자가 준비되지 않았습니다.');
-  return updateManager.openReleasePage();
-});
+}
 
-ipcMain.handle('agents:snapshot', () => {
-  if (monitorWorker) monitorWorker.postMessage({ type: 'scan' });
-  return lastSnapshot;
-});
-ipcMain.handle('agents:detail', (_event, sessionId) => new Promise(resolve => {
-  if (!monitorWorker) return resolve(null);
-  const requestId = ++detailRequestId;
-  const timer = setTimeout(() => {
-    const pending = pendingDetails.get(requestId);
-    if (!pending) return;
-    pendingDetails.delete(requestId);
-    resolve(null);
-  }, 4000);
-  pendingDetails.set(requestId, {
-    resolve: value => {
-      clearTimeout(timer);
-      resolve(value);
+function requestAgentDetail(sessionId) {
+  return new Promise(resolve => {
+    if (!monitorWorker || String(sessionId || '').length > 500) return resolve(null);
+    const requestId = ++detailRequestId;
+    const timer = setTimeout(() => {
+      if (!pendingDetails.has(requestId)) return;
+      pendingDetails.delete(requestId);
+      resolve(null);
+    }, 4000);
+    pendingDetails.set(requestId, {
+      resolve: value => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+    });
+    monitorWorker.postMessage({ type: 'detail', requestId, sessionId: String(sessionId || '') });
+  });
+}
+
+function registerIpcHandlers() {
+  registerAppIpc({
+    handleTrusted,
+    bootstrap: bootstrapState,
+    backgroundState: () => ({
+      visible: Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()),
+      backgroundSessions: backgroundAgentSessions().length,
+      trayReady: Boolean(backgroundTray),
+    }),
+    show: () => { showMainWindow(); return { ok: true }; },
+    setLocale: locale => {
+      appLocale = ['ko', 'en', 'zh-CN'].includes(locale) ? locale : 'ko';
+      updateBackgroundTrayMenu();
+      return { locale: appLocale };
+    },
+    updateManager: () => updateManager,
+  });
+  registerAgentIpc({
+    handleTrusted,
+    snapshot: () => { refreshMonitor(); return lastSnapshot; },
+    requestDetail: requestAgentDetail,
+    runner: () => runner,
+    probeProviders: () => {
+      availability = probeProviders();
+      if (monitorWorker) monitorWorker.postMessage({ type: 'availability', availability });
+      refreshMonitor();
+      return availability;
     },
   });
-  monitorWorker.postMessage({ type: 'detail', requestId, sessionId: String(sessionId || '') });
-}));
-ipcMain.handle('agents:run', (_event, opts) => runner.start(opts));
-ipcMain.handle('agents:stop', (_event, runId) => runner.stop(runId));
-ipcMain.handle('agents:active-runs', () => runner.listActive());
-ipcMain.handle('providers:probe', () => {
-  availability = probeProviders();
-  if (monitorWorker) monitorWorker.postMessage({ type: 'availability', availability });
-  if (monitorWorker) monitorWorker.postMessage({ type: 'scan' });
-  return availability;
-});
+  registerTerminalIpc({
+    ipcMain,
+    requireTrustedSender,
+    trustedSender,
+    manager: () => terminalManager,
+    listWslDistros,
+    sendError: payload => sendTerminal('terminals:error', payload),
+  });
+  registerTmuxIpc({ handleTrusted, controller: tmuxController, refresh: refreshMonitor });
+  registerWorkspaceIpc({
+    handleTrusted,
+    list: listWorkspaces,
+    add: async () => {
+      const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'multiSelections'], title: mainText('addWorkspaces') });
+      if (result.canceled) return listWorkspaces();
+      return saveWorkspaces([...listWorkspaces(), ...result.filePaths.map(folder => ({ path: folder, name: path.basename(folder) }))]);
+    },
+    remove: folder => saveWorkspaces(removeWorkspace(listWorkspaces(), folder)),
+    pick: async () => {
+      const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'], title: mainText('pickWorkspace') });
+      return result.canceled ? null : result.filePaths[0];
+    },
+    openExternal: async target => {
+      const value = String(target || '');
+      if (!/^https:\/\//i.test(value)) return { ok: false };
+      await shell.openExternal(value);
+      return { ok: true };
+    },
+    writeClipboard: value => {
+      clipboard.writeText(String(value || '').slice(0, 8_000));
+      return { ok: true };
+    },
+    bridgeCommand: provider => {
+      const id = String(provider || '').toLowerCase();
+      if (!['claude', 'codex', 'gemini', 'grok'].includes(id)) return { ok: false };
+      const prefix = bridgeLauncher && bridgeLauncher.commandPrefix || 'loadtoagent';
+      return { ok: true, command: `${prefix} run ${id}`, launcher: bridgeLauncher };
+    },
+    openOrigin: async session => {
+      const provider = String(session && session.provider || '');
+      const externalId = String(session && session.externalId || '');
+      const clientKind = String(session && session.clientKind || '');
+      if (provider === 'codex' && clientKind === 'codex-desktop' && /^[0-9a-f-]{20,80}$/i.test(externalId)) {
+        await shell.openExternal(`codex://threads/${encodeURIComponent(externalId)}`);
+        return { ok: true };
+      }
+      if (provider === 'claude' && clientKind === 'claude-desktop') {
+        await shell.openExternal('claude://');
+        return { ok: true };
+      }
+      return { ok: false };
+    },
+  });
+}
 
-ipcMain.handle('terminals:list', event => {
-  requireTrustedSender(event);
-  return terminalManager ? terminalManager.list() : [];
-});
-ipcMain.handle('wsl:list-distros', event => {
-  requireTrustedSender(event);
-  return listWslDistros();
-});
-ipcMain.handle('terminals:get', (event, id) => {
-  requireTrustedSender(event);
-  return terminalManager ? terminalManager.get(id, true) : null;
-});
-ipcMain.handle('terminals:create', (event, options) => {
-  requireTrustedSender(event);
-  if (!terminalManager) throw new Error('터미널 관리자가 준비되지 않았습니다.');
-  return terminalManager.create(options || {});
-});
-ipcMain.on('terminals:write', (event, id, data) => {
-  if (!trustedSender(event) || !terminalManager) return;
-  try { terminalManager.write(id, data); } catch (error) { sendTerminal('terminals:error', { id: String(id || ''), message: error.message }); }
-});
-ipcMain.handle('terminals:command', (event, id, command) => {
-  requireTrustedSender(event);
-  return terminalManager.command(id, command);
-});
-ipcMain.on('terminals:resize', (event, id, cols, rows) => {
-  if (!trustedSender(event) || !terminalManager) return;
-  try { terminalManager.resize(id, cols, rows); } catch {}
-});
-ipcMain.handle('terminals:signal', (event, id, signal) => {
-  requireTrustedSender(event);
-  return terminalManager.signal(id, signal);
-});
-ipcMain.handle('terminals:restart', (event, id) => {
-  requireTrustedSender(event);
-  return terminalManager.restart(id);
-});
-ipcMain.handle('terminals:close', (event, id) => {
-  requireTrustedSender(event);
-  return terminalManager.close(id);
-});
-
-ipcMain.handle('tmux:send-text', async (event, options) => {
-  requireTrustedSender(event);
-  return tmuxController.sendText(options || {});
-});
-ipcMain.handle('tmux:send-key', async (event, options) => {
-  requireTrustedSender(event);
-  return tmuxController.sendKey(options || {});
-});
-ipcMain.handle('tmux:capture', async (event, options) => {
-  requireTrustedSender(event);
-  return tmuxController.capture(options || {});
-});
-ipcMain.handle('tmux:new-session', async (event, options) => {
-  requireTrustedSender(event);
-  const result = await tmuxController.newSession(options || {});
-  refreshMonitor();
-  return result;
-});
-ipcMain.handle('tmux:new-window', async (event, options) => {
-  requireTrustedSender(event);
-  const result = await tmuxController.newWindow(options || {});
-  refreshMonitor();
-  return result;
-});
-ipcMain.handle('tmux:split-pane', async (event, options) => {
-  requireTrustedSender(event);
-  const result = await tmuxController.splitPane(options || {});
-  refreshMonitor();
-  return result;
-});
-ipcMain.handle('tmux:rename-session', async (event, options) => {
-  requireTrustedSender(event);
-  const result = await tmuxController.renameSession(options || {});
-  refreshMonitor();
-  return result;
-});
-ipcMain.handle('tmux:rename-window', async (event, options) => {
-  requireTrustedSender(event);
-  const result = await tmuxController.renameWindow(options || {});
-  refreshMonitor();
-  return result;
-});
-ipcMain.handle('tmux:select-layout', async (event, options) => {
-  requireTrustedSender(event);
-  const result = await tmuxController.selectLayout(options || {});
-  refreshMonitor();
-  return result;
-});
-ipcMain.handle('tmux:kill-pane', async (event, options) => {
-  requireTrustedSender(event);
-  const result = await tmuxController.killPane(options || {});
-  refreshMonitor();
-  return result;
-});
-ipcMain.handle('tmux:kill-window', async (event, options) => {
-  requireTrustedSender(event);
-  const result = await tmuxController.killWindow(options || {});
-  refreshMonitor();
-  return result;
-});
-ipcMain.handle('tmux:kill-session', async (event, options) => {
-  requireTrustedSender(event);
-  const result = await tmuxController.killSession(options || {});
-  refreshMonitor();
-  return result;
-});
-
-ipcMain.handle('workspaces:list', () => listWorkspaces());
-ipcMain.handle('workspaces:add', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'multiSelections'], title: mainText('addWorkspaces') });
-  if (result.canceled) return listWorkspaces();
-  return saveWorkspaces([...listWorkspaces(), ...result.filePaths.map(folder => ({ path: folder, name: path.basename(folder) }))]);
-});
-ipcMain.handle('workspaces:remove', (_event, folder) => saveWorkspaces(listWorkspaces().filter(item => path.resolve(item.path) !== path.resolve(String(folder || '')))));
-ipcMain.handle('workspaces:pick', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'], title: mainText('pickWorkspace') });
-  return result.canceled ? null : result.filePaths[0];
-});
-ipcMain.handle('external:open', (_event, target) => {
-  const value = String(target || '');
-  if (!/^https:\/\//i.test(value)) return { ok: false };
-  shell.openExternal(value);
-  return { ok: true };
-});
-ipcMain.handle('clipboard:write', (event, value) => {
-  requireTrustedSender(event);
-  clipboard.writeText(String(value || '').slice(0, 8_000));
-  return { ok: true };
-});
-ipcMain.handle('bridge:command', (event, provider) => {
-  requireTrustedSender(event);
-  const id = String(provider || '').toLowerCase();
-  if (!['claude', 'codex', 'gemini', 'grok'].includes(id)) return { ok: false };
-  const prefix = bridgeLauncher && bridgeLauncher.commandPrefix || 'loadtoagent';
-  return { ok: true, command: `${prefix} run ${id}`, launcher: bridgeLauncher };
-});
-ipcMain.handle('agents:open-origin', async (event, session) => {
-  requireTrustedSender(event);
-  const provider = String(session && session.provider || '');
-  const externalId = String(session && session.externalId || '');
-  const clientKind = String(session && session.clientKind || '');
-  const validId = /^[0-9a-f-]{20,80}$/i.test(externalId);
-  if (provider === 'codex' && clientKind === 'codex-desktop' && validId) {
-    await shell.openExternal(`codex://threads/${encodeURIComponent(externalId)}`);
-    return { ok: true };
-  }
-  if (provider === 'claude' && clientKind === 'claude-desktop') {
-    await shell.openExternal('claude://');
-    return { ok: true };
-  }
-  return { ok: false };
-});
+registerIpcHandlers();
 
 app.whenReady().then(() => {
   hydratePlatformPath();

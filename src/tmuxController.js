@@ -1,6 +1,8 @@
 'use strict';
 
 const { spawn } = require('child_process');
+const crypto = require('crypto');
+const { reportRecoverableError, runBestEffort } = require('./diagnostics');
 
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const ALLOWED_KEYS = new Set(['Enter', 'Escape', 'Tab', 'BSpace', 'Up', 'Down', 'Left', 'Right', 'Home', 'End', 'PPage', 'NPage', 'C-c', 'C-d', 'C-l', 'C-z']);
@@ -39,7 +41,7 @@ function runProcess(file, args, options = {}) {
       if (error) reject(error); else resolve(value);
     };
     const timer = setTimeout(() => {
-      try { child.kill(); } catch {}
+      runBestEffort('tmux-timeout-kill', () => child.kill());
       finish(new Error('tmux 명령 시간이 초과되었습니다.'));
     }, options.timeoutMs || 8_000);
     child.stdout.on('data', chunk => {
@@ -78,8 +80,16 @@ class TmuxController {
     const target = safeTarget(options.target);
     const text = String(options.text == null ? '' : options.text);
     if (!text || text.length > 128 * 1024) throw new Error('보낼 명령의 크기가 올바르지 않습니다.');
-    await this.execute(distro, ['load-buffer', '-'], { input: text });
-    await this.execute(distro, ['paste-buffer', '-d', '-t', target]);
+    const bufferName = `loadtoagent-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
+    await this.execute(distro, ['load-buffer', '-b', bufferName, '-'], { input: text });
+    try {
+      await this.execute(distro, ['paste-buffer', '-b', bufferName, '-d', '-t', target]);
+    } catch (error) {
+      await this.execute(distro, ['delete-buffer', '-b', bufferName]).catch(cleanupError => {
+        reportRecoverableError('tmux-delete-failed-buffer', cleanupError);
+      });
+      throw error;
+    }
     if (options.enter !== false) await this.execute(distro, ['send-keys', '-t', target, 'Enter']);
     return { ok: true };
   }
@@ -118,6 +128,7 @@ class TmuxController {
     // WSL routes command arguments through a Linux command line; a bare tmux
     // format beginning with # can be consumed as a shell comment. -P's default
     // target format is stable and avoids that quoting boundary entirely.
+    if (!['horizontal', 'vertical'].includes(options.direction)) throw new Error('지원하지 않는 tmux 분할 방향입니다.');
     const args = ['split-window', '-d', '-t', safeTarget(options.target), '-P'];
     if (options.direction === 'horizontal') args.splice(1, 0, '-h');
     if (options.cwd) args.push('-c', clean(options.cwd, 500));

@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { EventEmitter } = require('events');
 const { PROVIDERS, normalizeProvider, modelContextWindow, blankUsage, finalizeUsage } = require('./providerRegistry');
+const { runBestEffort } = require('./diagnostics');
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -25,9 +26,7 @@ function findExecutable(command) {
   for (const dir of pathParts) {
     for (const ext of [...new Set(extensions)]) {
       const file = path.join(dir.replace(/^"|"$/g, ''), raw + ext);
-      try {
-        if (fs.statSync(file).isFile()) return file;
-      } catch {}
+      if (fs.existsSync(file) && fs.statSync(file).isFile()) return file;
     }
   }
   return '';
@@ -42,8 +41,9 @@ function probeProviders() {
 function atomicJson(file, value) {
   const temp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(temp, JSON.stringify(value, null, 2), 'utf8');
-  try { fs.renameSync(temp, file); } catch {
-    try { fs.copyFileSync(temp, file); } finally { try { fs.unlinkSync(temp); } catch {} }
+  try { fs.renameSync(temp, file); } catch (_renameUnavailable) {
+    // Windows can transiently lock the destination; copy-and-clean is the atomic-write fallback.
+    try { fs.copyFileSync(temp, file); } finally { runBestEffort('runner-temp-cleanup', () => fs.unlinkSync(temp)); }
   }
 }
 
@@ -54,7 +54,7 @@ function eventText(value) {
   if (typeof value === 'object') {
     const nested = value.text || value.output_text || value.content || value.message || value.response;
     if (nested != null) return eventText(nested);
-    try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+    try { return JSON.stringify(value, null, 2); } catch (_circularValue) { return String(value); }
   }
   return String(value);
 }
@@ -420,7 +420,7 @@ class AgentRunner extends EventEmitter {
 
   handleLine(run, stream, line) {
     let event = null;
-    try { event = JSON.parse(line); } catch {}
+    try { event = JSON.parse(line); } catch (_plainOutputLine) { event = null; } // Plain stderr/stdout lines are valid runner output.
     fs.appendFileSync(path.join(run.dir, 'events.jsonl'), `${JSON.stringify({ timestamp: new Date().toISOString(), stream, event, text: event ? undefined : clip(line, 4000) })}\n`, 'utf8');
     if (event) {
       if (run.provider === 'claude') handleClaude(run.state, event);
@@ -450,7 +450,7 @@ class AgentRunner extends EventEmitter {
     if (process.platform === 'win32') {
       execFile('taskkill', ['/PID', String(run.child.pid), '/T', '/F'], { windowsHide: true }, () => {});
     } else {
-      try { run.child.kill('SIGTERM'); } catch {}
+      runBestEffort('runner-stop', () => run.child.kill('SIGTERM'));
     }
     return { ok: true };
   }

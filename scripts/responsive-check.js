@@ -29,7 +29,7 @@ async function waitForWindow() {
 
 async function waitForRenderer(win) {
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    const ready = await win.webContents.executeJavaScript(`document.readyState === 'complete' && typeof renderSessions === 'function'`);
+    const ready = await win.webContents.executeJavaScript(`document.readyState === 'complete' && typeof window.LoadToAgentApp.renderSessions === 'function'`);
     if (ready) return;
     await wait(100);
   }
@@ -100,7 +100,7 @@ function assertLayout(metrics, context) {
 
 async function overlayMetrics(win, capturePath = '') {
   await win.webContents.executeJavaScript(`(() => {
-    openRunModal();
+    window.LoadToAgentApp.openRunModal();
   })()`);
   await wait(360);
   if (capturePath) {
@@ -204,13 +204,13 @@ async function setupWorkflowFixture(win) {
     const fixtureIds = new Set([rootId, ...childIds]);
     window.__responsiveWorkflowFixtures = [root, ...children];
     window.__ensureResponsiveWorkflowFixture = () => {
-      const sessions = state.snapshot && state.snapshot.sessions || [];
-      state.snapshot.sessions = [...sessions.filter(session => !fixtureIds.has(session.id)), ...window.__responsiveWorkflowFixtures];
-      state.view = 'all';
-      state.graphFocusId = rootId;
-      state.expandedCompletedSubagents.delete(rootId);
+      const sessions = window.LoadToAgentApp.state.snapshot && window.LoadToAgentApp.state.snapshot.sessions || [];
+      window.LoadToAgentApp.state.snapshot.sessions = [...sessions.filter(session => !fixtureIds.has(session.id)), ...window.__responsiveWorkflowFixtures];
+      window.LoadToAgentApp.state.view = 'all';
+      window.LoadToAgentApp.state.graphFocusId = rootId;
+      window.LoadToAgentApp.state.expandedCompletedSubagents.delete(rootId);
       document.querySelectorAll('.view-nav .nav-item').forEach(item => item.classList.toggle('active', item.dataset.view === 'all'));
-      renderSessions();
+      window.LoadToAgentApp.renderSessions();
     };
     if (window.LoadToAgentTerminal && !window.__responsiveOriginalAgentTargets) {
       window.__responsiveOriginalAgentTargets = window.LoadToAgentTerminal.agentTargets;
@@ -219,7 +219,7 @@ async function setupWorkflowFixture(win) {
         : window.__responsiveOriginalAgentTargets(session);
     }
     window.__ensureResponsiveWorkflowFixture();
-    drawAgentWorkflowConnections();
+    window.LoadToAgentApp.drawAgentWorkflowConnections();
     const stage = document.querySelector('.main-stage');
     const canvas = document.querySelector('.agent-workflow-canvas');
     if (stage && canvas) stage.scrollTo(0, Math.max(0, canvas.offsetTop - 12));
@@ -230,7 +230,7 @@ async function setupWorkflowFixture(win) {
 async function workflowMetrics(win) {
   return win.webContents.executeJavaScript(`(() => {
     window.__ensureResponsiveWorkflowFixture?.();
-    drawAgentWorkflowConnections();
+    window.LoadToAgentApp.drawAgentWorkflowConnections();
     const canvas = document.querySelector('.agent-workflow-canvas');
     const upstream = document.querySelector('.upstream-column .agent-workflow-origin, .upstream-column .agent-workflow-node');
     const selected = document.querySelector('.agent-workflow-selected');
@@ -364,7 +364,7 @@ app.whenReady().then(async () => {
         await win.webContents.executeJavaScript(`new Promise(resolve => {
           window.__ensureResponsiveWorkflowFixture?.();
           requestAnimationFrame(() => requestAnimationFrame(() => {
-            drawAgentWorkflowConnections();
+            window.LoadToAgentApp.drawAgentWorkflowConnections();
             const stage = document.querySelector('.main-stage');
             const canvas = document.querySelector('.agent-workflow-canvas');
             if (stage && canvas) stage.scrollTo(0, Math.max(0, canvas.offsetTop - 12));

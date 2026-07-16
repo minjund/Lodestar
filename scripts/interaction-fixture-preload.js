@@ -6,11 +6,26 @@ const clone = value => value == null ? value : JSON.parse(JSON.stringify(value))
 const now = new Date().toISOString();
 
 const providers = [
-  { id: 'claude', label: 'Claude', company: 'Anthropic', accent: '#d58b5b', mark: 'C', installed: true },
-  { id: 'gpt', label: 'GPT', company: 'OpenAI', accent: '#63d6b1', mark: 'G', installed: true },
-  { id: 'gemini', label: 'Gemini', company: 'Google', accent: '#6da8ff', mark: 'Ge', installed: true },
-  { id: 'grok', label: 'Grok', company: 'xAI', accent: '#c394ff', mark: 'X', installed: true },
-  { id: 'codex', label: 'GPT · Codex', company: 'OpenAI', accent: '#4fd1a7', mark: 'Cx', installed: true },
+  {
+    id: 'claude', label: 'Claude', company: 'Anthropic', accent: '#d58b5b', mark: 'C', installed: true,
+    docs: 'https://example.test/claude',
+  },
+  {
+    id: 'gpt', label: 'GPT', company: 'OpenAI', accent: '#63d6b1', mark: 'G', installed: true,
+    docs: 'https://example.test/gpt',
+  },
+  {
+    id: 'gemini', label: 'Gemini', company: 'Google', accent: '#6da8ff', mark: 'Ge', installed: true,
+    docs: 'https://example.test/gemini',
+  },
+  {
+    id: 'grok', label: 'Grok', company: 'xAI', accent: '#c394ff', mark: 'X', installed: true,
+    docs: 'https://example.test/grok',
+  },
+  {
+    id: 'codex', label: 'GPT · Codex', company: 'OpenAI', accent: '#4fd1a7', mark: 'Cx', installed: true,
+    docs: 'https://example.test/codex',
+  },
 ];
 
 const usage = { input: 1200, output: 540, cachedInput: 100, cacheWrite: 0, reasoning: 80, total: 1920 };
@@ -257,7 +272,7 @@ const api = {
   },
   terminalWrite: (id, data) => record('terminalWrite', [id, data]),
   terminalCommand: (id, command) => controlled('terminalCommand', [id, command]),
-  terminalResize: (id, cols, rows) => record('terminalResize', [id, cols, rows]),
+  terminalResize: (id, cols, rows) => controlled('terminalResize', [id, cols, rows]),
   terminalSignal: (id, signal) => controlled('terminalSignal', [id, signal]),
   terminalRestart: async id => {
     await controlled('terminalRestart', [id]);

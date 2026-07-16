@@ -6,9 +6,11 @@ const path = require('path');
 const net = require('net');
 const crypto = require('crypto');
 const { AGENT_PROVIDERS } = require('./terminalManager');
+const { runBestEffort } = require('./diagnostics');
 
 const PROTOCOL_VERSION = 1;
 const MAX_FRAME_CHARS = 1024 * 1024;
+const AUTH_TIMEOUT_MS = 10_000;
 
 function bridgeDirectory(home = os.homedir()) {
   return path.join(home, '.loadtoagent');
@@ -28,9 +30,9 @@ function safeWriteJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(temporary, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600 });
-  try { fs.chmodSync(temporary, 0o600); } catch {}
+  runBestEffort('bridge-temp-permissions', () => fs.chmodSync(temporary, 0o600));
   fs.renameSync(temporary, file);
-  try { fs.chmodSync(file, 0o600); } catch {}
+  runBestEffort('bridge-discovery-permissions', () => fs.chmodSync(file, 0o600));
 }
 
 function sendFrame(socket, payload) {
@@ -43,6 +45,14 @@ function validProvider(value) {
   return AGENT_PROVIDERS[provider] ? provider : '';
 }
 
+function decodeBase64(value) {
+  const encoded = String(value || '');
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+    throw new Error('브리지 입력 인코딩이 올바르지 않습니다.');
+  }
+  return Buffer.from(encoded, 'base64').toString('utf8');
+}
+
 class BridgeServer {
   constructor(options = {}) {
     this.terminalManager = options.terminalManager;
@@ -53,6 +63,7 @@ class BridgeServer {
     this.file = options.discoveryFile || discoveryFile(this.home);
     this.server = null;
     this.clients = new Map();
+    this.terminalListenersAttached = false;
     this.onTerminalData = payload => this.forwardData(payload);
     this.onTerminalState = payload => this.forwardState(payload);
   }
@@ -61,23 +72,43 @@ class BridgeServer {
     if (!this.terminalManager) return Promise.reject(new Error('터미널 관리자가 준비되지 않았습니다.'));
     if (this.server) return Promise.resolve(this.info());
     if (this.platform !== 'win32') {
-      try { fs.unlinkSync(this.endpoint); } catch {}
+      if (fs.existsSync(this.endpoint)) runBestEffort('bridge-stale-endpoint', () => fs.unlinkSync(this.endpoint));
     }
     this.server = net.createServer(socket => this.accept(socket));
-    this.terminalManager.on('data', this.onTerminalData);
-    this.terminalManager.on('state', this.onTerminalState);
     return new Promise((resolve, reject) => {
       const fail = error => {
+        if (this.server) {
+          runBestEffort('bridge-start-close', () => this.server.close());
+        }
         this.server = null;
         reject(error);
       };
       this.server.once('error', fail);
       this.server.listen(this.endpoint, () => {
         this.server.removeListener('error', fail);
-        safeWriteJson(this.file, this.info());
-        resolve(this.info());
+        try {
+          safeWriteJson(this.file, this.info());
+          this.attachTerminalListeners();
+          resolve(this.info());
+        } catch (error) {
+          fail(error);
+        }
       });
     });
+  }
+
+  attachTerminalListeners() {
+    if (this.terminalListenersAttached) return;
+    this.terminalManager.on('data', this.onTerminalData);
+    this.terminalManager.on('state', this.onTerminalState);
+    this.terminalListenersAttached = true;
+  }
+
+  detachTerminalListeners() {
+    if (!this.terminalManager || !this.terminalListenersAttached) return;
+    this.terminalManager.removeListener('data', this.onTerminalData);
+    this.terminalManager.removeListener('state', this.onTerminalState);
+    this.terminalListenersAttached = false;
   }
 
   info() {
@@ -93,7 +124,10 @@ class BridgeServer {
 
   accept(socket) {
     socket.setNoDelay(true);
-    const client = { socket, buffer: '', authenticated: false, terminalId: '', bridgeId: '' };
+    const client = { socket, buffer: '', authenticated: false, terminalId: '', bridgeId: '', authTimer: null };
+    client.authTimer = setTimeout(() => {
+      if (!client.authenticated) socket.destroy(new Error('브리지 인증 시간이 초과되었습니다.'));
+    }, AUTH_TIMEOUT_MS);
     this.clients.set(socket, client);
     socket.on('data', chunk => this.consume(client, chunk));
     socket.on('error', () => this.detach(client));
@@ -109,7 +143,11 @@ class BridgeServer {
       client.buffer = client.buffer.slice(newline + 1);
       if (!line) continue;
       let message;
-      try { message = JSON.parse(line); } catch { return client.socket.destroy(new Error('브리지 메시지가 올바르지 않습니다.')); }
+      try {
+        message = JSON.parse(line);
+      } catch (_invalidBridgeFrame) {
+        return client.socket.destroy(new Error('브리지 메시지가 올바르지 않습니다.'));
+      }
       try { this.handle(client, message || {}); } catch (error) {
         sendFrame(client.socket, { type: 'error', message: String(error.message || error) });
         if (!client.authenticated) client.socket.end();
@@ -134,6 +172,8 @@ class BridgeServer {
         rows: message.rows,
       });
       client.authenticated = true;
+      clearTimeout(client.authTimer);
+      client.authTimer = null;
       client.terminalId = session.id;
       client.bridgeId = bridgeId;
       sendFrame(client.socket, {
@@ -146,8 +186,7 @@ class BridgeServer {
       return;
     }
     if (message.type === 'input') {
-      const data = Buffer.from(String(message.data || ''), 'base64').toString('utf8');
-      this.terminalManager.write(client.terminalId, data);
+      this.terminalManager.write(client.terminalId, decodeBase64(message.data));
     } else if (message.type === 'resize') {
       this.terminalManager.resize(client.terminalId, message.cols, message.rows);
     } else if (message.type === 'signal') {
@@ -155,7 +194,7 @@ class BridgeServer {
     } else if (message.type === 'close') {
       this.terminalManager.close(client.terminalId);
       client.socket.end();
-    }
+    } else throw new Error('지원하지 않는 브리지 메시지입니다.');
   }
 
   forwardData(payload) {
@@ -175,25 +214,23 @@ class BridgeServer {
   }
 
   detach(client) {
+    if (client.authTimer) clearTimeout(client.authTimer);
     this.clients.delete(client.socket);
   }
 
   dispose() {
-    if (this.terminalManager) {
-      this.terminalManager.removeListener('data', this.onTerminalData);
-      this.terminalManager.removeListener('state', this.onTerminalState);
-    }
+    this.detachTerminalListeners();
     for (const client of this.clients.values()) {
-      try { client.socket.destroy(); } catch {}
+      runBestEffort('bridge-client-close', () => client.socket.destroy());
     }
     this.clients.clear();
     if (this.server) {
-      try { this.server.close(); } catch {}
+      runBestEffort('bridge-server-close', () => this.server.close());
       this.server = null;
     }
-    try { fs.unlinkSync(this.file); } catch {}
+    if (fs.existsSync(this.file)) runBestEffort('bridge-discovery-cleanup', () => fs.unlinkSync(this.file));
     if (this.platform !== 'win32') {
-      try { fs.unlinkSync(this.endpoint); } catch {}
+      if (fs.existsSync(this.endpoint)) runBestEffort('bridge-endpoint-cleanup', () => fs.unlinkSync(this.endpoint));
     }
   }
 }
@@ -205,4 +242,5 @@ module.exports = {
   discoveryFile,
   endpointFor,
   safeWriteJson,
+  decodeBase64,
 };

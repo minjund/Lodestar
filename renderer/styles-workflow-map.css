@@ -1,0 +1,513 @@
+/*
+ * Directed workflow map
+ * ---------------------
+ * Upstream/downstream columns, connection ports, summaries, and routed edges.
+ */
+
+.downstream-column>header {
+  margin-bottom: 6px;
+}
+
+.downstream-stack.density-many {
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  align-items: start;
+  gap: 10px 12px;
+}
+
+.downstream-column {
+  padding: 0 0 2px;
+  position: relative;
+}
+
+.agent-workflow-edges {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.agent-workflow-edge.downstream {
+  stroke: #3fae8c;
+}
+
+.agent-workflow-column {
+  min-width: 0;
+}
+
+.agent-workflow-column>header {
+  min-height: 50px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  margin-bottom: 10px;
+  padding: 0 3px;
+}
+
+.agent-workflow-column>header b {
+  display: block;
+  color: #dce6ee;
+  font-size: 13px;
+}
+
+.agent-workflow-column>header span {
+  display: block;
+  margin-top: 4px;
+  color: #718195;
+  font-size: 11px;
+}
+
+.agent-workflow-stack {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.agent-workflow-node {
+  position: relative;
+  min-width: 0;
+}
+
+.agent-workflow-node .agent-flow-row {
+  border: 1px solid color-mix(in srgb,var(--provider) 24%,#263543);
+  border-radius: 12px;
+  background: linear-gradient(145deg,color-mix(in srgb,var(--provider) 5%,#101821),#0b1118);
+  box-shadow: 0 8px 22px rgba(0,0,0,.14);
+}
+
+.agent-workflow-node .agent-flow-row:hover {
+  border-color: color-mix(in srgb,var(--provider) 45%,#31505b);
+  transform: translateY(-1px);
+}
+
+.agent-workflow-selected .agent-node {
+  width: 100%;
+  box-shadow: 0 14px 35px rgba(0,0,0,.22),inset 3px 0 var(--provider);
+}
+
+.agent-workflow-origin {
+  position: relative;
+  min-width: 0;
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: 38px minmax(0,1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #2d4953;
+  border-radius: 12px;
+  background: linear-gradient(145deg,#102029,#0b131a);
+  box-shadow: 0 8px 22px rgba(0,0,0,.14);
+}
+
+.agent-workflow-origin b {
+  display: block;
+  font-size: 13px;
+}
+
+.agent-workflow-origin small {
+  display: block;
+  margin-top: 4px;
+  color: #75879a;
+  font-size: 11px;
+}
+
+.agent-workflow-empty {
+  min-height: 78px;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  border: 1px dashed #29403f;
+  border-radius: 12px;
+  background: rgba(8,15,20,.56);
+  color: #67798b;
+  font-size: 11px;
+  text-align: center;
+}
+
+.agent-workflow-port.input {
+  left: -7px;
+  top: 50%;
+  transform: translate(-50%,-50%);
+}
+
+.agent-workflow-port.output {
+  right: -7px;
+  top: 50%;
+  transform: translate(50%,-50%);
+  background: #55d6a8;
+  box-shadow: 0 0 0 1px rgba(102,222,183,.45),0 0 12px rgba(85,214,168,.28);
+}
+
+.agent-workflow-port {
+  position: absolute;
+  z-index: 4;
+  width: 14px;
+  height: 14px;
+  border: 3px solid #0b1218;
+  border-radius: 50%;
+  background: #5da8c3;
+  box-shadow: 0 0 0 1px rgba(119,188,211,.45),0 0 12px rgba(80,166,195,.28);
+  transition: transform var(--motion-medium) var(--motion-ease),box-shadow var(--motion-medium) ease;
+  background-clip: padding-box;
+}
+
+.agent-workflow-node:hover .agent-workflow-port {
+  box-shadow: 0 0 0 4px rgba(85,214,168,.1),0 0 16px rgba(85,214,168,.42);
+}
+
+.agent-workflow-selected:hover .agent-workflow-port {
+  box-shadow: 0 0 0 4px rgba(85,214,168,.1),0 0 16px rgba(85,214,168,.42);
+}
+
+.motion-connect .agent-workflow-edge {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: motion-edge-draw 560ms var(--motion-ease) forwards;
+}
+
+.motion-connect .agent-workflow-edge.downstream {
+  animation-delay: 110ms;
+}
+
+.agent-workflow-selected-stack {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  position: relative;
+}
+
+.agent-workflow-summary::-webkit-scrollbar {
+  display: none;
+}
+
+.agent-workflow-summary>span:first-child {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  color: #70828d;
+  font-size: 9px;
+}
+
+.agent-workflow-summary>span:first-child b {
+  color: #66dfb3;
+}
+
+.workflow-summary-chip {
+  --provider: #8fa2b7;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  border: 1px solid color-mix(in srgb,var(--provider) 24%,#263643);
+  border-radius: 7px;
+  background: color-mix(in srgb,var(--provider) 6%,#0d171c);
+}
+
+.workflow-summary-chip i {
+  width: 18px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  background: color-mix(in srgb,var(--provider) 12%,#152028);
+  color: var(--provider);
+  font-size: 6px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.workflow-summary-chip b {
+  color: #aebdc5;
+  font-size: 8px;
+}
+
+.workflow-summary-chip em {
+  color: var(--provider);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.downstream-stack .agent-workflow-node {
+  min-width: 0;
+}
+
+.downstream-stack .agent-flow-copy b {
+  font-size: 11px;
+}
+
+.downstream-stack .agent-flow-copy em {
+  font-size: 9px;
+}
+
+.agent-workflow-edge.downstream.group {
+  stroke: #53cda5;
+  stroke-width: 2.15;
+  opacity: .88;
+}
+
+.agent-workflow-edge.upstream.branch {
+  stroke-width: 2.1;
+}
+
+.agent-workflow-canvas {
+  position: relative;
+  min-width: 0;
+  border: 1px solid #20333c;
+  border-radius: 16px;
+  background-color: rgba(5,10,15,.64);
+  background-image: radial-gradient(circle,rgba(99,139,154,.16) 1px,transparent 1px);
+  background-size: 20px 20px;
+  padding: 22px 28px;
+  overflow: visible;
+}
+
+.agent-workflow-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-items: start;
+  min-width: 0;
+  grid-template-columns: minmax(150px,.5fr) minmax(300px,.95fr) minmax(420px,1.55fr);
+  gap: 46px;
+}
+
+.agent-workflow-selected {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+  max-width: 350px;
+  margin-inline: auto;
+}
+
+.agent-workflow-selected>.agent-workflow-port.input {
+  top: 38px;
+}
+
+.agent-workflow-selected>.agent-workflow-port.output {
+  top: 38px;
+}
+
+.agent-workflow-selected .agent-node-main {
+  padding: 13px 14px;
+}
+
+.agent-workflow-selected .agent-task {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.agent-workflow-selected .agent-current {
+  margin-top: 9px;
+}
+
+.agent-workflow-selected .agent-node-footer {
+  padding: 0 13px;
+}
+
+.agent-workflow-edge {
+  fill: none;
+  stroke: #4a7890;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 3px rgba(76,180,151,.2));
+}
+
+.downstream-stack .agent-flow-row {
+  border-bottom: 1px solid color-mix(in srgb,var(--provider) 24%,#263543);
+  min-height: 66px;
+  align-items: start;
+}
+
+.downstream-stack .agent-flow-provider {
+  padding-top: 2px;
+}
+
+.downstream-column>.agent-workflow-port.group-input {
+  left: -7px;
+  top: 96px;
+  width: 2px;
+  height: 2px;
+  border: 0;
+  transform: translate(-50%,-50%);
+  background: transparent;
+  box-shadow: none;
+  opacity: 0;
+}
+
+.agent-workflow-summary {
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 9px;
+  border: 1px solid #1d3034;
+  border-radius: 10px;
+  background: rgba(8,22,22,.72);
+  overflow-x: auto;
+  scrollbar-width: none;
+  display: block;
+  min-height: 0;
+  margin-bottom: 12px;
+  padding: 10px;
+  overflow: visible;
+}
+
+.workflow-summary-evidence {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 0 2px;
+  color: #7d9199;
+  font-size: 8px;
+}
+
+.workflow-summary-evidence small {
+  color: #5e747c;
+}
+
+.workflow-summary-providers {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.workflow-summary-providers::-webkit-scrollbar {
+  display: none;
+}
+
+.downstream-stack .agent-flow-row.child-session {
+  grid-template-columns: 7px minmax(0,1fr) auto;
+  gap: 11px;
+  padding: 13px 12px;
+  border-color: color-mix(in srgb,var(--provider) 27%,#263543);
+  background: linear-gradient(150deg,color-mix(in srgb,var(--provider) 6%,#101921),#091117 76%);
+  min-height: 158px;
+  position: relative;
+  overflow: hidden;
+}
+
+.agent-workflow-empty.current-clear {
+  display: flex;
+  min-height: 86px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border-color: #263b42;
+  background: rgba(10,18,24,.72);
+}
+
+.agent-workflow-empty.current-clear b {
+  color: #9dacb9;
+  font-size: 11px;
+}
+
+.agent-workflow-empty.current-clear span {
+  color: #607181;
+  font-size: 9px;
+}
+
+.downstream-stack.density-many>.agent-workflow-empty.current-clear {
+  grid-column: 1/-1;
+}
+
+.agent-workflow-selected-stack>.agent-workflow-port.output {
+  right: auto;
+  left: min(calc(50% + 175px),100%);
+  top: 38px;
+  bottom: auto;
+  transform: translate(-50%,-50%);
+}
+
+.downstream-stack .child-session .agent-flow-copy {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.downstream-stack .child-session .agent-flow-copy>* {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.downstream-stack .child-session .agent-flow-session-title {
+  color: #eef4f7;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.38;
+  letter-spacing: -.015em;
+  -webkit-box-orient: vertical;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-line-clamp: initial;
+}
+
+.downstream-stack .child-session .agent-flow-agent strong {
+  min-width: 0;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.downstream-stack .child-session .agent-flow-assignment strong {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-line-clamp: initial;
+}
+
+.downstream-stack .child-session .agent-flow-assignment-source {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-line-clamp: initial;
+}
+
+.downstream-stack .child-session .agent-flow-assignment {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.downstream-stack .child-session .agent-flow-outcome {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.downstream-stack .child-session .agent-flow-outcome-copy {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

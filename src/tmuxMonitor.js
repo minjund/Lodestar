@@ -319,8 +319,8 @@ class TmuxMonitor {
   constructor(options = {}) {
     this.execFileSync = options.execFileSync || execFileSync;
     this.platform = options.platform || process.platform;
-    this.scanTtlMs = options.scanTtlMs || DEFAULT_SCAN_TTL_MS;
-    this.discoveryTtlMs = options.discoveryTtlMs || DEFAULT_DISCOVERY_TTL_MS;
+    this.scanTtlMs = options.scanTtlMs ?? DEFAULT_SCAN_TTL_MS;
+    this.discoveryTtlMs = options.discoveryTtlMs ?? DEFAULT_DISCOVERY_TTL_MS;
     this.lastDiscoveryAt = 0;
     this.lastScanAt = 0;
     this.distros = [];
@@ -342,7 +342,8 @@ class TmuxMonitor {
     try {
       const output = this.execFileSync('wsl.exe', ['--list', '--quiet'], { windowsHide: true, timeout: 5_000, maxBuffer: 256 * 1024 });
       this.distros = normalizeWslList(output);
-    } catch {
+    } catch (_wslUnavailable) {
+      // WSL absence is a supported runtime state; the next scan will probe again.
       this.distros = [];
     }
     return this.distros;

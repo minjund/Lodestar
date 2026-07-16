@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
+const { reportRecoverableError } = require('./diagnostics');
 
 const RELEASE_API = 'https://api.github.com/repos/minjund/LodeToAgent/releases/latest';
 const RELEASE_PAGE = 'https://github.com/minjund/LodeToAgent/releases/latest';
@@ -17,7 +18,7 @@ function normalizeVersion(value) {
   if (!match) return null;
   return {
     raw: normalized,
-    core: match.slice(1, 4).map(Number),
+    core: match.slice(1, 4),
     prerelease: match[4] ? match[4].split('.') : [],
   };
 }
@@ -27,7 +28,9 @@ function compareVersions(left, right) {
   const b = normalizeVersion(right);
   if (!a || !b) throw new Error('비교할 버전 형식이 올바르지 않습니다.');
   for (let index = 0; index < 3; index += 1) {
-    if (a.core[index] !== b.core[index]) return a.core[index] > b.core[index] ? 1 : -1;
+    const leftPart = BigInt(a.core[index]);
+    const rightPart = BigInt(b.core[index]);
+    if (leftPart !== rightPart) return leftPart > rightPart ? 1 : -1;
   }
   if (!a.prerelease.length && !b.prerelease.length) return 0;
   if (!a.prerelease.length) return 1;
@@ -41,7 +44,7 @@ function compareVersions(left, right) {
     if (aPart === bPart) continue;
     const aNumeric = /^\d+$/.test(aPart);
     const bNumeric = /^\d+$/.test(bPart);
-    if (aNumeric && bNumeric) return Number(aPart) > Number(bPart) ? 1 : -1;
+    if (aNumeric && bNumeric) return BigInt(aPart) > BigInt(bPart) ? 1 : -1;
     if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
     return aPart > bPart ? 1 : -1;
   }
@@ -52,7 +55,8 @@ function trustedDownloadUrl(value) {
   try {
     const url = new URL(String(value || ''));
     return url.protocol === 'https:' && url.hostname === 'github.com' && url.pathname.startsWith('/minjund/LodeToAgent/releases/download/');
-  } catch {
+  } catch (_invalidDownloadUrl) {
+    // Malformed external input is an expected validation miss, not an operational failure.
     return false;
   }
 }
@@ -62,21 +66,33 @@ function assetScore(asset, options) {
   const lower = name.toLowerCase();
   const version = String(options.version || '').toLowerCase();
   if (!name || asset.state && asset.state !== 'uploaded' || !trustedDownloadUrl(asset.browser_download_url)) return -1;
-  let score = lower.includes(version) ? 12 : 0;
+  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const hasExactVersion = new RegExp(`(?:^|[-_.])${escapedVersion}(?:[-_.]|$)`).test(lower);
+  if (!version || !hasExactVersion) return -1;
+  const hasArm64 = /(?:^|[-_.])arm64(?:[-_.]|$)/.test(lower);
+  const hasX64 = /(?:^|[-_.])(?:x64|amd64)(?:[-_.]|$)/.test(lower);
+  const hasIa32 = /(?:^|[-_.])(?:ia32|x86)(?:[-_.]|$)/.test(lower);
+  let score = 12;
   if (options.platform === 'win32') {
     if (!lower.endsWith('.exe')) return -1;
+    if (options.arch === 'arm64' && !hasArm64) return -1;
+    if (options.arch === 'x64' && (hasArm64 || hasIa32)) return -1;
+    if (options.arch === 'ia32' && !hasIa32) return -1;
     if (lower.includes('setup')) score += 100;
     else if (lower.includes('portable')) score += 70;
     else score += 30;
-    if (options.arch === 'arm64') score += lower.includes('arm64') ? 25 : -40;
-    else if (lower.includes('arm64')) score -= 40;
+    if (options.arch === 'arm64' && hasArm64) score += 25;
+    if (options.arch === 'x64' && hasX64) score += 25;
+    if (options.arch === 'ia32' && hasIa32) score += 25;
     return score;
   }
   if (options.platform === 'darwin') {
     if (!lower.endsWith('.dmg')) return -1;
+    if (options.arch === 'arm64' && !hasArm64) return -1;
+    if (options.arch === 'x64' && !hasX64) return -1;
     score += 90;
-    if (options.arch === 'arm64') score += lower.includes('arm64') ? 30 : -50;
-    if (options.arch === 'x64') score += lower.includes('x64') ? 30 : -50;
+    if (options.arch === 'arm64') score += 30;
+    if (options.arch === 'x64') score += 30;
     return score;
   }
   return -1;
@@ -93,14 +109,15 @@ function publicAsset(asset) {
   if (!asset) return null;
   return {
     name: String(asset.name || ''),
-    size: Number(asset.size || 0),
+    size: Number.isSafeInteger(Number(asset.size)) && Number(asset.size) >= 0 ? Number(asset.size) : 0,
     url: String(asset.browser_download_url || ''),
     digest: /^sha256:[0-9a-f]{64}$/i.test(String(asset.digest || '')) ? String(asset.digest).toLowerCase() : '',
   };
 }
 
 function safeFileName(value) {
-  return path.basename(String(value || '')).replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 180);
+  const fileName = path.basename(String(value || '')).replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 180);
+  return !fileName || fileName === '.' || fileName === '..' ? '' : fileName;
 }
 
 class UpdateManager extends EventEmitter {
@@ -173,6 +190,7 @@ class UpdateManager extends EventEmitter {
       const releaseUrl = trustedReleasePage(release.html_url) ? release.html_url : RELEASE_PAGE;
       const asset = selectReleaseAsset(release.assets, { platform: this.platform, arch: this.arch, version: latest.raw });
       const available = compareVersions(latest.raw, this.currentVersion) > 0;
+      const exposedAsset = available ? publicAsset(asset) : null;
       return this.setState({
         status: available ? 'available' : 'current',
         latestVersion: latest.raw,
@@ -180,10 +198,10 @@ class UpdateManager extends EventEmitter {
         releaseUrl,
         publishedAt: String(release.published_at || ''),
         notes: String(release.body || '').slice(0, 12_000),
-        asset: available ? publicAsset(asset) : null,
+        asset: exposedAsset,
         progress: 0,
         downloadedBytes: 0,
-        totalBytes: Number(asset && asset.size || 0),
+        totalBytes: exposedAsset ? exposedAsset.size : 0,
         downloadedPath: '',
         checkedAt: new Date().toISOString(),
         error: available && !asset ? '이 운영체제에 맞는 설치 파일이 아직 릴리스에 올라오지 않았습니다.' : '',
@@ -213,8 +231,9 @@ class UpdateManager extends EventEmitter {
       await fs.promises.rm(temporaryPath, { force: true });
       const response = await this.fetch(asset.url, { headers: { 'User-Agent': `LoadToAgent/${this.currentVersion}` } });
       if (!response || !response.ok) throw new Error(`업데이트 파일을 내려받지 못했습니다${response && response.status ? ` (${response.status})` : ''}.`);
-      const headerSize = Number(response.headers && response.headers.get && response.headers.get('content-length') || 0);
-      const totalBytes = Number(asset.size || headerSize || 0);
+      const rawHeaderSize = Number(response.headers && response.headers.get && response.headers.get('content-length') || 0);
+      const headerSize = Number.isSafeInteger(rawHeaderSize) && rawHeaderSize > 0 ? rawHeaderSize : 0;
+      const totalBytes = Number(asset.size) > 0 ? Number(asset.size) : headerSize;
       const hash = crypto.createHash('sha256');
       let downloadedBytes = 0;
       let lastProgressAt = 0;
@@ -268,8 +287,14 @@ class UpdateManager extends EventEmitter {
         error: '',
       });
     } catch (error) {
-      if (handle) await handle.close().catch(() => {});
-      await fs.promises.rm(temporaryPath, { force: true }).catch(() => {});
+      if (handle) {
+        await handle.close().catch(cleanupError => {
+          reportRecoverableError('update-download-handle-close', cleanupError);
+        });
+      }
+      await fs.promises.rm(temporaryPath, { force: true }).catch(cleanupError => {
+        reportRecoverableError('update-download-temporary-remove', cleanupError);
+      });
       this.setState({ status: 'available', progress: 0, downloadedBytes: 0, downloadedPath: '', error: error && error.message || '업데이트 파일을 내려받지 못했습니다.' });
       throw error;
     }
@@ -296,7 +321,8 @@ function trustedReleasePage(value) {
   try {
     const url = new URL(String(value || ''));
     return url.protocol === 'https:' && url.hostname === 'github.com' && url.pathname.startsWith('/minjund/LodeToAgent/releases/');
-  } catch {
+  } catch (_invalidReleaseUrl) {
+    // Malformed external input is an expected validation miss, not an operational failure.
     return false;
   }
 }
@@ -309,4 +335,5 @@ module.exports = {
   normalizeVersion,
   selectReleaseAsset,
   trustedDownloadUrl,
+  safeFileName,
 };

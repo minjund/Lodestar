@@ -6,6 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const { spawn: spawnChild } = require('child_process');
+const { runBestEffort } = require('./diagnostics');
 
 const MAX_SESSIONS = 24;
 const MAX_INPUT_CHARS = 128 * 1024;
@@ -61,9 +62,7 @@ function resolveWindowsCommand(command, env = process.env) {
   for (const directory of directories) {
     for (const suffix of suffixes) {
       const candidate = hasPath ? `${value}${suffix}` : path.join(directory, `${value}${suffix}`);
-      try {
-        if (fs.statSync(candidate).isFile()) return candidate;
-      } catch {}
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
     }
   }
   return value;
@@ -72,7 +71,7 @@ function resolveWindowsCommand(command, env = process.env) {
 function killPtyTree(handle, pid) {
   if (!handle) return;
   if (process.platform !== 'win32' || !Number.isFinite(Number(pid))) {
-    try { handle.kill(); } catch {}
+    runBestEffort('terminal-kill', () => handle.kill());
     return;
   }
   try {
@@ -82,11 +81,12 @@ function killPtyTree(handle, pid) {
     });
     killer.once('exit', code => {
       if (code === 0 || handle.__loadtoagentExited) return;
-      try { handle.kill(); } catch {}
+      runBestEffort('terminal-kill-fallback', () => handle.kill());
     });
     killer.unref();
-  } catch {
-    try { handle.kill(); } catch {}
+  } catch (_treeKillUnavailable) {
+    // Fall back to the PTY handle when the platform process-tree command is unavailable.
+    runBestEffort('terminal-kill-spawn-fallback', () => handle.kill());
   }
 }
 
@@ -236,7 +236,13 @@ class TerminalManager extends EventEmitter {
       generation: 0,
     };
     this.sessions.set(id, session);
-    this.spawn(session);
+    try {
+      this.spawn(session);
+    } catch (error) {
+      this.sessions.delete(id);
+      this.emit('state', { change: 'removed', session: publicSession(session, false), sessions: this.list() });
+      throw error;
+    }
     return publicSession(session, true);
   }
 
@@ -284,8 +290,9 @@ class TerminalManager extends EventEmitter {
       session.process = null;
       session.status = 'failed';
       session.updatedAt = new Date().toISOString();
-      session.replay += `\r\n[LoadToAgent] 터미널을 시작하지 못했습니다: ${error.message}\r\n`;
-      this.emit('data', { id: session.id, data: session.replay });
+      const failureMessage = `\r\n[LoadToAgent] 터미널을 시작하지 못했습니다: ${error.message}\r\n`;
+      session.replay = `${session.replay}${failureMessage}`.slice(-MAX_REPLAY_CHARS);
+      this.emit('data', { id: session.id, data: failureMessage });
       this.emitState('updated', session);
       throw error;
     }
@@ -391,7 +398,7 @@ class TerminalManager extends EventEmitter {
 
   dispose() {
     for (const id of [...this.sessions.keys()]) {
-      try { this.close(id); } catch {}
+      runBestEffort(`terminal-dispose:${id}`, () => this.close(id));
     }
   }
 }

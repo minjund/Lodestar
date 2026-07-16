@@ -52,11 +52,22 @@ app.whenReady().then(() => {
     try {
       const win = BrowserWindow.getAllWindows()[0];
       if (!win) throw new Error('LoadToAgent 창을 찾을 수 없습니다.');
+      const executeJavaScript = win.webContents.executeJavaScript.bind(win.webContents);
+      let executionStep = 0;
+      win.webContents.executeJavaScript = async expression => {
+        executionStep += 1;
+        try {
+          return await executeJavaScript(expression);
+        } catch (error) {
+          const preview = String(expression).replace(/\s+/g, ' ').slice(0, 180);
+          throw new Error(`visual execute step ${executionStep} failed (${preview}): ${error.message}`);
+        }
+      };
       setTestWindowSize(win, 1600, 980);
       for (let attempt = 0; attempt < 25; attempt += 1) {
         const tmuxReady = await win.webContents.executeJavaScript(`(() => {
-          const summary = state.snapshot && state.snapshot.tmux && state.snapshot.tmux.summary || {};
-          const totals = state.snapshot && state.snapshot.summary && state.snapshot.summary.totals || {};
+          const summary = window.LoadToAgentApp.state.snapshot && window.LoadToAgentApp.state.snapshot.tmux && window.LoadToAgentApp.state.snapshot.tmux.summary || {};
+          const totals = window.LoadToAgentApp.state.snapshot && window.LoadToAgentApp.state.snapshot.summary && window.LoadToAgentApp.state.snapshot.summary.totals || {};
           return Number(summary.aiPanes || 0) > 0
             && Number(summary.linked || 0) === Number(summary.aiPanes || 0)
             && Number(totals.sessions || 0) > 0;
@@ -64,7 +75,7 @@ app.whenReady().then(() => {
         if (tmuxReady) break;
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
-      await win.webContents.executeJavaScript("document.fonts.ready.then(() => { window.LoadToAgentI18n?.setLocale('ko'); state.view = 'all'; state.graphFocusId = null; document.querySelectorAll('.view-nav .nav-item').forEach(item => item.classList.toggle('active', item.dataset.view === 'all')); renderSessions(); document.querySelector('.main-stage')?.scrollTo(0, 0); })");
+      await win.webContents.executeJavaScript("document.fonts.ready.then(() => { window.LoadToAgentI18n?.setLocale('ko'); window.LoadToAgentApp.state.view = 'all'; window.LoadToAgentApp.state.graphFocusId = null; document.querySelectorAll('.view-nav .nav-item').forEach(item => item.classList.toggle('active', item.dataset.view === 'all')); window.LoadToAgentApp.renderSessions(); document.querySelector('.main-stage')?.scrollTo(0, 0); })");
       await new Promise(resolve => setTimeout(resolve, 500));
       const bridgeInfo = await win.webContents.executeJavaScript(`(async () => {
         const bootstrap = await window.loadtoagent.bootstrap();
@@ -165,7 +176,7 @@ app.whenReady().then(() => {
         const terminalSessions = await window.loadtoagent.terminalList();
         return {
           sectionVisible: !document.querySelector('#terminalSection')?.classList.contains('hidden'),
-          appView: state.view,
+          appView: window.LoadToAgentApp.state.view,
           activeNav: document.querySelector('.view-nav .nav-item.active')?.dataset.view || '',
           sectionClass: document.querySelector('#terminalSection')?.className || '',
           sessions: document.querySelectorAll('.terminal-session-item').length,
@@ -242,21 +253,21 @@ app.whenReady().then(() => {
       }))()`);
       await win.webContents.executeJavaScript("document.querySelector('#closeDrawerBtn')?.click()");
       const tmuxMetrics = await win.webContents.executeJavaScript(`(() => ({
-        summary: state.snapshot && state.snapshot.tmux && state.snapshot.tmux.summary,
+        summary: window.LoadToAgentApp.state.snapshot && window.LoadToAgentApp.state.snapshot.tmux && window.LoadToAgentApp.state.snapshot.tmux.summary,
         distroNodes: document.querySelectorAll('.tmux-distro-node').length,
         sessionNodes: document.querySelectorAll('.tmux-session-node').length,
         windowNodes: document.querySelectorAll('.tmux-window-node').length,
         paneNodes: document.querySelectorAll('.tmux-pane-node').length,
         aiPaneNodes: document.querySelectorAll('.tmux-pane-node.has-agent').length,
         breadcrumbSteps: document.querySelectorAll('#tmuxBreadcrumbs button').length,
-        focused: Boolean(state.tmuxFocus),
-        linkedCommandTargets: (state.snapshot && state.snapshot.sessions || []).filter(session => window.LoadToAgentTerminal.agentTargets(session).some(target => target.kind === 'tmux')).length,
+        focused: Boolean(window.LoadToAgentApp.state.tmuxFocus),
+        linkedCommandTargets: (window.LoadToAgentApp.state.snapshot && window.LoadToAgentApp.state.snapshot.sessions || []).filter(session => window.LoadToAgentTerminal.agentTargets(session).some(target => target.kind === 'tmux')).length,
       }))()`);
       if (Number(tmuxMetrics.summary?.linked || 0) > 0 && tmuxMetrics.linkedCommandTargets < 1) throw new Error(`연결된 tmux AI를 직접 지시 대상으로 찾지 못했습니다: ${JSON.stringify(tmuxMetrics)}`);
       await win.webContents.executeJavaScript("document.querySelector('[data-view=\"all\"]')?.click(); document.querySelector('.main-stage')?.scrollTo(0, 0)");
       await new Promise(resolve => setTimeout(resolve, 350));
       const structuredSessionId = await win.webContents.executeJavaScript(`(() => {
-        const base = (state.snapshot && state.snapshot.sessions || []).find(item => item.provider === 'claude') || {};
+        const base = (window.LoadToAgentApp.state.snapshot && window.LoadToAgentApp.state.snapshot.sessions || []).find(item => item.provider === 'claude') || {};
         const id = 'visual-check:structured-detail';
         const fixture = {
           ...base,
@@ -274,15 +285,15 @@ app.whenReady().then(() => {
           usage: base.usage || { input: 0, cachedInput: 0, output: 0, total: 0 },
           context: base.context || { used: 0, window: 0, percent: 0 },
         };
-        state.details.set(id, fixture);
-        state.selectedId = id;
-        state.detailLoading = false;
-        state.drawerTab = 'chat';
-        state.drawerForceLatest = true;
+        window.LoadToAgentApp.state.details.set(id, fixture);
+        window.LoadToAgentApp.state.selectedId = id;
+        window.LoadToAgentApp.state.detailLoading = false;
+        window.LoadToAgentApp.state.drawerTab = 'chat';
+        window.LoadToAgentApp.state.drawerForceLatest = true;
         document.querySelector('#drawerBackdrop').classList.remove('hidden');
         document.querySelector('#detailDrawer').classList.add('open');
         document.querySelector('#detailDrawer').setAttribute('aria-hidden', 'false');
-        renderDrawer();
+        window.LoadToAgentApp.renderDrawer();
         return id;
       })()`);
       await new Promise(resolve => setTimeout(resolve, 350));
@@ -304,13 +315,13 @@ app.whenReady().then(() => {
       if (structuredSessionId && structuredMetrics.candidates === 0) throw new Error('구조화 JSON 메시지가 읽기 쉬운 카드로 렌더링되지 않았습니다.');
       if (structuredSessionId && !structuredMetrics.atBottom) throw new Error(`상세 대화가 최신 메시지 위치로 이동하지 않았습니다. gap=${structuredMetrics.bottomGap}`);
       const densitySetup = await win.webContents.executeJavaScript(`(async () => {
-        const sessions = state.snapshot && state.snapshot.sessions || [];
-        const base = sessions.find(item => !item.parentId && isLiveSession(item)) || sessions[0];
+        const sessions = window.LoadToAgentApp.state.snapshot && window.LoadToAgentApp.state.snapshot.sessions || [];
+        const base = sessions.find(item => !item.parentId && window.LoadToAgentApp.isLiveSession(item)) || sessions[0];
         if (!base) return { focusId: '', terminalId: '' };
         const directTerminal = await window.loadtoagent.terminalCreate({ type: ${JSON.stringify(localTerminalType)}, title: 'AI 직접 지시 검증', cols: 120, rows: 32 });
         const alternateTerminal = await window.loadtoagent.terminalCreate({ type: ${JSON.stringify(localTerminalType)}, title: 'AI 지시 대상 선택 검증', cols: 120, rows: 32 });
         await window.LoadToAgentTerminal.refresh();
-        const providerIds = state.providers.map(item => item.id);
+        const providerIds = window.LoadToAgentApp.state.providers.map(item => item.id);
         const now = Date.now();
         const roots = Array.from({ length: 32 }, (_, index) => ({
           ...base,
@@ -414,14 +425,14 @@ app.whenReady().then(() => {
         const fixtures = [...roots, ...children, grandchild];
         window.__loadtoagentDensityFixture = { fixtures, focusId: roots[0].id, terminalId: directTerminal.id };
         window.__ensureLoadToAgentDensityFixture = () => {
-          const current = state.snapshot && state.snapshot.sessions || [];
+          const current = window.LoadToAgentApp.state.snapshot && window.LoadToAgentApp.state.snapshot.sessions || [];
           const ids = new Set(current.map(item => item.id));
           for (const fixture of fixtures) if (!ids.has(fixture.id)) current.unshift(fixture);
         };
         window.__ensureLoadToAgentDensityFixture();
-        state.graphFocusId = null;
-        state.graphExpandedProviders.clear();
-        renderSessions();
+        window.LoadToAgentApp.state.graphFocusId = null;
+        window.LoadToAgentApp.state.graphExpandedProviders.clear();
+        window.LoadToAgentApp.renderSessions();
         document.querySelector('.main-stage')?.scrollTo(0, 0);
         return { focusId: roots[0].id, terminalId: directTerminal.id, alternateTerminalId: alternateTerminal.id };
       })()`);
@@ -434,9 +445,9 @@ app.whenReady().then(() => {
       fs.writeFileSync(treeOutput, treeImage.toPNG());
       const densityMetrics = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        state.graphFocusId = null;
-        state.graphExpandedProviders.clear();
-        renderSessions();
+        window.LoadToAgentApp.state.graphFocusId = null;
+        window.LoadToAgentApp.state.graphExpandedProviders.clear();
+        window.LoadToAgentApp.renderSessions();
         const grid = document.querySelector('#liveSessionGrid');
         const before = document.querySelectorAll('.agent-flow-row').length;
         const more = document.querySelector('.agent-flow-more[data-graph-provider-more]');
@@ -450,7 +461,7 @@ app.whenReady().then(() => {
           moreButtons: document.querySelectorAll('[data-graph-provider-more]').length,
           runtimeSegments: document.querySelectorAll('.runtime-segment').length,
           tmuxRuntimeCards: document.querySelectorAll('.tmux-runtime .live-tmux-card').length,
-          tmuxAiPanes: Number(state.snapshot?.tmux?.summary?.aiPanes || 0),
+          tmuxAiPanes: Number(window.LoadToAgentApp.state.snapshot?.tmux?.summary?.aiPanes || 0),
           tmuxFirst: document.querySelector('.runtime-segment:first-child')?.classList.contains('tmux-runtime') || false,
           noHorizontalOverflow: grid ? grid.scrollWidth <= grid.clientWidth + 2 : false,
           subagentTabRemoved: !document.querySelector('[data-view="subagents"]'),
@@ -462,7 +473,7 @@ app.whenReady().then(() => {
       if (densityFocusId) {
         await win.webContents.executeJavaScript(`(() => {
           window.__ensureLoadToAgentDensityFixture?.();
-          renderSessions();
+          window.LoadToAgentApp.renderSessions();
           document.querySelector('[data-graph-focus="${densityFocusId}"]')?.click();
         })()`);
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -470,9 +481,9 @@ app.whenReady().then(() => {
       const directMarker = `LOADTOAGENT_AGENT_DIRECT_${Date.now()}`;
       const commandUiMetrics = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        state.graphFocusId = ${JSON.stringify(densityFocusId)};
-        renderSessions();
-        const session = state.snapshot.sessions.find(item => item.id === ${JSON.stringify(densityFocusId)});
+        window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(densityFocusId)};
+        window.LoadToAgentApp.renderSessions();
+        const session = window.LoadToAgentApp.state.snapshot.sessions.find(item => item.id === ${JSON.stringify(densityFocusId)});
         const targets = window.LoadToAgentTerminal.agentTargets(session);
         const form = document.querySelector('[data-agent-command-form="${densityFocusId}"]');
         const input = form?.querySelector('[data-agent-command-draft]');
@@ -505,8 +516,8 @@ app.whenReady().then(() => {
       const openDraft = '이 문장을 터미널 입력창에서 이어서 작성';
       await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        state.graphFocusId = ${JSON.stringify(densityFocusId)};
-        renderSessions();
+        window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(densityFocusId)};
+        window.LoadToAgentApp.renderSessions();
         const input = document.querySelector('[data-agent-command-draft="${densityFocusId}"]');
         if (input) {
           input.value = ${JSON.stringify(openDraft)};
@@ -514,7 +525,7 @@ app.whenReady().then(() => {
         }
         document.querySelector('[data-agent-terminal-open="${densityFocusId}"]')?.click();
       })()`);
-      const terminalOpenReady = await waitForRenderer(win, `(() => state.view === 'terminal' && document.querySelector('.terminal-session-item.active')?.dataset.terminalId === ${JSON.stringify(commandTerminalId)} && document.querySelector('#terminalCommandInput')?.value === ${JSON.stringify(openDraft)})()`);
+      const terminalOpenReady = await waitForRenderer(win, `(() => window.LoadToAgentApp.state.view === 'terminal' && document.querySelector('.terminal-session-item.active')?.dataset.terminalId === ${JSON.stringify(commandTerminalId)} && document.querySelector('#terminalCommandInput')?.value === ${JSON.stringify(openDraft)})()`);
       if (!terminalOpenReady) throw new Error('선택한 AI에서 정확한 일반 터미널과 지시 초안을 열지 못했습니다.');
       const sessionTerminalMetrics = await win.webContents.executeJavaScript(`(() => ({
         historyVisible: !document.querySelector('#terminalHistoryPanel')?.classList.contains('hidden'),
@@ -614,25 +625,25 @@ app.whenReady().then(() => {
       setTestWindowSize(win, 1600, 980);
       await new Promise(resolve => setTimeout(resolve, 350));
       await win.webContents.executeJavaScript(`(() => {
-        state.agentCommandDrafts.delete(${JSON.stringify(densityFocusId)});
+        window.LoadToAgentApp.state.agentCommandDrafts.delete(${JSON.stringify(densityFocusId)});
         document.querySelector('[data-view="all"]')?.click();
         window.__ensureLoadToAgentDensityFixture?.();
-        state.graphFocusId = ${JSON.stringify(densityFocusId)};
-        renderSessions();
+        window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(densityFocusId)};
+        window.LoadToAgentApp.renderSessions();
       })()`);
       await new Promise(resolve => setTimeout(resolve, 300));
       const motionMetrics = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        state.graphFocusId = null;
-        renderSessions();
+        window.LoadToAgentApp.state.graphFocusId = null;
+        window.LoadToAgentApp.renderSessions();
         document.querySelector('[data-graph-focus="${densityFocusId}"]')?.click();
-        drawAgentWorkflowConnections();
+        window.LoadToAgentApp.drawAgentWorkflowConnections();
         const path = document.querySelector('.agent-workflow-edge');
-        openRunModal();
+        window.LoadToAgentApp.openRunModal();
         const modalOpening = document.querySelector('.run-modal')?.getAnimations().some(animation => animation.animationName === 'motion-modal-in') || false;
-        closeRunModal();
-        openDrawer(${JSON.stringify(densityFocusId)});
-        closeDrawer();
+        window.LoadToAgentApp.closeRunModal();
+        window.LoadToAgentApp.openDrawer(${JSON.stringify(densityFocusId)});
+        window.LoadToAgentApp.closeDrawer();
         return {
           reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
           preferenceMatches: document.documentElement.dataset.motion === (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'reduced' : 'full'),
@@ -657,22 +668,22 @@ app.whenReady().then(() => {
       const focusImage = await captureStableState(win, `(() => {
         document.querySelector('#closeDrawerBtn')?.click();
         window.__ensureLoadToAgentDensityFixture?.();
-        state.graphFocusId = ${JSON.stringify(densityFocusId)};
-        state.expandedCompletedSubagents.delete(${JSON.stringify(densityFocusId)});
-        renderSessions();
-        drawAgentWorkflowConnections();
+        window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(densityFocusId)};
+        window.LoadToAgentApp.state.expandedCompletedSubagents.delete(${JSON.stringify(densityFocusId)});
+        window.LoadToAgentApp.renderSessions();
+        window.LoadToAgentApp.drawAgentWorkflowConnections();
         document.querySelector('.main-stage')?.scrollTo(0, 0);
-      })()`, `state.graphFocusId === ${JSON.stringify(densityFocusId)} && document.querySelectorAll('.downstream-column .agent-workflow-node').length === 0 && document.querySelector('[data-subagent-completed-toggle]') && !document.querySelector('[data-completed-subagent-list]') && !document.querySelector('[data-subagent-search], [data-subagent-provider], [data-subagent-status]') && !document.querySelector('#detailDrawer')?.classList.contains('open') && document.querySelector('#drawerBackdrop')?.classList.contains('hidden')`);
+      })()`, `window.LoadToAgentApp.state.graphFocusId === ${JSON.stringify(densityFocusId)} && document.querySelectorAll('.downstream-column .agent-workflow-node').length === 0 && document.querySelector('[data-subagent-completed-toggle]') && !document.querySelector('[data-completed-subagent-list]') && !document.querySelector('[data-subagent-search], [data-subagent-provider], [data-subagent-status]') && !document.querySelector('#detailDrawer')?.classList.contains('open') && document.querySelector('#drawerBackdrop')?.classList.contains('hidden')`);
       const focusOutput = path.join(outputDir, 'loadtoagent-agent-focus.png');
       fs.writeFileSync(focusOutput, focusImage.toPNG());
       const metrics = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        if (window.__loadtoagentDensityFixture) state.graphFocusId = window.__loadtoagentDensityFixture.focusId;
-        state.expandedCompletedSubagents.add(${JSON.stringify(densityFocusId)});
-        renderSessions();
+        if (window.__loadtoagentDensityFixture) window.LoadToAgentApp.state.graphFocusId = window.__loadtoagentDensityFixture.focusId;
+        window.LoadToAgentApp.state.expandedCompletedSubagents.add(${JSON.stringify(densityFocusId)});
+        window.LoadToAgentApp.renderSessions();
         const start = performance.now();
-        for (let index = 0; index < 5; index += 1) renderSessions();
-        drawAgentWorkflowConnections();
+        for (let index = 0; index < 5; index += 1) window.LoadToAgentApp.renderSessions();
+        window.LoadToAgentApp.drawAgentWorkflowConnections();
         const grid = document.querySelector('#liveSessionGrid');
         const upstream = document.querySelector('.upstream-column .agent-workflow-origin, .upstream-column .agent-workflow-node')?.getBoundingClientRect();
         const selected = document.querySelector('.agent-workflow-selected')?.getBoundingClientRect();
@@ -700,7 +711,7 @@ app.whenReady().then(() => {
           averageRenderMs: (performance.now() - start) / 5,
           renderedCards: document.querySelectorAll('.session-card').length,
           liveNodes: document.querySelectorAll('.live-session-grid .agent-node').length,
-          graphFocused: Boolean(state.graphFocusId),
+          graphFocused: Boolean(window.LoadToAgentApp.state.graphFocusId),
           breadcrumbSteps: document.querySelectorAll('#graphBreadcrumbs button').length,
           workflowCanvas: document.querySelectorAll('.agent-workflow-canvas').length,
           upstreamNodes: document.querySelectorAll('.upstream-column .agent-workflow-origin, .upstream-column .agent-workflow-node').length,
@@ -732,7 +743,7 @@ app.whenReady().then(() => {
           legacyFilters: document.querySelectorAll('[data-subagent-status], [data-subagent-provider], [data-subagent-search]').length,
           tmuxBadges: document.querySelectorAll('.downstream-column .execution-mode-badge.tmux').length,
           standardBadges: document.querySelectorAll('.downstream-column .execution-mode-badge.standard').length,
-          recentSubagents: [...document.querySelectorAll('#sessionGrid [data-session-id]')].filter(node => state.snapshot.sessions.find(item => item.id === node.dataset.sessionId)?.parentId).length,
+          recentSubagents: [...document.querySelectorAll('#sessionGrid [data-session-id]')].filter(node => window.LoadToAgentApp.state.snapshot.sessions.find(item => item.id === node.dataset.sessionId)?.parentId).length,
           desktopDirectionFixed: Boolean(upstream && selected && downstream && upstream.right < selected.left && selected.right < downstream.left),
           noHorizontalOverflow: grid ? grid.scrollWidth <= grid.clientWidth + 2 : false,
         };
@@ -741,36 +752,36 @@ app.whenReady().then(() => {
 
       const communicationImage = await captureStableState(win, `(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        state.graphFocusId = ${JSON.stringify(densityFocusId)};
-        renderSessions();
-        drawAgentWorkflowConnections();
+        window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(densityFocusId)};
+        window.LoadToAgentApp.renderSessions();
+        window.LoadToAgentApp.drawAgentWorkflowConnections();
         document.querySelector('.agent-communication-panel')?.scrollIntoView({ block: 'start' });
-      })()`, `state.graphFocusId === ${JSON.stringify(densityFocusId)} && document.querySelectorAll('.agent-communication-event').length === 30 && (() => { const rect = document.querySelector('.agent-communication-panel')?.getBoundingClientRect(); return rect && rect.bottom > 0 && rect.top < innerHeight; })()`);
+      })()`, `window.LoadToAgentApp.state.graphFocusId === ${JSON.stringify(densityFocusId)} && document.querySelectorAll('.agent-communication-event').length === 30 && (() => { const rect = document.querySelector('.agent-communication-panel')?.getBoundingClientRect(); return rect && rect.bottom > 0 && rect.top < innerHeight; })()`);
       const communicationOutput = path.join(outputDir, 'loadtoagent-agent-communication.png');
       fs.writeFileSync(communicationOutput, communicationImage.toPNG());
 
       const childClick = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        state.graphFocusId = ${JSON.stringify(densityFocusId)};
-        renderSessions();
-        drawAgentWorkflowConnections();
+        window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(densityFocusId)};
+        window.LoadToAgentApp.renderSessions();
+        window.LoadToAgentApp.drawAgentWorkflowConnections();
         const child = document.querySelector('.downstream-column [data-graph-focus]');
         child?.click();
-        return { childId: child?.dataset.graphFocus || '', immediateFocusId: state.graphFocusId };
+        return { childId: child?.dataset.graphFocus || '', immediateFocusId: window.LoadToAgentApp.state.graphFocusId };
       })()`);
       const childFocusId = childClick.childId;
       if (!childFocusId || childClick.immediateFocusId !== childFocusId) throw new Error(`나눠 맡긴 AI 선택 이벤트가 적용되지 않았습니다: ${JSON.stringify(childClick)}`);
       await new Promise(resolve => setTimeout(resolve, 450));
       const childMetrics = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        state.graphFocusId = ${JSON.stringify(childFocusId)};
-        state.expandedCompletedSubagents.add(${JSON.stringify(childFocusId)});
-        renderSessions();
-        drawAgentWorkflowConnections();
+        window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(childFocusId)};
+        window.LoadToAgentApp.state.expandedCompletedSubagents.add(${JSON.stringify(childFocusId)});
+        window.LoadToAgentApp.renderSessions();
+        window.LoadToAgentApp.drawAgentWorkflowConnections();
         const upstream = document.querySelector('.upstream-column .agent-workflow-node')?.getBoundingClientRect();
         const selected = document.querySelector('.agent-workflow-selected')?.getBoundingClientRect();
         return {
-          focusId: state.graphFocusId,
+          focusId: window.LoadToAgentApp.state.graphFocusId,
           parentId: document.querySelector('.upstream-column [data-graph-focus]')?.dataset.graphFocus || '',
           parentOnLeft: Boolean(upstream && selected && upstream.right < selected.left),
           downstreamNodes: document.querySelectorAll('.downstream-column .agent-workflow-node').length,
@@ -786,11 +797,11 @@ app.whenReady().then(() => {
       const childFocusImage = await captureStableState(win, `(() => {
         document.querySelector('#closeDrawerBtn')?.click();
         window.__ensureLoadToAgentDensityFixture?.();
-        state.graphFocusId = ${JSON.stringify(childFocusId)};
-        renderSessions();
-        drawAgentWorkflowConnections();
+        window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(childFocusId)};
+        window.LoadToAgentApp.renderSessions();
+        window.LoadToAgentApp.drawAgentWorkflowConnections();
         document.querySelector('.main-stage')?.scrollTo(0, 0);
-      })()`, `state.graphFocusId === ${JSON.stringify(childFocusId)} && document.querySelector('.upstream-column [data-graph-focus]')?.dataset.graphFocus === ${JSON.stringify(densityFocusId)} && !document.querySelector('#detailDrawer')?.classList.contains('open') && document.querySelector('#drawerBackdrop')?.classList.contains('hidden')`);
+      })()`, `window.LoadToAgentApp.state.graphFocusId === ${JSON.stringify(childFocusId)} && document.querySelector('.upstream-column [data-graph-focus]')?.dataset.graphFocus === ${JSON.stringify(densityFocusId)} && !document.querySelector('#detailDrawer')?.classList.contains('open') && document.querySelector('#drawerBackdrop')?.classList.contains('hidden')`);
       const childFocusOutput = path.join(outputDir, 'loadtoagent-agent-child-focus.png');
       fs.writeFileSync(childFocusOutput, childFocusImage.toPNG());
       if (childMetrics.focusId !== childFocusId || childMetrics.parentId !== densityFocusId || !childMetrics.parentOnLeft || childMetrics.downstreamNodes !== 1 || !childMetrics.emptyShown || childMetrics.connectionPaths !== 2 || !childMetrics.resumeReady || !childMetrics.commandEnabled || !childMetrics.resumeMode || childMetrics.bridgeCopyVisible || childMetrics.communicationEvents !== 3) throw new Error(`중첩 도움 AI 선택 후 부모 방향·재개 상태·하위 통신 기록이 올바르지 않습니다: ${JSON.stringify(childMetrics)}`);
@@ -798,8 +809,8 @@ app.whenReady().then(() => {
       const controlStateMetrics = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
         const inspect = id => {
-          state.graphFocusId = id;
-          renderSessions();
+          window.LoadToAgentApp.state.graphFocusId = id;
+          window.LoadToAgentApp.renderSessions();
           const panel = document.querySelector('.agent-command-panel');
           return {
             classes: panel?.className || '',
@@ -809,7 +820,7 @@ app.whenReady().then(() => {
             enabledTextarea: panel?.querySelector('textarea')?.disabled === false,
           };
         };
-        const sessions = state.snapshot.sessions || [];
+        const sessions = window.LoadToAgentApp.state.snapshot.sessions || [];
         const connectSession = sessions.find(item => item.id === 'visual-density:child:0');
         const previousConnectStatus = connectSession?.status;
         const previousConnectProvider = connectSession?.provider;
@@ -849,21 +860,21 @@ app.whenReady().then(() => {
 
       const returnClick = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        state.graphFocusId = ${JSON.stringify(childFocusId)};
-        state.expandedCompletedSubagents.add(${JSON.stringify(childFocusId)});
-        renderSessions();
+        window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(childFocusId)};
+        window.LoadToAgentApp.state.expandedCompletedSubagents.add(${JSON.stringify(childFocusId)});
+        window.LoadToAgentApp.renderSessions();
         const parent = document.querySelector('.upstream-column [data-graph-focus]');
         parent?.click();
-        return { parentId: parent?.dataset.graphFocus || '', immediateFocusId: state.graphFocusId };
+        return { parentId: parent?.dataset.graphFocus || '', immediateFocusId: window.LoadToAgentApp.state.graphFocusId };
       })()`);
       if (returnClick.parentId !== densityFocusId || returnClick.immediateFocusId !== densityFocusId) throw new Error(`메인 AI로 돌아가기 이벤트가 적용되지 않았습니다: ${JSON.stringify(returnClick)}`);
       await new Promise(resolve => setTimeout(resolve, 450));
       const returnMetrics = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        if (state.graphFocusId !== ${JSON.stringify(densityFocusId)}) { state.graphFocusId = ${JSON.stringify(densityFocusId)}; renderSessions(); }
-        drawAgentWorkflowConnections();
+        if (window.LoadToAgentApp.state.graphFocusId !== ${JSON.stringify(densityFocusId)}) { window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(densityFocusId)}; window.LoadToAgentApp.renderSessions(); }
+        window.LoadToAgentApp.drawAgentWorkflowConnections();
         return {
-          focusId: state.graphFocusId,
+          focusId: window.LoadToAgentApp.state.graphFocusId,
           originVisible: Boolean(document.querySelector('.upstream-column .agent-workflow-origin')),
           downstreamNodes: document.querySelectorAll('.downstream-column .agent-workflow-node').length,
           connectionPaths: document.querySelectorAll('.agent-workflow-edge').length,
@@ -874,42 +885,42 @@ app.whenReady().then(() => {
 
       const subagentStateImage = await captureStableState(win, `(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        const child = state.snapshot.sessions.find(item => item.id === 'visual-density:child:9');
+        const child = window.LoadToAgentApp.state.snapshot.sessions.find(item => item.id === 'visual-density:child:9');
         if (child) { child.status = 'running'; child.statusDetail = '추가 검증 작업 수행 중'; child.completionObserved = false; child.completedAt = null; }
-        const root = state.snapshot.sessions.find(item => item.id === ${JSON.stringify(densityFocusId)});
+        const root = window.LoadToAgentApp.state.snapshot.sessions.find(item => item.id === ${JSON.stringify(densityFocusId)});
         if (root?.collaboration?.metrics) { root.collaboration.metrics.currentlyRunning = 1; root.collaboration.metrics.completedRecords = 9; }
-        state.graphFocusId = ${JSON.stringify(densityFocusId)};
-        state.expandedCompletedSubagents.delete(${JSON.stringify(densityFocusId)});
-        renderSessions();
-        drawAgentWorkflowConnections();
+        window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(densityFocusId)};
+        window.LoadToAgentApp.state.expandedCompletedSubagents.delete(${JSON.stringify(densityFocusId)});
+        window.LoadToAgentApp.renderSessions();
+        window.LoadToAgentApp.drawAgentWorkflowConnections();
         document.querySelector('.main-stage')?.scrollTo(0, 0);
       })()`, `document.querySelectorAll('.child-session.work-working').length === 1 && document.querySelectorAll('.child-session.work-resting').length === 0 && document.querySelector('[data-subagent-completed-toggle]') && document.querySelector('.child-session.work-working .execution-mode-badge.tmux') && !document.querySelector('[data-completed-subagent-list]')`);
       const subagentStateOutput = path.join(outputDir, 'loadtoagent-subagent-work-states.png');
       fs.writeFileSync(subagentStateOutput, subagentStateImage.toPNG());
       await win.webContents.executeJavaScript(`(() => {
-        const child = state.snapshot.sessions.find(item => item.id === 'visual-density:child:9');
+        const child = window.LoadToAgentApp.state.snapshot.sessions.find(item => item.id === 'visual-density:child:9');
         if (child) { child.status = 'completed'; child.statusDetail = '작업 완료'; child.completionObserved = true; child.completedAt = child.updatedAt; }
-        const root = state.snapshot.sessions.find(item => item.id === ${JSON.stringify(densityFocusId)});
+        const root = window.LoadToAgentApp.state.snapshot.sessions.find(item => item.id === ${JSON.stringify(densityFocusId)});
         if (root?.collaboration?.metrics) { root.collaboration.metrics.currentlyRunning = 0; root.collaboration.metrics.completedRecords = 10; }
-        renderSessions();
+        window.LoadToAgentApp.renderSessions();
       })()`);
 
       const subagentConversationImage = await captureStableState(win, `(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        state.graphFocusId = ${JSON.stringify(densityFocusId)};
-        state.expandedCompletedSubagents.add(${JSON.stringify(densityFocusId)});
-        const root = state.snapshot.sessions.find(item => item.id === ${JSON.stringify(densityFocusId)});
+        window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(densityFocusId)};
+        window.LoadToAgentApp.state.expandedCompletedSubagents.add(${JSON.stringify(densityFocusId)});
+        const root = window.LoadToAgentApp.state.snapshot.sessions.find(item => item.id === ${JSON.stringify(densityFocusId)});
         const longEvent = root?.collaboration?.communications?.find(item => item.childId === 'visual-density:child:2' && item.kind === 'assignment');
         if (longEvent) {
           longEvent.text = '아주 긴 서브에이전트 작업 지시 내용 '.repeat(80);
           longEvent.protected = false;
         }
-        renderSessions();
+        window.LoadToAgentApp.renderSessions();
         document.querySelector('.downstream-column [data-open-subagent-chat="visual-density:child:2"]')?.click();
-      })()`, `state.graphFocusId === ${JSON.stringify(densityFocusId)} && state.drawerMode === 'subagent' && document.querySelector('[data-subagent-dialog-count="3"]') && document.querySelectorAll('.drawer-tab:not(.hidden)').length === 1 && document.querySelector('[data-resume-agent]')`);
+      })()`, `window.LoadToAgentApp.state.graphFocusId === ${JSON.stringify(densityFocusId)} && window.LoadToAgentApp.state.drawerMode === 'subagent' && document.querySelector('[data-subagent-dialog-count="3"]') && document.querySelectorAll('.drawer-tab:not(.hidden)').length === 1 && document.querySelector('[data-resume-agent]')`);
       const subagentConversationOutput = path.join(outputDir, 'loadtoagent-subagent-conversation.png');
       fs.writeFileSync(subagentConversationOutput, subagentConversationImage.toPNG());
-      const subagentConversationMetrics = await win.webContents.executeJavaScript(`(() => { const preview = document.querySelector('[data-subagent-message-preview][data-truncated="true"]'); const paragraph = preview?.querySelector('p'); const style = paragraph ? getComputedStyle(paragraph) : null; return { focusId: state.graphFocusId, drawerMode: state.drawerMode, dialogEvents: document.querySelectorAll('[data-subagent-communication]').length, visibleTabs: document.querySelectorAll('.drawer-tab:not(.hidden)').length, resumeAvailable: Boolean(document.querySelector('[data-resume-agent]')), truncatedPreview: Boolean(preview), previewCharacters: paragraph?.textContent?.length || 0, endsWithEllipsis: paragraph?.textContent?.endsWith('…') || false, previewClamped: Boolean(paragraph && style && style.overflow === 'hidden' && paragraph.clientHeight <= parseFloat(style.lineHeight) * 5 + 2), drawerOverflow: document.querySelector('#detailDrawer')?.scrollWidth > document.querySelector('#detailDrawer')?.clientWidth + 2 }; })()`);
+      const subagentConversationMetrics = await win.webContents.executeJavaScript(`(() => { const preview = document.querySelector('[data-subagent-message-preview][data-truncated="true"]'); const paragraph = preview?.querySelector('p'); const style = paragraph ? getComputedStyle(paragraph) : null; return { focusId: window.LoadToAgentApp.state.graphFocusId, drawerMode: window.LoadToAgentApp.state.drawerMode, dialogEvents: document.querySelectorAll('[data-subagent-communication]').length, visibleTabs: document.querySelectorAll('.drawer-tab:not(.hidden)').length, resumeAvailable: Boolean(document.querySelector('[data-resume-agent]')), truncatedPreview: Boolean(preview), previewCharacters: paragraph?.textContent?.length || 0, endsWithEllipsis: paragraph?.textContent?.endsWith('…') || false, previewClamped: Boolean(paragraph && style && style.overflow === 'hidden' && paragraph.clientHeight <= parseFloat(style.lineHeight) * 5 + 2), drawerOverflow: document.querySelector('#detailDrawer')?.scrollWidth > document.querySelector('#detailDrawer')?.clientWidth + 2 }; })()`);
       if (subagentConversationMetrics.focusId !== densityFocusId || subagentConversationMetrics.drawerMode !== 'subagent' || subagentConversationMetrics.dialogEvents !== 3 || subagentConversationMetrics.visibleTabs !== 1 || !subagentConversationMetrics.resumeAvailable || !subagentConversationMetrics.truncatedPreview || subagentConversationMetrics.previewCharacters > 361 || !subagentConversationMetrics.endsWithEllipsis || !subagentConversationMetrics.previewClamped || subagentConversationMetrics.drawerOverflow) throw new Error(`서브에이전트 전용 대화 상세가 올바르지 않습니다: ${JSON.stringify(subagentConversationMetrics)}`);
       await win.webContents.executeJavaScript("document.querySelector('#closeDrawerBtn')?.click()");
 
@@ -917,10 +928,10 @@ app.whenReady().then(() => {
       await new Promise(resolve => setTimeout(resolve, 450));
       const workflowCompactMetrics = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        state.graphFocusId = ${JSON.stringify(densityFocusId)};
-        state.expandedCompletedSubagents.add(${JSON.stringify(densityFocusId)});
-        renderSessions();
-        drawAgentWorkflowConnections();
+        window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(densityFocusId)};
+        window.LoadToAgentApp.state.expandedCompletedSubagents.add(${JSON.stringify(densityFocusId)});
+        window.LoadToAgentApp.renderSessions();
+        window.LoadToAgentApp.drawAgentWorkflowConnections();
         const upstream = document.querySelector('.upstream-column')?.getBoundingClientRect();
         const selected = document.querySelector('.selected-column')?.getBoundingClientRect();
         const downstream = document.querySelector('.downstream-column')?.getBoundingClientRect();
@@ -963,13 +974,13 @@ app.whenReady().then(() => {
       if (!workflowCompactMetrics.compactDirection || !workflowCompactMetrics.selectedVisible || !workflowCompactMetrics.guideHidden || !workflowCompactMetrics.sidebarNoOverlap || workflowCompactMetrics.routeCollisions !== 0 || workflowCompactMetrics.connectionPaths !== 2 || workflowCompactMetrics.downstreamGroups !== 1 || workflowCompactMetrics.groupArrowheads !== 1 || !workflowCompactMetrics.groupPortInsideCanvas || workflowCompactMetrics.downstreamColumns < 1 || !workflowCompactMetrics.noHorizontalOverflow || !workflowCompactMetrics.noBodyOverflow) throw new Error(`최소 창 크기의 연결형 작업 흐름이 올바르지 않습니다: ${JSON.stringify(workflowCompactMetrics)}`);
       const workflowCompactImage = await captureStableState(win, `(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        state.graphFocusId = ${JSON.stringify(densityFocusId)};
-        renderSessions();
-        drawAgentWorkflowConnections();
+        window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(densityFocusId)};
+        window.LoadToAgentApp.renderSessions();
+        window.LoadToAgentApp.drawAgentWorkflowConnections();
         document.querySelector('.main-stage')?.scrollTo(0, 0);
       })()`, `(() => {
         const current = document.querySelector('.agent-workflow-selected .agent-current')?.getBoundingClientRect();
-        return state.graphFocusId === ${JSON.stringify(densityFocusId)} && document.querySelector('#beginnerGuide')?.classList.contains('hidden') && current && current.bottom <= window.innerHeight;
+        return window.LoadToAgentApp.state.graphFocusId === ${JSON.stringify(densityFocusId)} && document.querySelector('#beginnerGuide')?.classList.contains('hidden') && current && current.bottom <= window.innerHeight;
       })()`, 8);
       const workflowCompactOutput = path.join(outputDir, 'loadtoagent-agent-workflow-compact.png');
       fs.writeFileSync(workflowCompactOutput, workflowCompactImage.toPNG());
