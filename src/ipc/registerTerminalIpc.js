@@ -9,9 +9,9 @@ function registerTerminalIpc({ ipcMain, requireTrustedSender, trustedSender, man
     requireTrustedSender(event);
     return listWslDistros();
   });
-  ipcMain.handle('terminals:get', (event, id) => {
+  ipcMain.handle('terminals:get', async (event, id) => {
     requireTrustedSender(event);
-    const session = manager() ? manager().get(id, true) : null;
+    const session = manager() ? await manager().get(id, true) : null;
     return session && session.type === 'agent' && !isProviderVisible(session.provider) ? null : session;
   });
   ipcMain.handle('terminals:create', (event, options) => {
@@ -21,7 +21,11 @@ function registerTerminalIpc({ ipcMain, requireTrustedSender, trustedSender, man
   });
   ipcMain.on('terminals:write', (event, id, data) => {
     if (!trustedSender(event) || !manager()) return;
-    try { manager().write(id, data); } catch (error) { sendError({ id: String(id || ''), message: error.message }); }
+    try {
+      Promise.resolve(manager().write(id, data)).catch(error => sendError({ id: String(id || ''), message: error.message }));
+    } catch (error) {
+      sendError({ id: String(id || ''), message: error.message });
+    }
   });
   ipcMain.handle('terminals:command', (event, id, command) => {
     requireTrustedSender(event);
@@ -30,7 +34,7 @@ function registerTerminalIpc({ ipcMain, requireTrustedSender, trustedSender, man
   ipcMain.on('terminals:resize', (event, id, cols, rows) => {
     if (!trustedSender(event) || !manager()) return;
     try {
-      manager().resize(id, cols, rows);
+      Promise.resolve(manager().resize(id, cols, rows)).catch(error => sendError({ id: String(id || ''), message: error.message }));
     } catch (error) {
       sendError({ id: String(id || ''), message: error.message });
     }

@@ -37,12 +37,20 @@
  * @property {string} status
  * @property {string|null} parentId
  * @property {string} cwd
+ * @property {string} originCwd Immutable workspace path where the session began.
  * @property {string} updatedAt
  * @property {TokenUsage} usage
  * @property {Array<Object>} messages
  * @property {Array<Object>} lifecycle
+ * @property {Array<{id:string,kind:'shell'|'background',mode:'foreground'|'background',tool:string,runtime:string,label:string,command:string,cwd:string,status:'running'|'completed'|'failed',statusDetail:string,output:string,backgroundId:string,exitCode:number|null,startedAt:string|null,updatedAt:string|null,completedAt:string|null}>} executions Observed shell and background execution units owned by this AI session.
  * @property {CollaborationSummary|null} collaboration
  * @property {{kind:string,iteration:number,phase?:string}|boolean|null} loop Safe execution-loop metadata; internal goal text is never included.
+ * @property {{required:boolean,kind:string,summary:string,requestedAt:string|null,source:string,confidence:string}} attention Actionable reason why the session needs the user.
+ * @property {{stage:string,percent:number,completedSteps:number,failedSteps:number,totalSteps:number,currentStep:string,blocker:string,lastActivityAt:string|null,source:string,checkpoints:Array<Object>}} progress Structured progress reconstructed from lifecycle events.
+ * @property {{level:string,score:number,signals:Array<Object>,lastActivityAt:string|null,ageSeconds:number|null}} health Stalls, failures, context pressure, and hierarchy anomalies.
+ * @property {{managed:boolean,respond:boolean,approve:boolean,deny:boolean,sendInstruction:boolean,stop:boolean,pause:boolean,resume:boolean,retry:boolean,reassign:boolean,openOrigin:boolean}} controlCapabilities Safe provider-aware actions available for this session.
+ * @property {{confidence:string,status:string,hierarchy:string,completion:string,sources:Array<string>}} evidence Observation provenance and confidence.
+ * @property {{status:string,summary:string,verified:boolean,verification:string,completedAt:string|null,artifacts:Array<Object>,checks:Array<Object>}} outcome Completion summary, artifacts, and verification evidence.
  */
 
 /**

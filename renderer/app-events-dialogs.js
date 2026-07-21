@@ -9,6 +9,7 @@ window.LoadToAgentAppFactories.createDialogEventBindings = function createDialog
     closeDrawer, renderDrawer, providerPickerHtml, syncRunComposer, openRunModal, closeRunModal, toast, performUiAction,
     handleRun, trapDialogFocus, selectView, saveRunDraft = () => {}, safeBackdrop = null,
     copyText = async () => false,
+    dispatchAgentCommand, controlManagedRun, quickRespond, prepareReassignment,
   } = context;
 
   function bindRunComposerEvents() {
@@ -132,7 +133,8 @@ window.LoadToAgentAppFactories.createDialogEventBindings = function createDialog
 
   function bindDrawerAndGlobalEvents() {
     $("#closeDrawerBtn").addEventListener("click", closeDrawer);
-    $("#drawerBackdrop").addEventListener("click", closeDrawer);
+    if (safeBackdrop) safeBackdrop($("#drawerBackdrop"), closeDrawer, $("#detailDrawer"));
+    else $("#drawerBackdrop").addEventListener("click", closeDrawer);
     $(".drawer-tabs").addEventListener("click", (event) => {
       const tab = event.target.closest("[data-tab]");
       if (tab) {
@@ -181,6 +183,21 @@ window.LoadToAgentAppFactories.createDialogEventBindings = function createDialog
         }
         return;
       }
+      const quick = event.target.closest("[data-attention-quick]");
+      if (quick) {
+        quickRespond(quick.dataset.attentionSessionId || state.selectedId, quick.dataset.attentionQuick, $("#detailDrawer"));
+        return;
+      }
+      const managedAction = event.target.closest("[data-managed-run-action]");
+      if (managedAction) {
+        await controlManagedRun(managedAction.dataset.managementSessionId || state.selectedId, managedAction.dataset.managedRunAction);
+        return;
+      }
+      const reassign = event.target.closest("[data-reassign-session]");
+      if (reassign) {
+        prepareReassignment(reassign.dataset.reassignSession);
+        return;
+      }
       const retry = event.target.closest("[data-retry-detail]");
       if (retry) {
         if (retry.dataset.busy === "true") return;
@@ -197,20 +214,30 @@ window.LoadToAgentAppFactories.createDialogEventBindings = function createDialog
         return;
       }
       const stop = event.target.closest("[data-stop-run]");
-      if (!stop) return;
-      const runId = stop.dataset.stopRun;
-      if (state.stopRequests.has(runId)) return;
-      state.stopRequests.add(runId);
-      renderDrawer();
-      try {
-        const result = await window.loadtoagent.stopAgent(runId);
-        toast(result.ok ? window.LoadToAgentI18n.t("ui.stop_request_sent") : result.error);
-      } catch (error) {
-        toast(window.LoadToAgentI18n.errorText(error, "ui.could_not_send_the_stop_request"));
-      } finally {
-        state.stopRequests.delete(runId);
-        if (state.selectedId) renderDrawer();
-      }
+      if (stop) await controlManagedRun(state.selectedId, "stop");
+    });
+    $("#detailDrawer").addEventListener("input", (event) => {
+      const input = event.target.closest("[data-agent-command-draft]");
+      if (input) state.agentCommandDrafts.set(input.dataset.agentCommandDraft, input.value);
+    });
+    $("#detailDrawer").addEventListener("change", (event) => {
+      const picker = event.target.closest("[data-agent-command-target]");
+      if (!picker) return;
+      if (picker.value) state.agentCommandTargets.set(picker.dataset.agentCommandTarget, picker.value);
+      else state.agentCommandTargets.delete(picker.dataset.agentCommandTarget);
+      picker.closest("form")?.querySelectorAll("button").forEach(button => { button.disabled = !picker.value; });
+    });
+    $("#detailDrawer").addEventListener("keydown", (event) => {
+      const input = event.target.closest("[data-agent-command-draft]");
+      if (!input || event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+      event.preventDefault();
+      input.closest("form")?.requestSubmit();
+    });
+    $("#detailDrawer").addEventListener("submit", (event) => {
+      const form = event.target.closest("[data-agent-command-form]");
+      if (!form) return;
+      event.preventDefault();
+      dispatchAgentCommand(form.dataset.agentCommandForm, form);
     });
     document.addEventListener("keydown", (event) => {
       trapDialogFocus(event);

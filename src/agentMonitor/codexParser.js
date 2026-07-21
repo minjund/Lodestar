@@ -2,6 +2,7 @@
 
 const path = require('path');
 const { createCodexCollaboration } = require('./codexCollaboration');
+const { createExecutionTracker } = require('./executionActivity');
 
 const COLLABORATION_TOOLS = new Set([
   'spawn_agent',
@@ -26,10 +27,12 @@ function createCodexParser(dependencies) {
     },
     textOps: {
       agentEnvelope,
+      assistantRequestsUserResponse,
       codexContentText,
       codexVisibleUserText,
       compactText,
       encryptedCollaborationText,
+      isUserInputTool,
       jsonObject,
     },
     collaborationOps: {
@@ -52,6 +55,7 @@ function createCodexParser(dependencies) {
     const session = baseSession('codex', externalId, fileInfo.file, fileInfo);
     session.truncated = parsed.truncated;
     session.cwd = meta.cwd || '';
+    session.originCwd = meta.cwd || '';
     session.model = meta.model || '';
     session.branch = meta.git && meta.git.branch || '';
     session.startedAt = timestamp(meta.timestamp || (metaRow && metaRow.timestamp), session.updatedAt);
@@ -87,10 +91,14 @@ function createCodexParser(dependencies) {
       activeTurn: false,
       lastTurnCompleted: false,
       lastFinalAnswer: '',
+      lastAssistantText: '',
+      lastConversationRole: '',
+      pendingUserInputCalls: new Set(),
       latestTs: session.updatedAt,
       observedWindow: Number(meta.context_window || 0),
       messageObservations: new Map(),
       collaboration: createCodexCollaboration(session, { compactText, timestamp }),
+      executionTracker: createExecutionTracker({ compactText, timestamp }),
       sessionStartedMs: Date.parse(session.startedAt || '') || 0,
     };
   }
@@ -154,7 +162,11 @@ function createCodexParser(dependencies) {
       settleRunningLifecycle(session, payload.completed_at || row.timestamp);
       session.completedAt = timestamp(payload.completed_at || row.timestamp, session.updatedAt);
       session.completionObserved = true;
-      if (payload.last_agent_message) state.lastFinalAnswer = compactText(payload.last_agent_message, 6000);
+      if (payload.last_agent_message) {
+        state.lastFinalAnswer = compactText(payload.last_agent_message, 6000);
+        state.lastAssistantText = state.lastFinalAnswer;
+        state.lastConversationRole = 'assistant';
+      }
       addLifecycle(session, {
         id: payload.turn_id,
         type: 'turn-complete',
@@ -175,12 +187,17 @@ function createCodexParser(dependencies) {
         return;
       }
       state.latestUser = text;
+      state.lastConversationRole = 'user';
       const key = `u:${payload.client_id || row.timestamp}:${text}`;
       addCodexMessage(session, state.messageObservations, { id: key, role: 'user', text, timestamp: row.timestamp }, 'event');
     } else if (payload.type === 'agent_message') {
       const text = compactText(payload.message);
       if (text) state.latestDelegationNarration = text;
       if (payload.phase === 'final_answer') state.lastFinalAnswer = text;
+      if (text) {
+        state.lastAssistantText = text;
+        state.lastConversationRole = 'assistant';
+      }
       const key = `a:${row.timestamp}:${text}`;
       addCodexMessage(session, state.messageObservations, { id: key, role: 'assistant', text, timestamp: row.timestamp }, 'event');
     } else if (payload.type === 'agent_reasoning') {
@@ -266,6 +283,14 @@ function createCodexParser(dependencies) {
     const collaborationTool = payload.namespace === 'collaboration' || COLLABORATION_TOOLS.has(name);
     if (collaborationTool && !timing.ownCollaborationRow) return;
     state.collaboration.calls.set(String(callId || ''), { name, args, timestamp: row.timestamp });
+    state.executionTracker.recordCall({
+      name,
+      callId,
+      args,
+      rawInput: payload.arguments || payload.input,
+      at: row.timestamp,
+    });
+    if (isUserInputTool(name)) state.pendingUserInputCalls.add(String(callId || name));
 
     let collaborationMessageProtected = false;
     if (collaborationTool) {
@@ -301,6 +326,15 @@ function createCodexParser(dependencies) {
   function processToolOutput(session, state, row, payload) {
     settleLifecycle(session, payload.call_id, 'done', row.timestamp);
     const call = state.collaboration.calls.get(String(payload.call_id || ''));
+    state.executionTracker.recordOutput({
+      name: call && call.name,
+      callId: payload.call_id,
+      args: call && call.args || {},
+      output: payload.output,
+      at: row.timestamp,
+      isError: payload.is_error === true || payload.status === 'failed',
+    });
+    state.pendingUserInputCalls.delete(String(payload.call_id || ''));
     const output = jsonObject(payload.output);
     if (call && call.name === 'spawn_agent') {
       const record = state.collaboration.ensureSpawn(payload.call_id);
@@ -361,8 +395,15 @@ function createCodexParser(dependencies) {
       if (/<codex_internal_context[^>]*\bsource=["']goal["']/i.test(rawText)) state.goalContexts.add(`${row.timestamp || ''}:${text}`);
       return;
     }
-    if (role === 'user') state.latestUser = text;
-    if (role === 'assistant') state.latestDelegationNarration = text;
+    if (role === 'user') {
+      state.latestUser = text;
+      state.lastConversationRole = 'user';
+    }
+    if (role === 'assistant') {
+      state.latestDelegationNarration = text;
+      state.lastAssistantText = text;
+      state.lastConversationRole = 'assistant';
+    }
     const key = payload.id || `message:${role}:${row.timestamp}:${text.slice(0, 80)}`;
     addCodexMessage(session, state.messageObservations, { id: key, role, text, timestamp: row.timestamp }, 'response');
   }
@@ -389,6 +430,7 @@ function createCodexParser(dependencies) {
     };
     if (row.type === 'turn_context') {
       session.model = payload.model || session.model;
+      if (payload.cwd && !session.originCwd) session.originCwd = payload.cwd;
       session.cwd = payload.cwd || session.cwd;
     } else if (row.type === 'world_state') {
       const retainedText = payload.state && payload.state.environments && payload.state.environments.subagents;
@@ -415,12 +457,21 @@ function createCodexParser(dependencies) {
     const collaboration = state.collaboration.finalize(session.collaboration.retainedAgents);
     session.collaboration.spawns = collaboration.spawns;
     session.collaboration.communications = collaboration.communications;
+    session.executions = state.executionTracker.finalize();
     const windowInfo = modelContextWindow('codex', session.model, state.observedWindow);
     session.context = contextInfo(session.turnUsage.total || session.turnUsage.input, windowInfo);
 
     if (session.status !== 'failed') {
       const turnAge = Date.now() - fileInfo.mtimeMs;
-      if (state.activeTurn && turnAge < STALE_TURN_THRESHOLD_MS) {
+      const pendingUserInput = state.pendingUserInputCalls.size > 0;
+      const conversationalInput = state.lastConversationRole === 'assistant'
+        && assistantRequestsUserResponse(state.lastAssistantText || state.lastFinalAnswer)
+        && (state.lastTurnCompleted || turnAge >= ACTIVE_THRESHOLD_MS);
+      if (!session.depth && (pendingUserInput || conversationalInput)) {
+        session.status = 'waiting';
+        session.statusDetail = pendingUserInput ? '선택 또는 입력 대기' : '답변 또는 선택 대기';
+        session.statusObserved = true;
+      } else if (state.activeTurn && turnAge < STALE_TURN_THRESHOLD_MS) {
         session.status = 'running';
         session.statusDetail = '턴 실행 중';
         session.statusObserved = true;

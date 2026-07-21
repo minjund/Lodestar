@@ -17,6 +17,7 @@
   <link rel="stylesheet" href="styles-terminal.css" />
   <link rel="stylesheet" href="styles-run-composer.css" />
   <link rel="stylesheet" href="styles-product.css" />
+  <link rel="stylesheet" href="styles-management.css" />
   <link rel="stylesheet" href="styles-runtime-overview.css" />
   <link rel="stylesheet" href="styles-onboarding.css" />
   <link rel="stylesheet" href="styles-settings.css" />
@@ -40,11 +41,14 @@
         <button class="nav-item active" type="button" data-view="all" aria-label="홈" data-i18n-aria-label="app.nav.home" aria-keyshortcuts="Meta+1 Control+1" aria-controls="liveSection globalStats sessionSection" title="홈" data-i18n-title="app.nav.home"><span class="nav-icon">⌂</span><span data-i18n="app.nav.home">홈</span><b id="navAllCount">0</b></button>
         <button class="nav-item" type="button" data-view="active" aria-label="진행 중" data-i18n-aria-label="app.nav.active" aria-keyshortcuts="Meta+2 Control+2" aria-controls="liveSection sessionSection" title="진행 중" data-i18n-title="app.nav.active"><span class="nav-icon live-dot"></span><span data-i18n="app.nav.active">진행 중</span><b id="navActiveCount">0</b></button>
         <button class="nav-item" type="button" data-view="waiting" aria-label="내 확인 필요" data-i18n-aria-label="app.nav.needs_review" aria-keyshortcuts="Meta+3 Control+3" aria-controls="sessionSection" title="내 확인 필요" data-i18n-title="app.nav.needs_review"><span class="nav-icon">!</span><span data-i18n="app.nav.needs_review">내 확인 필요</span><b id="navWaitingCount">0</b></button>
-        <button class="nav-item runtime-nav-item" type="button" data-view="runtime" aria-label="스케줄·루프" data-i18n-aria-label="app.nav.runtime" aria-keyshortcuts="Meta+4 Control+4" aria-controls="automationOverview" title="스케줄·루프" data-i18n-title="app.nav.runtime"><span class="nav-icon runtime-nav-icon">↻</span><span data-i18n="app.nav.runtime">스케줄·루프</span><b id="navRuntimeCount">0</b></button>
-        <div class="nav-group-label" data-i18n="app.nav.continue_session">기존 세션에 이어서 입력</div>
-        <button class="nav-item" type="button" data-view="terminal" aria-label="세션 터미널" data-i18n-aria-label="app.nav.session_terminal" aria-keyshortcuts="Meta+5 Control+5" aria-controls="terminalSection" title="세션 터미널" data-i18n-title="app.nav.session_terminal"><span class="nav-icon">›_</span><span data-i18n="app.nav.session_terminal">세션 터미널</span><b id="navTerminalCount">0</b></button>
-        <div class="nav-group-label tmux-only" data-i18n="ui.tmux_only">tmux 전용</div>
-        <button class="nav-item tmux-nav-item" type="button" data-view="tmux" aria-label="tmux 작업" data-i18n-aria-label="app.nav.tmux" aria-keyshortcuts="Meta+6 Control+6" aria-controls="tmuxSection" title="tmux 작업" data-i18n-title="app.nav.tmux"><span class="nav-icon">▦</span><span data-i18n="app.nav.tmux">tmux 작업</span><b id="navTmuxCount">0</b></button>
+        <details id="advancedToolsNav" class="advanced-tools-nav">
+          <summary><span class="nav-icon">⌁</span><span data-i18n="management.advanced_tools">고급 도구</span><b id="advancedToolsCount">0</b><i aria-hidden="true">⌄</i></summary>
+          <div class="advanced-tools-list">
+            <button class="nav-item runtime-nav-item" type="button" data-view="runtime" aria-label="스케줄·루프" data-i18n-aria-label="app.nav.runtime" aria-keyshortcuts="Meta+4 Control+4" aria-controls="automationOverview" title="스케줄·루프" data-i18n-title="app.nav.runtime"><span class="nav-icon runtime-nav-icon">↻</span><span data-i18n="app.nav.runtime">스케줄·루프</span><b id="navRuntimeCount">0</b></button>
+            <button class="nav-item" type="button" data-view="terminal" aria-label="세션 터미널" data-i18n-aria-label="app.nav.session_terminal" aria-keyshortcuts="Meta+5 Control+5" aria-controls="terminalSection" title="세션 터미널" data-i18n-title="app.nav.session_terminal"><span class="nav-icon">›_</span><span data-i18n="app.nav.session_terminal">세션 터미널</span><b id="navTerminalCount">0</b></button>
+            <button class="nav-item tmux-nav-item" type="button" data-view="tmux" aria-label="tmux 작업" data-i18n-aria-label="app.nav.tmux" aria-keyshortcuts="Meta+6 Control+6" aria-controls="tmuxSection" title="tmux 작업" data-i18n-title="app.nav.tmux"><span class="nav-icon">▦</span><span data-i18n="app.nav.tmux">tmux 작업</span><b id="navTmuxCount">0</b></button>
+          </div>
+        </details>
         <div class="nav-group-label" data-i18n="app.nav.application">프로그램</div>
         <button class="nav-item settings-nav-item" type="button" data-view="settings" aria-label="설정" data-i18n-aria-label="app.nav.settings" aria-keyshortcuts="Meta+7 Control+7" aria-controls="settingsSection" title="설정" data-i18n-title="app.nav.settings"><span class="nav-icon">⚙</span><span data-i18n="app.nav.settings">설정</span><b id="navUpdateBadge" class="hidden">NEW</b></button>
         <button id="mobileMoreBtn" class="nav-item mobile-more-nav" type="button" aria-label="더보기" data-i18n-aria-label="app.nav.more" title="더보기" data-i18n-title="app.nav.more" aria-expanded="false" aria-controls="mobileToolsMenu"><span class="nav-icon">•••</span><span data-i18n="app.nav.more">더보기</span></button>
@@ -56,8 +60,8 @@
       </section>
 
       <section class="sidebar-section workspace-section">
-        <div class="section-title"><span data-i18n="ui.workspaces">작업 폴더</span><button id="addWorkspaceBtn" class="icon-button" type="button" title="작업 폴더 추가" data-i18n-title="ui.add_workspace" aria-label="작업 폴더 추가" data-i18n-aria-label="ui.add_workspace" aria-controls="workspaceList">＋</button></div>
-        <div id="workspaceList" class="workspace-list" role="group" aria-label="작업 폴더 필터" data-i18n-aria-label="quality.workspace_filter"></div>
+        <div class="section-title"><span data-i18n="ui.workspaces">프로젝트</span><button id="addWorkspaceBtn" class="icon-button" type="button" title="프로젝트 추가" data-i18n-title="ui.add_workspace" aria-label="프로젝트 추가" data-i18n-aria-label="ui.add_workspace" aria-controls="workspaceList">＋</button></div>
+        <div id="workspaceList" class="workspace-list" role="group" aria-label="프로젝트별 세션 필터" data-i18n-aria-label="quality.workspace_filter"></div>
       </section>
 
       <div class="sidebar-footer">
@@ -107,6 +111,10 @@
       </section>
 
       <section id="automationOverview" class="automation-overview hidden" aria-label="예약 작업과 실행 루프" data-i18n-aria-label="runtime.section_label"></section>
+
+      <section id="operationsOverview" class="operations-overview hidden" aria-label="에이전트 운영 상태" data-i18n-aria-label="management.operations_label"></section>
+
+      <section id="attentionInbox" class="attention-inbox hidden" aria-label="조치가 필요한 에이전트 작업" data-i18n-aria-label="management.inbox_label"></section>
 
       <section id="settingsSection" class="settings-section hidden" aria-labelledby="settingsTitle">
         <header class="settings-head">
@@ -190,7 +198,7 @@
           </div>
         </div>
         <div class="terminal-layout">
-          <aside class="terminal-resource-panel">
+          <aside id="terminalResourcePanel" class="terminal-resource-panel">
             <div class="terminal-resource-head"><div><b data-i18n="ui.my_terminal_sessions">내 터미널 세션</b><span id="terminalSessionSummary" data-i18n="common.running" data-i18n-params='{"count":0}'>0개 실행 중</span></div><span class="terminal-resource-live"><i></i>LIVE</span></div>
             <p id="terminalReorderHelp" class="sr-only" data-i18n="terminal.reorder_help">세션 옆의 위아래 버튼을 누르거나, 세션에 초점을 둔 뒤 Alt와 위아래 화살표 키를 눌러 순서를 바꿀 수 있습니다.</p>
             <div id="terminalSessionList" class="terminal-session-list" role="listbox" aria-label="터미널 세션" data-i18n-aria-label="quality.terminal_sessions"></div>
@@ -231,7 +239,18 @@
                 <footer><span class="session-lock-dot"></span><b data-i18n="ui.this_conversation_is_connected_to_the_terminal_on_the_right">이 대화가 오른쪽 터미널과 연결되어 있습니다</b></footer>
               </aside>
               <section class="terminal-console-pane" aria-label="실시간 터미널과 명령 입력" data-i18n-aria-label="ui.live_terminal_and_command_input">
-                <header class="terminal-console-head"><div><span class="terminal-console-pulse"></span><div><b data-i18n="ui.live_terminal">실시간 터미널</b><small id="terminalConsoleCaption" data-i18n="ui.select_a_session_to_show_its_output_here">세션을 선택하면 출력이 여기에 표시됩니다</small></div></div><span id="terminalConsoleState" class="terminal-console-state" data-i18n="ui.waiting_for_selection">선택 대기</span></header>
+                <header class="terminal-console-head">
+                  <div class="terminal-console-title"><span class="terminal-console-pulse"></span><div><b data-i18n="ui.live_terminal">실시간 터미널</b><small id="terminalConsoleCaption" data-i18n="ui.select_a_session_to_show_its_output_here">세션을 선택하면 출력이 여기에 표시됩니다</small></div></div>
+                  <div class="terminal-console-tools">
+                    <span id="terminalConsoleState" class="terminal-console-state" data-i18n="ui.waiting_for_selection">선택 대기</span>
+                    <div class="terminal-font-controls" role="group" aria-label="터미널 글자 크기" data-i18n-aria-label="terminal.view.font_size">
+                      <button id="terminalFontDecreaseBtn" type="button" aria-label="터미널 글자 작게" data-i18n-aria-label="terminal.view.font_decrease" title="터미널 글자 작게" data-i18n-title="terminal.view.font_decrease">−</button>
+                      <output id="terminalFontSizeLabel" aria-live="polite">15px</output>
+                      <button id="terminalFontIncreaseBtn" type="button" aria-label="터미널 글자 크게" data-i18n-aria-label="terminal.view.font_increase" title="터미널 글자 크게" data-i18n-title="terminal.view.font_increase">＋</button>
+                    </div>
+                    <button id="terminalFocusBtn" class="terminal-focus-button" type="button" aria-pressed="false" title="터미널만 크게 보기" data-i18n-title="terminal.view.focus"><span data-i18n="terminal.view.focus">집중 보기</span><b aria-hidden="true">⛶</b></button>
+                  </div>
+                </header>
                 <div id="terminalViewport" class="terminal-viewport"><div id="terminalEmpty" class="terminal-empty"><span>›_</span><h3 data-i18n="ui.choose_a_session_to_continue">이어갈 세션을 선택하세요</h3><p data-i18n="ui.choose_a_session_on_the_left_or_create_one_to">왼쪽 세션을 고르거나 새 세션을 만들면 실시간 출력과 명령 입력창이 열립니다.</p></div></div>
                 <form id="terminalCommandForm" class="terminal-command-form">
                   <div class="terminal-command-label"><label id="terminalCommandLabel" for="terminalCommandInput" data-i18n="ui.send_command_to_terminal">터미널에 명령 보내기</label><span data-i18n="ui.enter_to_send_shift_enter_for_newline">Enter 전송 · Shift+Enter 줄바꿈</span></div>
@@ -284,6 +303,12 @@
           <button id="graphResetBtn" class="graph-reset hidden" type="button" data-i18n="ui.back_to_task_list">작업 목록으로</button>
         </div>
         <div id="liveSessionGrid" class="live-session-grid"></div>
+        <div id="activeEmptyState" class="empty-state hidden">
+          <div class="empty-orbit"><span></span></div>
+          <h3 data-i18n="ui.no_tasks_are_currently_active">현재 진행 중인 작업이 없습니다</h3>
+          <p data-i18n="ui.new_tasks_will_show_their_progress_here_immediately">새 작업을 시작하면 진행 상황이 여기에 바로 표시됩니다.</p>
+          <button class="primary-button" type="button" data-open-run data-i18n="ui.assign_a_new_task_to_ai">AI에게 새 일 맡기기</button>
+        </div>
       </section>
 
       <section id="globalStats" class="global-stats" aria-label="전체 통계" data-i18n-aria-label="ui.overall_statistics"></section>
@@ -313,12 +338,17 @@
     </main>
   </div>
 
-  <nav id="mobileToolsMenu" class="mobile-tools-menu hidden" aria-label="고급 기능과 설정" data-i18n-aria-label="ui.advanced_tools_and_settings">
-    <div><b data-i18n="app.nav.more">더보기</b><span data-i18n="ui.advanced_tools_to_open_only_when_needed">필요할 때만 여는 고급 기능이에요.</span></div>
+  <aside id="mobileToolsMenu" class="mobile-tools-menu hidden" role="dialog" aria-modal="true" aria-labelledby="mobileToolsTitle" aria-hidden="true" tabindex="-1" inert>
+    <div class="mobile-tools-head"><span><b id="mobileToolsTitle" data-i18n="app.nav.more">더보기</b><small data-i18n="ui.advanced_tools_to_open_only_when_needed">필요할 때만 여는 고급 기능이에요.</small></span><button id="mobileToolsCloseBtn" type="button" aria-label="닫기" data-i18n-aria-label="common.close">×</button></div>
+    <details class="mobile-project-picker">
+      <summary><i aria-hidden="true">□</i><span><b data-i18n="ui.workspaces">프로젝트</b><small id="mobileWorkspaceSummary" data-i18n="project.all">모든 프로젝트</small></span><em aria-hidden="true">⌄</em></summary>
+      <div class="mobile-project-picker-body"><div id="mobileWorkspaceList" class="workspace-list" role="group" aria-label="프로젝트별 세션 필터" data-i18n-aria-label="quality.workspace_filter"></div><button id="mobileAddWorkspaceBtn" type="button" data-i18n="ui.add_workspace">프로젝트 고정</button></div>
+    </details>
+    <button type="button" data-mobile-view="runtime"><i aria-hidden="true">↻</i><span><b data-i18n="app.nav.runtime">스케줄·루프</b><small data-i18n="runtime.description">다음 예약과 지금 반복 중인 에이전트 흐름을 함께 봅니다.</small></span></button>
     <button type="button" data-mobile-view="terminal"><i aria-hidden="true">›_</i><span><b data-i18n="app.nav.session_terminal">세션 터미널</b><small data-i18n="ui.continue_an_existing_ai_conversation_directly">기존 AI 대화를 직접 이어서 입력</small></span></button>
     <button type="button" data-mobile-view="tmux"><i aria-hidden="true">▦</i><span><b data-i18n="app.nav.tmux">tmux 작업</b><small data-i18n="ui.manage_multiple_terminals_together">여러 명령창을 묶어 관리</small></span></button>
     <button type="button" data-mobile-view="settings"><i aria-hidden="true">⚙</i><span><b data-i18n="settings.title">프로그램 설정</b><small data-i18n="ui.check_version_and_updates">버전과 업데이트 확인</small></span></button>
-  </nav>
+  </aside>
 
   <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
   <aside id="detailDrawer" class="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" aria-hidden="true" tabindex="-1" inert>
@@ -329,6 +359,7 @@
     </div>
     <div id="drawerMeta" class="drawer-meta"></div>
     <div class="drawer-tabs" role="tablist" aria-orientation="horizontal">
+      <button id="drawerTabSummary" class="drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawerContent" tabindex="-1" data-tab="summary" data-i18n="management.summary">관리 요약</button>
       <button id="drawerTabChat" class="drawer-tab active" type="button" role="tab" aria-selected="true" aria-controls="drawerContent" tabindex="0" data-tab="chat" data-i18n="ui.conversation">대화 내용</button>
       <button id="drawerTabLifecycle" class="drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawerContent" tabindex="-1" data-tab="lifecycle" data-i18n="ui.progress">진행 과정</button>
       <button id="drawerTabTokens" class="drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawerContent" tabindex="-1" data-tab="tokens" data-i18n="ui.usage">사용량</button>
@@ -357,7 +388,7 @@
         <label class="permission-toggle"><input id="allowWrites" type="checkbox" /><span class="toggle-track"></span><div><strong data-i18n="ui.allow_ai_to_edit_files">AI가 파일을 고칠 수 있게 허용</strong><small data-i18n="ui.when_enabled_the_ai_can_directly_edit_files_in_the">켜면 선택한 폴더의 파일을 직접 수정합니다.</small></div></label>
         <div id="runPermissionHint" class="run-permission-hint hidden" role="status" data-i18n="ui.this_request_appears_to_need_file_changes_without_edit_permission">이 요청은 파일 수정이 필요해 보여요. 위의 수정 허용을 켜지 않으면 AI가 코드 변경 없이 검토만 합니다.</div>
       </section>
-      <details class="run-advanced">
+      <details class="run-advanced" data-disclosure-key="run:advanced">
         <summary><span><b data-i18n="ui.advanced_settings">고급 설정</b><small data-i18n="ui.use_only_when_selecting_a_specific_model">특정 모델을 직접 지정할 때만 사용</small></span><i aria-hidden="true">↓</i></summary>
         <label><span><span data-i18n="ui.model">사용 모델</span> <small data-i18n="ui.leave_blank_if_unsure">몰라도 비워두세요</small></span><input id="runModel" autocomplete="off" spellcheck="false" placeholder="비워두면 AI가 알아서 선택합니다" data-i18n-placeholder="ui.leave_blank_to_let_the_ai_choose" /></label>
       </details>
@@ -410,8 +441,9 @@
   <script src="app-graph-layout.js"></script>
   <script src="app-graph-orchestration.js"></script>
   <script src="app-tmux-render.js"></script>
-  <script src="app-session-render.js"></script>
   <script src="app-agent-actions.js"></script>
+  <script src="app-management.js"></script>
+  <script src="app-session-render.js"></script>
   <script src="app-drawer-data.js"></script>
   <script src="app-drawer-content.js"></script>
   <script src="app-drawer.js"></script>

@@ -30,11 +30,16 @@
 
 .sidebar>.workspace-section {
   flex: none;
+  width: 100%;
+  min-width: 0;
   overflow: visible;
 }
 
 .sidebar>.workspace-section .workspace-list {
-  max-height: 180px;
+  width: 100%;
+  min-width: 0;
+  max-height: none;
+  overflow: visible;
 }
 
 body[data-current-view="runtime"] .sidebar>.workspace-section,
@@ -138,7 +143,7 @@ body[data-current-view="settings"] .sidebar>.workspace-section {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg,rgba(14,18,28,.98),rgba(9,12,19,.98));
+  background: linear-gradient(180deg,#0a111a,#070c13 72%,#060a10);
   border-right: 1px solid var(--line);
   overflow-x: hidden;
   overflow-y: auto;
@@ -209,13 +214,13 @@ html {
 
 :root {
   color-scheme: dark;
-  --bg: #070910;
-  --panel: #0d111a;
-  --panel-2: #111722;
-  --panel-3: #151c28;
-  --line: #202838;
-  --line-soft: #171e2b;
-  --text: #f4f7fb;
+  --bg: #060a10;
+  --panel: #0b121a;
+  --panel-2: #101923;
+  --panel-3: #15212c;
+  --line: #263643;
+  --line-soft: #192630;
+  --text: #f4f8fa;
   --cyan: #59d8ff;
   --green: #4ce39a;
   --amber: #f6bd55;
@@ -227,8 +232,8 @@ html {
   --motion-slow: 440ms;
   --motion-ease: cubic-bezier(.22,1,.36,1);
   --motion-standard: cubic-bezier(.2,.8,.2,1);
-  --muted: #aab6c5;
-  --dim: #8794a6;
+  --muted: #b7c3cc;
+  --dim: #93a3af;
   --focus: #8ae8ff;
 }
 
@@ -267,7 +272,7 @@ html {
   height: 100vh;
   display: grid;
   grid-template-columns: var(--sidebar) minmax(0,1fr);
-  background: radial-gradient(circle at 76% -12%,rgba(58,115,160,.16),transparent 35%),var(--bg);
+  background: radial-gradient(circle at 76% -12%,rgba(46,151,129,.12),transparent 34%),linear-gradient(180deg,#070b12,var(--bg));
   max-width: 100%;
   min-width: 0;
 }
@@ -275,10 +280,13 @@ html {
 .main-stage {
   height: 100vh;
   overflow: auto;
+  overflow-anchor: none;
+  overscroll-behavior: contain;
   scrollbar-color: #283244 transparent;
   padding: 28px clamp(24px,2.5vw,44px) 64px;
   max-width: 100%;
   min-width: 0;
+  background: linear-gradient(180deg,rgba(9,15,23,.28),rgba(6,10,16,.08));
 }
 
 .topbar>div {

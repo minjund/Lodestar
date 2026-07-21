@@ -117,26 +117,31 @@
   .terminal-resource-panel {
     max-height: none;
     display: grid;
-    grid-template-columns: 205px minmax(0,1fr);
-    grid-template-rows: 92px;
+    grid-template-columns: 220px minmax(0,1fr);
+    grid-template-rows: 106px;
     border-right: 0;
     border-bottom: 1px solid #1d2d38;
   }
 
   .terminal-resource-head {
-    min-height: 92px;
+    min-height: 106px;
     border-right: 1px solid #1d2d38;
     border-bottom: 0;
   }
 
   .terminal-session-list {
-    grid-template-columns: repeat(2,minmax(0,1fr));
-    max-height: 92px;
-    padding: 9px;
+    display: grid;
+    grid-template-columns: none;
+    grid-auto-columns: minmax(250px,310px);
+    grid-auto-flow: column;
+    max-height: 106px;
+    padding: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 
   .terminal-session-item {
-    min-height: 72px;
+    min-height: 84px;
   }
 
   .terminal-resource-tip {
@@ -144,8 +149,8 @@
   }
 
   #terminalSection .terminal-workbench {
-    height: 495px;
-    min-height: 495px;
+    height: clamp(620px,calc(100vh - 270px),760px);
+    min-height: 620px;
   }
 }
 
@@ -335,7 +340,11 @@
 
   .terminal-session-list {
     grid-template-columns: 1fr;
-    max-height: 176px;
+    grid-auto-columns: auto;
+    grid-auto-flow: row;
+    max-height: 260px;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   .terminal-command-label>span {
@@ -354,7 +363,10 @@
 
   .terminal-console-head {
     align-items: flex-start;
+    flex-direction: column;
   }
+
+  .terminal-console-tools { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
 
   .terminal-console-state {
     margin-top: 1px;

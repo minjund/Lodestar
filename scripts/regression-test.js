@@ -9,6 +9,7 @@ const { registerRuntimeTerminalBridgeTests } = require('./tests/runtimes-termina
 const { registerUiContractSuite } = require('./tests/ui-contracts');
 const { registerAttentionNotifierTests } = require('./tests/attention-notifier');
 const { registerAutomationMonitorTests } = require('./tests/automation-monitor');
+const { registerSessionIntelligenceTests } = require('./tests/session-intelligence');
 
 const root = path.resolve(__dirname, '..');
 const fixtures = createRegressionFixtures(root);
@@ -18,12 +19,13 @@ const context = { ...fixtures, test: harness.test };
 registerCoreUpdateWorkspaceTests(context);
 registerAttentionNotifierTests(context);
 registerAutomationMonitorTests(context);
+registerSessionIntelligenceTests(context);
 registerAgentParserTests(context);
 registerRuntimeTerminalBridgeTests(context);
 registerUiContractSuite(context);
 
-if (harness.count() !== 60) {
-  throw new Error(`회귀 테스트 등록 수가 60개가 아닙니다: ${harness.count()}`);
+if (harness.count() !== 68) {
+  throw new Error(`회귀 테스트 등록 수가 68개가 아닙니다: ${harness.count()}`);
 }
 
 harness.run({ cleanup: fixtures.cleanup }).catch(error => {

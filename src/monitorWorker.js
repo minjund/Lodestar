@@ -8,6 +8,7 @@ const { TmuxMonitor, linkAgentSessions } = require('./tmuxMonitor');
 const { ProcessMonitor, applyRuntimePresence } = require('./processMonitor');
 const { scanCodexAutomationHomes } = require('./automationMonitor');
 const { reportRecoverableError } = require('./diagnostics');
+const { enrichSession } = require('./sessionIntelligence');
 
 const tmuxMonitor = new TmuxMonitor();
 tmuxMonitor.scan();
@@ -131,6 +132,30 @@ function cardCollaboration(value) {
   };
 }
 
+function cardExecutions(value) {
+  return (value || []).slice(-120).map(activity => ({
+    id: activity.id,
+    callId: activity.callId,
+    kind: activity.kind,
+    mode: activity.mode,
+    tool: clip(activity.tool, 80),
+    runtime: clip(activity.runtime, 80),
+    label: clip(activity.label, 180),
+    command: clip(activity.command, 1200),
+    cwd: clip(activity.cwd, 360),
+    status: activity.status,
+    statusDetail: clip(activity.statusDetail, 180),
+    output: clip(activity.output, 2400),
+    backgroundId: clip(activity.backgroundId, 180),
+    backgroundIdType: clip(activity.backgroundIdType, 40),
+    exitCode: activity.exitCode == null ? null : Number(activity.exitCode),
+    startedAt: activity.startedAt,
+    updatedAt: activity.updatedAt,
+    completedAt: activity.completedAt,
+    source: activity.source,
+  }));
+}
+
 function cardSession(session) {
   return {
     id: session.id,
@@ -147,6 +172,7 @@ function cardSession(session) {
     title: clip(session.title, 180),
     model: session.model,
     cwd: session.cwd,
+    originCwd: session.originCwd || session.cwd,
     branch: session.branch,
     workspace: session.workspace,
     projectless: Boolean(session.projectless),
@@ -186,6 +212,13 @@ function cardSession(session) {
       phase: clip(session.loop.phase, 40),
     } : (session.loop === true ? true : null),
     collaboration: cardCollaboration(session.collaboration),
+    executions: cardExecutions(session.executions),
+    attention: session.attention,
+    progress: session.progress,
+    health: session.health,
+    controlCapabilities: session.controlCapabilities,
+    evidence: session.evidence,
+    outcome: session.outcome,
     messages: selectCardMessages(session.messages),
     lifecycle: (session.lifecycle || []).slice(-2).map(cardLifecycle),
   };
@@ -198,6 +231,7 @@ function fingerprint(snapshot, tmux, automations) {
     session.status,
     session.usage && session.usage.total,
     session.context && session.context.used,
+    session.originCwd,
     session.workspace,
     Boolean(session.projectless),
     session.loop && `${session.loop.kind || ''}:${session.loop.iteration || 0}:${session.loop.phase || ''}`,
@@ -205,6 +239,11 @@ function fingerprint(snapshot, tmux, automations) {
     session.collaboration && session.collaboration.metrics && Object.values(session.collaboration.metrics).join(':'),
     session.collaboration && session.collaboration.communications && session.collaboration.communications.length,
     session.collaboration && session.collaboration.communications && session.collaboration.communications.at(-1) && session.collaboration.communications.at(-1).id,
+    (session.executions || []).map(activity => `${activity.id}:${activity.status}:${activity.mode}:${activity.backgroundId || ''}:${activity.updatedAt || ''}`).join(','),
+    session.attention && `${session.attention.kind}:${session.attention.required}`,
+    session.progress && `${session.progress.stage}:${session.progress.percent}:${session.progress.currentStep}`,
+    session.health && `${session.health.level}:${session.health.signals.map(signal => signal.code).join(',')}`,
+    session.outcome && `${session.outcome.status}:${session.outcome.artifacts.length}:${session.outcome.checks.length}`,
     (session.runtimePresence || []).map(item => `${item.id}:${item.pid}:${item.terminalId || ''}`).join(','),
   ]);
   const tmuxState = (tmux.distros || []).flatMap(distro => (distro.sessions || []).flatMap(tmuxSession => (tmuxSession.windows || []).flatMap(window => (window.panes || []).map(pane => [
@@ -224,7 +263,7 @@ function fingerprint(snapshot, tmux, automations) {
   const automationState = (automations || []).map(item => [
     item.id, item.name, item.status, item.rrule, item.nextRunAt, item.updatedAt, (item.cwds || []).join('|'),
   ]);
-  return JSON.stringify([sessions, tmuxState, automationState]);
+  return JSON.stringify([Math.floor(Date.now() / 60_000), sessions, tmuxState, automationState]);
 }
 
 monitor.on('snapshot', snapshot => {
@@ -233,7 +272,8 @@ monitor.on('snapshot', snapshot => {
   monitor.setHistoryHomes(historyHomes);
   const tmux = linkAgentSessions(tmuxBase, snapshot.sessions);
   const processSnapshot = processMonitor.scan();
-  const sessions = applyRuntimePresence(snapshot.sessions, tmux, processSnapshot, Date.now(), currentBridges);
+  const observedSessions = applyRuntimePresence(snapshot.sessions, tmux, processSnapshot, Date.now(), currentBridges);
+  const sessions = observedSessions.map(session => enrichSession(session, observedSessions, Date.now()));
   const localKind = process.platform === 'win32' ? 'windows' : (process.platform === 'darwin' ? 'macos' : 'linux');
   const automations = scanCodexAutomationHomes({
     homes: [{ home: workerData.home, kind: localKind, distro: '', label: 'Local' }, ...historyHomes],
@@ -278,9 +318,10 @@ parentPort.on('message', message => {
   if (message.type === 'detail') {
     const runtime = lastPublishedSessions.find(item => item.id === message.sessionId) || null;
     const stored = (monitor.lastSnapshot.sessions || []).find(item => item.id === message.sessionId) || null;
-    const session = stored && runtime
+    const merged = stored && runtime
       ? { ...stored, status: runtime.status, statusDetail: runtime.statusDetail, statusObserved: runtime.statusObserved, runtimePresence: runtime.runtimePresence || [] }
       : (stored || runtime);
+    const session = enrichSession(merged, lastPublishedSessions, Date.now());
     parentPort.postMessage({ type: 'detail-result', requestId: message.requestId, session });
   }
   if (message.type === 'stop') {

@@ -29,6 +29,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     agentExecutionMode,
     executionModeBadge,
     graphDescendantCount,
+    sessionWorkspaceLabel,
   } = context;
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
   const statusLabel = (status) => ({
@@ -99,7 +100,9 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
         <span class="agent-node-gauge"><i style="width:${percent}%"></i></span>
       </button>
       <footer class="agent-node-footer">
-        <span>${cumulativeChildren ? t("graph.subagents_created", { count: cumulativeChildren }) : session.parentId ? t("graph.helper_ai") : t("graph.central_ai")}</span>
+        <span>${session.parentId
+          ? (cumulativeChildren ? t("graph.subagents_created", { count: cumulativeChildren }) : t("graph.helper_ai"))
+          : t("project.origin_named", { name: sessionWorkspaceLabel(session) })}</span>
         <button type="button" data-open-session="${esc(session.id)}">${esc(t("graph.view_conversation"))} <b>↗</b>
         </button>
         </footer>
@@ -110,7 +113,9 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     const provider = providerInfo(session.provider);
     const usage = session.usage || {};
     const directChildren = graphChildren(session, model).length;
-    const identity = session.parentId ? t("graph.helper_ai_named", { name: session.agentName || agentRoleLabel(session.agentRole) }) : session.workspace || t("graph.central_task");
+    const identity = session.parentId
+      ? t("graph.helper_ai_named", { name: session.agentName || agentRoleLabel(session.agentRole) })
+      : t("project.origin_named", { name: sessionWorkspaceLabel(session) });
     const delegation = session.delegation || {};
     const taskName = delegation.taskName || session.taskName || "";
     const assignedWork = delegation.assignmentObserved && delegation.assignment ? delegation.assignment : taskName || session.title;
@@ -190,11 +195,22 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     const expanded = state.graphExpandedProviders.has(providerId);
     const shown = expanded ? ordered : ordered.slice(0, 6);
     const hidden = Math.max(0, ordered.length - shown.length);
-    const agents = ordered.reduce((total, root) => total + 1 + graphDescendantCount(root, model), 0);
+    const helperIds = new Set();
+    const queue = ordered.flatMap((root) => root.childIds || []);
+    while (queue.length) {
+      const id = queue.shift();
+      if (!id || helperIds.has(id)) continue;
+      const helper = model.byId.get(id);
+      if (!helper) continue;
+      helperIds.add(id);
+      queue.push(...(helper.childIds || []));
+    }
+    const helpers = [...helperIds].map((id) => model.byId.get(id)).filter(Boolean);
+    const activeHelpers = helpers.filter(isLiveSession).length;
     return `<section class="agent-flow-lane" style="${providerStyle(providerId)}">
       <header class="agent-flow-lane-head">
         <span class="provider-mark">${esc(provider.mark)}</span>
-        <span><b>${esc(provider.label)}</b><small>${esc(t("graph.major_tasks_and_agents", { tasks: ordered.length, agents }))}</small></span>
+        <span><b>${esc(provider.label)}</b><small>${esc(t("graph.major_tasks_and_agents", { tasks: ordered.length, active: activeHelpers, records: helpers.length }))}</small></span>
         <em>${esc(t("graph.running_count", { count: ordered.filter(isLiveSession).length }))}</em>
       </header>
       <div class="agent-flow-list">${shown.map((root) => compactGraphNode(root, model)).join("")}</div>
@@ -273,21 +289,53 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
   }
 
   function runtimeSeparatedOverview(roots, model) {
+    const tmuxEntries = liveTmuxEntries(state.snapshot && state.snapshot.tmux);
+    const tmuxLinkedIds = new Set(tmuxEntries.map((entry) => String(entry.agent && entry.agent.linkedSessionId || "")).filter(Boolean));
+    const workflowUsesTmux = root => {
+      const queue = [...(root.childIds || [])];
+      const visited = new Set();
+      while (queue.length) {
+        const id = queue.shift();
+        if (!id || visited.has(id)) continue;
+        visited.add(id);
+        const child = model.byId.get(id);
+        if (!child) continue;
+        if (agentExecutionMode(child).kind === "tmux" || tmuxLinkedIds.has(child.id)) return true;
+        queue.push(...(child.childIds || []));
+      }
+      return false;
+    };
+    const tmuxRoots = roots.filter((root) => agentExecutionMode(root).kind === "tmux" || tmuxLinkedIds.has(root.id) || workflowUsesTmux(root));
+    const tmuxRootIds = new Set(tmuxRoots.map((root) => root.id));
+    const standardRoots = roots.filter((root) => !tmuxRootIds.has(root.id));
     const providerOrder = [...new Set([...visibleProviders().map((item) => item.id), ...roots.map((item) => item.provider).filter(isProviderVisible)])];
     const lanesFor = (items) =>
       providerOrder.map((providerId) => ({ providerId, roots: items.filter((root) => root.provider === providerId) })).filter((item) => item.roots.length);
-    const lanes = lanesFor(roots);
-    const sessionHtml = lanes.length
-      ? `<div class="agent-flow-overview">${lanes.map((item) => providerFlowLane(item.providerId, item.roots, model)).join("")}</div>`
-      : `<div class="runtime-segment-empty"><b>${esc(t("graph.no_active_sessions"))}</b><span>${esc(t("graph.active_sessions_appear_here"))}</span></div>`;
+    const standardLanes = lanesFor(standardRoots);
+    const tmuxLanes = lanesFor(tmuxRoots);
+    const standardHtml = standardLanes.length
+      ? `<div class="agent-flow-overview">${standardLanes.map((item) => providerFlowLane(item.providerId, item.roots, model)).join("")}</div>`
+      : `<div class="runtime-segment-empty"><b>${esc(t("graph.no_standard_ai"))}</b><span>${esc(t("graph.all_detected_in_tmux"))}</span></div>`;
+    const tmuxSection = tmuxLanes.length
+      ? `<section class="runtime-segment tmux-runtime" data-runtime-segment="tmux">
+        <header>
+          <span class="runtime-segment-icon">▦</span>
+          <span><small>${esc(t("graph.tmux_only"))}</small><b>${esc(t("graph.tmux_sessions"))}</b><em>${esc(t("graph.tmux_runtime_description"))}</em></span>
+          <strong>${esc(t("common.count", { count: tmuxRoots.length }))}</strong>
+          <button type="button" class="live-tmux-overview-open">${esc(t("graph.open_tmux_overview"))}</button>
+        </header>
+        <div class="agent-flow-overview">${tmuxLanes.map((item) => providerFlowLane(item.providerId, item.roots, model)).join("")}</div>
+      </section>`
+      : "";
     return `<div class="agent-runtime-split" data-runtime-split="true">
-      <section class="runtime-segment standard-runtime" data-runtime-segment="sessions">
+      ${tmuxSection}
+      <section class="runtime-segment standard-runtime" data-runtime-segment="standard">
         <header>
           <span class="runtime-segment-icon">›_</span>
-          <span><small>${esc(t("graph.session_overview"))}</small><b>${esc(t("graph.execution_sessions"))}</b><em>${esc(t("graph.execution_sessions_description"))}</em></span>
-          <strong>${esc(t("common.count", { count: roots.length }))}</strong>
+          <span><small>${esc(t("graph.without_tmux"))}</small><b>${esc(t("graph.standard_sessions"))}</b><em>${esc(t("graph.standard_runtime_description"))}</em></span>
+          <strong>${esc(t("common.count", { count: standardRoots.length }))}</strong>
         </header>
-        ${sessionHtml}
+        ${standardHtml}
       </section>
     </div>`;
   }
@@ -447,9 +495,88 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
       </section>`;
   }
 
+  function executionActivityLabel(activity) {
+    if (activity.kind === "background") return t("graph.background_task");
+    return activity.mode === "background" ? t("graph.shell_background") : t("graph.shell_foreground");
+  }
+
+  function executionActivityStatus(activity) {
+    return ({
+      running: t("graph.execution_running"),
+      completed: t("graph.execution_completed"),
+      failed: t("graph.execution_failed"),
+      cancelled: t("ui.stopped"),
+    })[activity.status] || activity.status;
+  }
+
+  function executionActivityCard(activity, ownerId = "") {
+    const label = executionActivityLabel(activity);
+    const command = readablePreview(activity.command || activity.label || label, 150);
+    const handle = activity.backgroundId
+      ? `${activity.backgroundIdType || t("graph.execution_handle")} · ${activity.backgroundId}`
+      : "";
+    const runtime = activity.runtime || activity.tool || t("graph.runtime_unknown");
+    return `<details class="execution-activity-card ${esc(activity.kind || "background")} ${esc(activity.mode || "foreground")} ${esc(activity.status || "completed")}"
+      data-disclosure-key="${esc(`graph:execution:${ownerId}:${activity.id}`)}"
+      data-execution-activity="${esc(activity.id)}"
+      data-execution-kind="${esc(activity.kind || "")}" data-execution-mode="${esc(activity.mode || "")}" data-execution-status="${esc(activity.status || "")}">
+      <summary>
+        <span class="execution-activity-icon" aria-hidden="true">${activity.kind === "shell" ? "›_" : "◌"}</span>
+        <span class="execution-activity-copy">
+          <span class="execution-activity-kicker"><b>${esc(label)}</b><small>${esc(runtime)}</small></span>
+          <strong title="${esc(command.full)}">${esc(activity.label || command.text)}</strong>
+          ${activity.command ? `<code title="${esc(activity.command)}">${esc(command.text)}</code>` : ""}
+          <span class="execution-activity-meta">
+            ${activity.cwd ? `<small title="${esc(activity.cwd)}">${esc(t("graph.execution_workdir"))} · ${esc(activity.cwd)}</small>` : ""}
+            ${handle ? `<small>${esc(handle)}</small>` : ""}
+          </span>
+        </span>
+        <span class="execution-activity-state"><span><i aria-hidden="true"></i><b>${esc(executionActivityStatus(activity))}</b></span><small>${esc(activity.statusDetail || timeAgo(activity.updatedAt || activity.startedAt))}</small><span class="execution-activity-disclosure"><b class="open-label">${esc(t("graph.execution_details"))}</b><b class="close-label">${esc(t("graph.execution_details_close"))}</b><i aria-hidden="true">⌄</i></span></span>
+      </summary>
+      <div class="execution-activity-detail">
+        <div class="execution-detail-command"><header><span>${esc(t("graph.execution_command"))}</span><button type="button" data-copy-text="${esc(activity.command || activity.label || command.full)}">${esc(t("graph.copy_command"))}</button></header><code>${esc(activity.command || activity.label || command.full)}</code></div>
+        <dl>
+          <div><dt>${esc(t("graph.execution_status_label"))}</dt><dd>${esc(executionActivityStatus(activity))}${activity.statusDetail ? ` · ${esc(activity.statusDetail)}` : ""}</dd></div>
+          <div><dt>${esc(t("graph.execution_runtime"))}</dt><dd>${esc(runtime)}</dd></div>
+          ${activity.cwd ? `<div><dt>${esc(t("graph.execution_workdir"))}</dt><dd title="${esc(activity.cwd)}">${esc(activity.cwd)}</dd></div>` : ""}
+          ${handle ? `<div><dt>${esc(t("graph.execution_handle"))}</dt><dd>${esc(handle)}</dd></div>` : ""}
+          ${activity.startedAt ? `<div><dt>${esc(t("graph.execution_started"))}</dt><dd title="${esc(activity.startedAt)}">${esc(timeAgo(activity.startedAt))}</dd></div>` : ""}
+          ${activity.updatedAt ? `<div><dt>${esc(t("graph.execution_updated"))}</dt><dd title="${esc(activity.updatedAt)}">${esc(timeAgo(activity.updatedAt))}</dd></div>` : ""}
+        </dl>
+        <div class="execution-detail-output"><header><span>${esc(t("graph.execution_output"))}</span>${activity.output ? `<button type="button" data-copy-text="${esc(activity.output)}">${esc(t("graph.copy_output"))}</button>` : ""}</header>${activity.output ? `<pre>${esc(activity.output)}</pre>` : `<p>${esc(t("graph.execution_output_unavailable"))}</p>`}</div>
+      </div>
+    </details>`;
+  }
+
+  function executionActivityPanel(session) {
+    const activities = [...(session.executions || [])].sort((a, b) => {
+      const activeA = a.status === "running" ? 1 : 0;
+      const activeB = b.status === "running" ? 1 : 0;
+      return activeB - activeA || Date.parse(b.updatedAt || b.startedAt || 0) - Date.parse(a.updatedAt || a.startedAt || 0);
+    });
+    if (!activities.length) return "";
+    const running = activities.filter((activity) => activity.status === "running");
+    const completed = activities.filter((activity) => activity.status !== "running");
+    const expanded = state.expandedExecutionSessions.has(session.id);
+    const shown = expanded ? activities : [...running, ...completed.slice(0, Math.max(0, 6 - running.length))];
+    return `<section class="execution-activity-panel" data-execution-activities="${activities.length}" data-running-executions="${running.length}">
+      <header>
+        <span><b>${esc(t("graph.execution_activity"))}</b><small>${esc(t("graph.execution_activity_description"))}</small></span>
+        <em>${esc(t("graph.execution_activity_summary", { running: running.length, total: activities.length }))}</em>
+      </header>
+      <div class="execution-activity-list">${shown.map(activity => executionActivityCard(activity, session.id)).join("")}</div>
+      ${shown.length < activities.length
+        ? `<button type="button" class="execution-activity-retained" data-execution-history-toggle="${esc(session.id)}" aria-expanded="false">${esc(t("graph.execution_show_older", { count: activities.length - shown.length }))}</button>`
+        : expanded && activities.length > 6
+          ? `<button type="button" class="execution-activity-retained" data-execution-history-toggle="${esc(session.id)}" aria-expanded="true">${esc(t("graph.execution_collapse_older"))}</button>`
+          : ""}
+    </section>`;
+  }
+
   function focusedGraph(focus, model, motionKind = "refresh") {
     const parent = focus.parentId ? model.byId.get(focus.parentId) : null;
     const children = graphChildren(focus, model);
+    const executionCount = (focus.executions || []).length;
     const { ongoing, completed } = splitSubagents(children);
     const completedExpanded = state.expandedCompletedSubagents.has(focus.id);
     const shownChildren = completedExpanded ? [...ongoing, ...completed] : ongoing;
@@ -469,7 +596,9 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
       ? ongoing.map((child) => workflowCompactNode(child, model, "downstream", agentRoleLabel(child.agentRole))).join("")
       : children.length
         ? `<div class="agent-workflow-empty current-clear"><b>${esc(t("graph.no_active_subagents"))}</b><span>${esc(t("graph.completed_available_below"))}</span></div>`
-        : `<div class="agent-workflow-empty">${esc(t("graph.no_delegated_tasks"))}</div>`;
+        : executionCount
+          ? ""
+          : `<div class="agent-workflow-empty">${esc(t("graph.no_delegated_tasks"))}</div>`;
     const completedRows = completedExpanded
       ? `<div class="completed-subagent-list" data-completed-subagent-list>
           ${completed.map((child) => workflowCompactNode(child, model, "downstream", agentRoleLabel(child.agentRole))).join("")}
@@ -477,7 +606,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
       : "";
     const downstream = `${ongoingRows}${completedSubagentDisclosure(focus.id, completed, completedExpanded)}${completedRows}`;
     const connectMotion = ["focus", "focus-back", "view"].includes(motionKind) ? "motion-connect" : "";
-    const childGroupPort = shownChildren.length
+    const childGroupPort = shownChildren.length || executionCount
       ? '<span class="agent-workflow-port input group-input" data-workflow-port="children-group-input" aria-hidden="true"></span>'
       : "";
     return `<div class="agent-workflow-canvas ${connectMotion}" data-workflow-focus="${esc(focus.id)}">
@@ -504,15 +633,17 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
               ${graphNode(focus, { focus: true })}
             </div>
             ${context.agentCommandComposer(focus)}
-            ${shownChildren.length ? '<span class="agent-workflow-port output" data-workflow-port="focus-output" aria-hidden="true"></span>' : ""}
+            ${shownChildren.length || executionCount ? '<span class="agent-workflow-port output" data-workflow-port="focus-output" aria-hidden="true"></span>' : ""}
           </div>
         </section>
         <section class="agent-workflow-column downstream-column"
           data-workflow-child-count="${children.length}" data-workflow-visible-child-count="${shownChildren.length}">
           ${childGroupPort}
-          <header><b>${esc(t("graph.subagent_sessions"))}</b>
-            <span>${esc(t("graph.subagent_visibility_summary", { ongoing: ongoing.length, completed: completed.length }))}</span>
+          <header><b>${esc(t("graph.observed_execution_units"))}</b>
+            <span>${esc(t("graph.execution_unit_summary", { subagents: children.length, executions: executionCount }))}</span>
           </header>
+          ${executionActivityPanel(focus)}
+          ${children.length ? `<div class="subagent-execution-heading"><b>${esc(t("graph.subagent_sessions"))}</b><span>${esc(t("graph.subagent_visibility_summary", { ongoing: ongoing.length, completed: completed.length }))}</span></div>` : ""}
           ${workflowChildrenSummary(focus, children)}
           <div class="agent-workflow-stack downstream-stack ${shownChildren.length > 3 ? "density-many" : ""}">${downstream}</div>
         </section>
@@ -524,6 +655,6 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
   return {
     graphNode, compactGraphNode, providerFlowLane, workflowCompactNode, liveTmuxEntries, liveTmuxPaneCard, runtimeSeparatedOverview,
     workflowMetrics, workflowChildrenSummary, splitSubagents, completedSubagentDisclosure, agentPathTaskName, communicationEndpoint,
-    workflowCommunicationPanel, focusedGraph,
+    workflowCommunicationPanel, executionActivityLabel, executionActivityStatus, executionActivityCard, executionActivityPanel, focusedGraph,
   };
 };

@@ -8,6 +8,9 @@ function registerAgentIpc({ handleTrusted, snapshot, requestDetail, runner, isPr
     return runner().start(options);
   });
   handleTrusted('agents:stop', runId => runner().stop(runId));
+  handleTrusted('agents:pause', runId => runner().pause(runId));
+  handleTrusted('agents:resume-run', runId => runner().resume(runId));
+  handleTrusted('agents:retry', runId => runner().retry(runId));
   handleTrusted('agents:active-runs', () => runner().listActive().filter(run => isProviderVisible(run.provider)));
   handleTrusted('providers:probe', probeProviders);
 }

@@ -11,6 +11,9 @@ const { runBestEffort } = require('./diagnostics');
 const MAX_SESSIONS = 24;
 const MAX_INPUT_CHARS = 128 * 1024;
 const MAX_REPLAY_CHARS = 2 * 1024 * 1024;
+const MAX_STORE_BYTES = 64 * 1024 * 1024;
+const STORE_VERSION = 1;
+const PERSIST_DELAY_MS = 150;
 const TERMINAL_TYPES = new Set(['powershell', 'cmd', 'shell', 'wsl', 'tmux', 'agent']);
 const AGENT_PROVIDERS = Object.freeze({
   claude: { command: 'claude', label: 'Claude' },
@@ -218,6 +221,46 @@ function publicSession(session, includeReplay = false) {
   return value;
 }
 
+function validTimestamp(value, fallback) {
+  const text = cleanText(value, 50);
+  return text && Number.isFinite(Date.parse(text)) ? new Date(text).toISOString() : fallback;
+}
+
+function restoredOptions(value = {}, platform = process.platform) {
+  const fallbackType = platform === 'win32' ? 'powershell' : 'shell';
+  const type = TERMINAL_TYPES.has(value.type) ? value.type : fallbackType;
+  const provider = cleanText(value.provider, 30).toLowerCase();
+  if (type === 'agent' && !AGENT_PROVIDERS[provider]) return null;
+  return {
+    type,
+    cwd: cleanText(value.cwd, 2_000) || os.homedir(),
+    distro: cleanText(value.distro, 100),
+    tmuxSession: cleanText(value.tmuxSession, 100),
+    tmuxPane: cleanText(value.tmuxPane, 100),
+    provider,
+    args: Array.isArray(value.args) ? value.args.slice(0, 80).map(item => cleanText(item, 2_000)) : [],
+    bridgeId: cleanText(value.bridgeId, 100),
+    title: cleanText(value.title, 100),
+    cols: numericDimension(value.cols, 120, 20, 500),
+    rows: numericDimension(value.rows, 32, 5, 200),
+  };
+}
+
+function persistedSession(session) {
+  return {
+    id: session.id,
+    options: { ...session.options, cols: session.cols, rows: session.rows },
+    title: session.title,
+    shell: session.shell,
+    status: session.status,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    exitCode: session.exitCode,
+    signal: session.signal,
+    replay: session.replay,
+  };
+}
+
 class TerminalManager extends EventEmitter {
   constructor(options = {}) {
     super();
@@ -225,7 +268,89 @@ class TerminalManager extends EventEmitter {
     this.killTree = options.killTree || killPtyTree;
     this.platform = options.platform || process.platform;
     this.agentProviders = options.agentProviders || AGENT_PROVIDERS;
+    this.fileSystem = options.fileSystem || fs;
+    this.storeFile = typeof options.storeFile === 'string' && options.storeFile.trim()
+      ? path.resolve(options.storeFile)
+      : '';
+    this.onPersistenceError = typeof options.onPersistenceError === 'function'
+      ? options.onPersistenceError
+      : () => {};
+    this.persistTimer = null;
     this.sessions = new Map();
+    this.loadPersistedSessions();
+  }
+
+  persistenceError(operation, error) {
+    runBestEffort(`terminal-persistence:${operation}`, () => this.onPersistenceError(operation, error));
+  }
+
+  loadPersistedSessions() {
+    if (!this.storeFile) return;
+    try {
+      const stat = this.fileSystem.statSync(this.storeFile);
+      if (!stat.isFile() || stat.size > MAX_STORE_BYTES) throw new Error('터미널 기록 파일의 크기가 허용 범위를 초과했습니다.');
+      const parsed = JSON.parse(this.fileSystem.readFileSync(this.storeFile, 'utf8'));
+      if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.sessions)) throw new Error('지원하지 않는 터미널 기록 형식입니다.');
+      for (const value of parsed.sessions.slice(0, MAX_SESSIONS)) {
+        const id = cleanText(value?.id, 200);
+        const options = restoredOptions(value?.options, this.platform);
+        if (!id || !options || this.sessions.has(id)) continue;
+        const now = new Date().toISOString();
+        const createdAt = validTimestamp(value.createdAt, now);
+        const updatedAt = validTimestamp(value.updatedAt, createdAt);
+        const status = value.status === 'failed' ? 'failed' : 'exited';
+        this.sessions.set(id, {
+          id,
+          options,
+          spec: null,
+          title: cleanText(value.title, 100) || options.title || options.tmuxSession || options.provider || options.type,
+          shell: cleanText(value.shell, 2_000),
+          pid: null,
+          status,
+          createdAt,
+          updatedAt,
+          exitCode: Number.isFinite(value.exitCode) ? value.exitCode : null,
+          signal: Number.isFinite(value.signal) ? value.signal : null,
+          cols: options.cols,
+          rows: options.rows,
+          replay: String(value.replay || '').slice(-MAX_REPLAY_CHARS),
+          process: null,
+          generation: 0,
+        });
+      }
+    } catch (error) {
+      if (error?.code !== 'ENOENT') this.persistenceError('load', error);
+    }
+  }
+
+  schedulePersist() {
+    if (!this.storeFile || this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      this.persistNow();
+    }, PERSIST_DELAY_MS);
+    if (typeof this.persistTimer.unref === 'function') this.persistTimer.unref();
+  }
+
+  persistNow() {
+    if (!this.storeFile) return;
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    const temporary = `${this.storeFile}.${process.pid}.tmp`;
+    try {
+      this.fileSystem.mkdirSync(path.dirname(this.storeFile), { recursive: true });
+      const payload = {
+        version: STORE_VERSION,
+        sessions: [...this.sessions.values()].map(persistedSession),
+      };
+      this.fileSystem.writeFileSync(temporary, JSON.stringify(payload), 'utf8');
+      this.fileSystem.renameSync(temporary, this.storeFile);
+    } catch (error) {
+      runBestEffort('terminal-persistence-temp-cleanup', () => this.fileSystem.unlinkSync(temporary));
+      this.persistenceError('save', error);
+    }
   }
 
   pty() {
@@ -261,14 +386,22 @@ class TerminalManager extends EventEmitter {
     try {
       this.spawn(session);
     } catch (error) {
-      this.sessions.delete(id);
-      this.emit('state', { change: 'removed', session: publicSession(session, false), sessions: this.list() });
+      // Keep failed launches visible until the user explicitly closes them.
+      // The failed session contains the startup error in replay and can be
+      // inspected, restarted, or removed from the session terminal.
+      this.persistNow();
       throw error;
     }
+    this.persistNow();
     return publicSession(session, true);
   }
 
   spawn(session) {
+    if (!session.spec) {
+      session.options = normalizeLaunchOptions(session.options, this.platform);
+      session.spec = launchSpec(session.options, this.platform, this.agentProviders);
+      session.shell = session.spec.file;
+    }
     const generation = ++session.generation;
     session.status = 'starting';
     session.exitCode = null;
@@ -296,6 +429,7 @@ class TerminalManager extends EventEmitter {
         session.replay = `${session.replay}${text}`.slice(-MAX_REPLAY_CHARS);
         session.updatedAt = new Date().toISOString();
         this.emit('data', { id: session.id, data: text });
+        this.schedulePersist();
       });
       processHandle.onExit(event => {
         processHandle.__loadtoagentExited = true;
@@ -322,6 +456,7 @@ class TerminalManager extends EventEmitter {
 
   emitState(change, session) {
     this.emit('state', { change, session: session ? publicSession(session, false) : null, sessions: this.list() });
+    this.schedulePersist();
   }
 
   list() {
@@ -360,6 +495,7 @@ class TerminalManager extends EventEmitter {
     session.cols = numericDimension(cols, session.cols, 20, 500);
     session.rows = numericDimension(rows, session.rows, 5, 200);
     if (session.process && session.status === 'running') session.process.resize(session.cols, session.rows);
+    this.schedulePersist();
     return { ok: true, cols: session.cols, rows: session.rows };
   }
 
@@ -387,6 +523,7 @@ class TerminalManager extends EventEmitter {
     session.status = 'exited';
     session.updatedAt = new Date().toISOString();
     this.emitState('updated', session);
+    this.persistNow();
     return { ok: true };
   }
 
@@ -415,13 +552,31 @@ class TerminalManager extends EventEmitter {
     session.updatedAt = new Date().toISOString();
     this.sessions.delete(session.id);
     this.emit('state', { change: 'removed', session: publicSession(session, false), sessions: this.list() });
+    this.persistNow();
     return { ok: true };
   }
 
-  dispose() {
+  dispose({ preserveSessions = false } = {}) {
+    if (preserveSessions) {
+      const now = new Date().toISOString();
+      for (const session of this.sessions.values()) {
+        if (session.process) {
+          const handle = session.process;
+          session.process = null;
+          session.generation += 1;
+          this.killTree(handle, session.pid);
+        }
+        if (session.status === 'running' || session.status === 'starting') session.status = 'exited';
+        session.pid = null;
+        session.updatedAt = now;
+      }
+      this.persistNow();
+      return;
+    }
     for (const id of [...this.sessions.keys()]) {
       runBestEffort(`terminal-dispose:${id}`, () => this.close(id));
     }
+    this.persistNow();
   }
 }
 

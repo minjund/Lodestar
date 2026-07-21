@@ -6,7 +6,68 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
   const {
     $, state, selectView, renderProviderOverview, renderProviderFilter, toggleProviderFilter, announceProviderFilter, renderSessions, renderTmuxMap, openDrawer, openSubagentConversation,
     dispatchAgentCommand, openAgentTerminal, copyBridgeCommand, openSessionOrigin, saveDashboardPreferences = () => {},
+    controlManagedRun, quickRespond, prepareReassignment,
+    copyText = async () => false,
+    announce = () => {},
   } = context;
+
+  const managementFilterLabel = value => value === "all" ? window.LoadToAgentI18n.t("management.filter_all") : window.LoadToAgentI18n.t(`management.health.${value}`);
+  const announceManagementFilter = value => announce(window.LoadToAgentI18n.t("management.filter_results", {
+    filter: managementFilterLabel(value),
+    count: $("#attentionInbox")?.querySelectorAll("[data-management-session]").length || 0,
+  }));
+
+  function bindManagementEvents() {
+    $("#operationsOverview").addEventListener("click", (event) => {
+      const open = event.target.closest("[data-open-session]");
+      if (open) return openDrawer(open.dataset.openSession);
+      const filter = event.target.closest("[data-management-filter]");
+      if (!filter) return;
+      selectView("waiting", { focusMain: true, managementFilter: filter.dataset.managementFilter });
+      announceManagementFilter(filter.dataset.managementFilter);
+    });
+    $("#attentionInbox").addEventListener("click", async (event) => {
+      const filter = event.target.closest("[data-management-inbox-filter]");
+      if (filter) {
+        state.managementFilter = filter.dataset.managementInboxFilter;
+        renderSessions("filter");
+        announceManagementFilter(state.managementFilter);
+        requestAnimationFrame(() => $("#attentionInbox")?.querySelector(`[data-management-inbox-filter="${CSS.escape(state.managementFilter)}"]`)?.focus({ preventScroll: true }));
+        return;
+      }
+      const open = event.target.closest("[data-open-session]");
+      if (open) return openDrawer(open.dataset.openSession);
+      const quick = event.target.closest("[data-attention-quick]");
+      if (quick) return quickRespond(quick.dataset.attentionSessionId, quick.dataset.attentionQuick, $("#attentionInbox"));
+      const managed = event.target.closest("[data-managed-run-action]");
+      if (managed) return controlManagedRun(managed.dataset.managementSessionId, managed.dataset.managedRunAction);
+      const reassign = event.target.closest("[data-reassign-session]");
+      if (reassign) prepareReassignment(reassign.dataset.reassignSession);
+    });
+    $("#attentionInbox").addEventListener("input", (event) => {
+      const input = event.target.closest("[data-agent-command-draft]");
+      if (input) state.agentCommandDrafts.set(input.dataset.agentCommandDraft, input.value);
+    });
+    $("#attentionInbox").addEventListener("change", (event) => {
+      const picker = event.target.closest("[data-agent-command-target]");
+      if (!picker) return;
+      if (picker.value) state.agentCommandTargets.set(picker.dataset.agentCommandTarget, picker.value);
+      else state.agentCommandTargets.delete(picker.dataset.agentCommandTarget);
+      picker.closest("form")?.querySelectorAll("button").forEach(button => { button.disabled = !picker.value; });
+    });
+    $("#attentionInbox").addEventListener("keydown", (event) => {
+      const input = event.target.closest("[data-agent-command-draft]");
+      if (!input || event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+      event.preventDefault();
+      input.closest("form")?.requestSubmit();
+    });
+    $("#attentionInbox").addEventListener("submit", (event) => {
+      const form = event.target.closest("[data-agent-command-form]");
+      if (!form) return;
+      event.preventDefault();
+      dispatchAgentCommand(form.dataset.agentCommandForm, form);
+    });
+  }
 
   function bindSessionListEvents() {
     $("#automationOverview").addEventListener("click", (event) => {
@@ -14,7 +75,7 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
       if (loopSelect) {
         state.selectedRuntimeLoopId = loopSelect.dataset.loopSelect;
         renderSessions("focus");
-        requestAnimationFrame(() => $("#automationOverview").querySelector(`[data-loop-select="${CSS.escape(state.selectedRuntimeLoopId)}"]`)?.focus());
+        requestAnimationFrame(() => $("#automationOverview").querySelector(`[data-loop-select="${CSS.escape(state.selectedRuntimeLoopId)}"]`)?.focus({ preventScroll: true }));
         return;
       }
       const sessionTarget = event.target.closest("[data-loop-open], [data-automation-session]");
@@ -33,7 +94,7 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
         event.preventDefault();
         state.selectedRuntimeLoopId = tabs[next].dataset.loopSelect;
         renderSessions("focus");
-        requestAnimationFrame(() => $("#automationOverview")?.querySelector(`[data-loop-select="${CSS.escape(state.selectedRuntimeLoopId)}"]`)?.focus());
+        requestAnimationFrame(() => $("#automationOverview")?.querySelector(`[data-loop-select="${CSS.escape(state.selectedRuntimeLoopId)}"]`)?.focus({ preventScroll: true }));
         return;
       }
       const schedule = event.target.closest("[data-automation-id]");
@@ -90,7 +151,23 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
   }
 
   function bindLiveAgentEvents() {
-    $("#liveSessionGrid").addEventListener("click", (event) => {
+    $("#liveSessionGrid").addEventListener("click", async (event) => {
+      const copy = event.target.closest("[data-copy-text]");
+      if (copy) {
+        event.stopPropagation();
+        await copyText(copy.dataset.copyText);
+        return;
+      }
+      const executionHistory = event.target.closest("[data-execution-history-toggle]");
+      if (executionHistory) {
+        event.stopPropagation();
+        const ownerId = executionHistory.dataset.executionHistoryToggle;
+        if (state.expandedExecutionSessions.has(ownerId)) state.expandedExecutionSessions.delete(ownerId);
+        else state.expandedExecutionSessions.add(ownerId);
+        renderSessions("expand");
+        requestAnimationFrame(() => $("#liveSessionGrid")?.querySelector(`[data-execution-history-toggle="${CSS.escape(ownerId)}"]`)?.focus({ preventScroll: true }));
+        return;
+      }
       const tmuxPane = event.target.closest('.live-tmux-pane[data-tmux-type="pane"][data-tmux-id]');
       const tmuxOverview = event.target.closest(".live-tmux-overview-open");
       if (tmuxPane || tmuxOverview) {
@@ -214,7 +291,7 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
         if (state.expandedTmuxSubagents.has(paneId)) state.expandedTmuxSubagents.delete(paneId);
         else state.expandedTmuxSubagents.add(paneId);
         renderTmuxMap();
-        requestAnimationFrame(() => $("#tmuxMap").querySelector(`[data-tmux-subagents-toggle="${CSS.escape(paneId)}"]`)?.focus());
+        requestAnimationFrame(() => $("#tmuxMap").querySelector(`[data-tmux-subagents-toggle="${CSS.escape(paneId)}"]`)?.focus({ preventScroll: true }));
         return;
       }
       const subagentChat = event.target.closest("[data-open-subagent-chat]");
@@ -241,7 +318,7 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
       const nextFocus = { type: node.dataset.tmuxType, id: node.dataset.tmuxId };
       state.tmuxFocus = nextFocus;
       renderTmuxMap();
-      requestAnimationFrame(() => $("#tmuxMap")?.querySelector(`[data-tmux-type="${CSS.escape(nextFocus.type)}"][data-tmux-id="${CSS.escape(nextFocus.id)}"]`)?.focus());
+      requestAnimationFrame(() => $("#tmuxMap")?.querySelector(`[data-tmux-type="${CSS.escape(nextFocus.type)}"][data-tmux-id="${CSS.escape(nextFocus.id)}"]`)?.focus({ preventScroll: true }));
       if (node.dataset.tmuxType === "pane") window.LoadToAgentTerminal?.selectTmuxById(node.dataset.tmuxId);
     });
     $("#tmuxMap").addEventListener("keydown", (event) => {
@@ -286,6 +363,7 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
   }
 
   function bindSessionAndAgentEvents() {
+    bindManagementEvents();
     bindSessionListEvents();
     bindLiveAgentEvents();
     bindGraphNavigationEvents();

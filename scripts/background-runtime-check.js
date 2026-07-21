@@ -63,17 +63,17 @@ async function waitFor(send, expression, message) {
   let terminalId = '';
   try {
     await send('Runtime.enable');
-    terminalId = await evaluate(send, `(async () => { const created = await window.loadtoagent.terminalCreate({ type: 'agent', provider: 'codex', args: ['--no-alt-screen'], cwd: ${JSON.stringify(cwd)}, title: '백그라운드 유지 검증' }); return created.id; })()`);
-    await waitFor(send, `(async () => (await window.loadtoagent.terminalList()).some(item => item.id === ${JSON.stringify(terminalId)} && item.status === 'running' && item.background))()`, '관리 AI 터미널이 실행되지 않았습니다.');
+    terminalId = await evaluate(send, `(async () => { const bootstrap = await window.loadtoagent.bootstrap(); const created = await window.loadtoagent.terminalCreate({ type: bootstrap.platform.localShell, cwd: ${JSON.stringify(cwd)}, title: '일반 터미널 백그라운드 유지 검증' }); return created.id; })()`);
+    await waitFor(send, `(async () => (await window.loadtoagent.terminalList()).some(item => item.id === ${JSON.stringify(terminalId)} && item.status === 'running' && item.type !== 'agent'))()`, '일반 세션 터미널이 실행되지 않았습니다.');
     await evaluate(send, 'window.close(); true');
-    const hidden = await waitFor(send, `(async () => { const state = await window.loadtoagent.backgroundState(); return !state.visible && state.backgroundSessions >= 1 && state.trayReady ? state : null; })()`, '창을 닫은 뒤 AI 터미널이 백그라운드로 유지되지 않았습니다.');
+    const hidden = await waitFor(send, `(async () => { const state = await window.loadtoagent.backgroundState(); return !state.visible && state.backgroundSessions >= 1 && state.trayReady ? state : null; })()`, '창을 닫은 뒤 일반 터미널이 백그라운드로 유지되지 않았습니다.');
     const retained = await evaluate(send, `(async () => { await new Promise(resolve => setTimeout(resolve, 800)); return (await window.loadtoagent.terminalList()).find(item => item.id === ${JSON.stringify(terminalId)}) || null; })()`);
-    if (!retained || retained.status !== 'running') throw new Error('숨김 상태에서 관리 AI 터미널이 종료되었습니다.');
+    if (!retained || retained.status !== 'running') throw new Error('숨김 상태에서 일반 세션 터미널이 종료되었습니다.');
     await evaluate(send, 'window.loadtoagent.showApp()');
     const reopened = await waitFor(send, `(async () => (await window.loadtoagent.backgroundState()).visible)()`, '백그라운드 앱을 다시 열지 못했습니다.');
     await evaluate(send, `window.loadtoagent.terminalClose(${JSON.stringify(terminalId)})`);
     terminalId = '';
-    process.stdout.write(`${JSON.stringify({ ok: true, hidden, retained: { background: retained.background, status: retained.status }, reopened })}\n`);
+    process.stdout.write(`${JSON.stringify({ ok: true, hidden, retained: { type: retained.type, status: retained.status }, reopened })}\n`);
   } finally {
     if (terminalId) {
       try { await evaluate(send, `window.loadtoagent.terminalClose(${JSON.stringify(terminalId)})`); } catch {}

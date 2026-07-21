@@ -269,6 +269,73 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
     }
   }
 
+  async function controlManagedRun(sessionId, action) {
+    const session = snapshotSession(sessionId) || state.details.get(sessionId);
+    const runId = session && session.runId;
+    const key = `${runId || sessionId}:${action}`;
+    if (!session || !runId || state.runControlRequests.has(key)) return;
+    const methods = {
+      stop: "stopAgent",
+      pause: "pauseAgent",
+      resume: "resumeAgentRun",
+      retry: "retryAgent",
+    };
+    const method = methods[action];
+    if (!method || typeof window.loadtoagent?.[method] !== "function") return context.toast(t("management.control_unavailable"));
+    state.runControlRequests.add(key);
+    if (action === "stop") state.stopRequests.add(runId);
+    context.renderDrawer?.();
+    try {
+      const result = await window.loadtoagent[method](runId);
+      if (!result || result.ok === false) throw new Error(result && result.error || t("management.control_failed"));
+      context.toast(t(`management.control_${action}_sent`));
+    } catch (error) {
+      context.toast(errorText(error, "management.control_failed"));
+    } finally {
+      state.runControlRequests.delete(key);
+      state.stopRequests.delete(runId);
+      if (state.selectedId) context.renderDrawer?.();
+    }
+  }
+
+  function quickRespond(sessionId, value, root = document) {
+    const command = String(value || "").trim();
+    if (!command) return;
+    state.agentCommandDrafts.set(sessionId, command);
+    const form = root.querySelector?.(`[data-agent-command-form="${CSS.escape(sessionId)}"]`);
+    const input = form?.querySelector("[data-agent-command-draft]");
+    if (input) input.value = command;
+    if (form) form.requestSubmit();
+    else {
+      state.drawerTab = "summary";
+      context.openDrawer?.(sessionId);
+    }
+  }
+
+  function prepareReassignment(sessionId) {
+    const session = snapshotSession(sessionId) || state.details.get(sessionId);
+    if (!session) return context.toast(t("agent.session_not_found"));
+    const provider = (context.visibleProviders?.() || state.providers)
+      .find(item => item.id !== session.provider && state.availability[item.id]);
+    if (!provider) return context.toast(t("management.reassign_unavailable"));
+    state.runProvider = provider.id;
+    context.closeDrawer?.(false);
+    context.openRunModal?.();
+    const request = session.sharedGoal
+      || session.delegation?.assignment
+      || [...(session.messages || [])].find(message => message.role === "user" && message.text)?.text
+      || session.title;
+    const task = request && request !== session.title ? `${session.title}\n\n${request}` : (request || session.title);
+    const prompt = t("management.reassign_prompt", { task, provider: providerInfo(session.provider).label });
+    const promptInput = $("#runPrompt");
+    const cwdInput = $("#runCwd");
+    if (promptInput) promptInput.value = prompt;
+    if (cwdInput && session.cwd) cwdInput.value = session.cwd;
+    $("#runProviderPicker") && ($("#runProviderPicker").innerHTML = context.providerPickerHtml?.() || "");
+    context.syncRunComposer?.();
+    promptInput?.focus({ preventScroll: true });
+  }
+
   return {
     agentCommandTargets,
     agentResumeSupport,
@@ -283,5 +350,8 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
     openAgentTerminal,
     copyBridgeCommand,
     openSessionOrigin,
+    controlManagedRun,
+    quickRespond,
+    prepareReassignment,
   };
 };

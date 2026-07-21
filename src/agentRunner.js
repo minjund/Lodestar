@@ -385,7 +385,7 @@ class AgentRunner extends EventEmitter {
       if (run.stopping) {
         state.status = 'cancelled';
         state.statusDetail = '사용자가 중지함';
-      } else if (state.status === 'running' || state.status === 'starting') {
+      } else if (state.status === 'running' || state.status === 'starting' || state.status === 'paused') {
         state.status = code === 0 ? 'completed' : 'failed';
         state.statusDetail = code === 0 ? '작업 완료' : `CLI 종료 코드 ${code}${signal ? ` · ${signal}` : ''}`;
       }
@@ -450,9 +450,74 @@ class AgentRunner extends EventEmitter {
     if (process.platform === 'win32') {
       execFile('taskkill', ['/PID', String(run.child.pid), '/T', '/F'], { windowsHide: true }, () => {});
     } else {
+      if (run.state.status === 'paused') runBestEffort('runner-stop-resume', () => process.kill(run.child.pid, 'SIGCONT'));
       runBestEffort('runner-stop', () => run.child.kill('SIGTERM'));
     }
     return { ok: true };
+  }
+
+  retry(id) {
+    const runIdValue = String(id || '');
+    if (!/^[a-z0-9-]{4,120}$/i.test(runIdValue)) return { ok: false, error: '다시 실행할 작업 ID가 올바르지 않습니다.' };
+    if (this.active.has(runIdValue)) return { ok: false, error: '아직 실행 중인 작업은 다시 실행할 수 없습니다.' };
+    const file = path.join(this.runsDir, runIdValue, 'meta.json');
+    let meta;
+    try {
+      meta = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (_unavailableRunMetadata) {
+      return { ok: false, error: '이전 실행 설정을 찾을 수 없습니다.' };
+    }
+    const result = this.start({
+      provider: meta.provider,
+      prompt: meta.prompt,
+      cwd: meta.cwd,
+      model: meta.model,
+      allowWrites: Boolean(meta.allowWrites),
+    });
+    return result && result.ok ? { ...result, retriedFrom: runIdValue } : result;
+  }
+
+  setPaused(id, paused) {
+    const run = this.active.get(String(id || ''));
+    if (!run) return Promise.resolve({ ok: false, error: '실행 중인 작업을 찾을 수 없습니다.' });
+    if (paused && run.state.status === 'paused') return Promise.resolve({ ok: true, status: 'paused' });
+    if (!paused && run.state.status !== 'paused') return Promise.resolve({ ok: true, status: run.state.status });
+    const applyState = () => {
+      run.state.status = paused ? 'paused' : 'running';
+      run.state.statusDetail = paused ? '사용자가 실행을 일시정지함' : '사용자가 실행을 다시 시작함';
+      addLifecycle(run.state, paused ? 'process-pause' : 'process-resume', paused ? '실행 일시정지' : '실행 다시 시작', {
+        id: `${paused ? 'pause' : 'resume'}:${Date.now()}`,
+        status: paused ? 'done' : 'running',
+      });
+      run.state.updatedAt = new Date().toISOString();
+      this.persist(run);
+      this.emit('changed', { runId: run.id, state: run.state });
+      return { ok: true, status: run.state.status };
+    };
+    if (process.platform !== 'win32') {
+      try {
+        process.kill(run.child.pid, paused ? 'SIGSTOP' : 'SIGCONT');
+        return Promise.resolve(applyState());
+      } catch (error) {
+        return Promise.resolve({ ok: false, error: error.message });
+      }
+    }
+    const systemRoot = process.env.SystemRoot || 'C:\\Windows';
+    const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    const command = `${paused ? 'Suspend' : 'Resume'}-Process -Id ${Number(run.child.pid)} -ErrorAction Stop`;
+    return new Promise(resolve => {
+      execFile(powershell, ['-NoProfile', '-NonInteractive', '-Command', command], { windowsHide: true }, error => {
+        resolve(error ? { ok: false, error: error.message } : applyState());
+      });
+    });
+  }
+
+  pause(id) {
+    return this.setPaused(id, true);
+  }
+
+  resume(id) {
+    return this.setPaused(id, false);
   }
 }
 

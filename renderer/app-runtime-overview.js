@@ -118,6 +118,10 @@ window.LoadToAgentAppFactories.createRuntimeOverview = function createRuntimeOve
     }));
   }
 
+  function phaseStatusLabel(stateValue) {
+    return t({ done: "runtime.phase_done", active: "runtime.phase_active", queued: "runtime.phase_queued" }[stateValue] || "runtime.phase_queued");
+  }
+
   function elapsedSince(value) {
     if (!value) return t("runtime.just_started");
     const elapsed = Date.now() - Date.parse(value || 0);
@@ -146,11 +150,12 @@ window.LoadToAgentAppFactories.createRuntimeOverview = function createRuntimeOve
 
   function loopSelector(loop, selected) {
     const provider = providerInfo(loop.provider);
+    const activePhase = loopPhases(loop).find((phase) => phase.state === "active") || loopPhases(loop)[0];
     return `<button type="button" class="runtime-loop-tab ${selected ? "selected" : ""}" data-loop-select="${esc(loop.id)}"
       id="runtime-loop-tab-${esc(loop.id)}" role="tab" aria-controls="runtime-loop-panel-${esc(loop.id)}"
       style="${providerStyle(loop.provider)}" aria-selected="${selected ? "true" : "false"}" aria-pressed="${selected ? "true" : "false"}" tabindex="${selected ? "0" : "-1"}">
       <span class="runtime-loop-tab-mark">${esc(provider.mark)}</span>
-      <span><b>${esc(loop.title)}</b><small>${esc(provider.label)} · <span data-runtime-started-at="${esc(loop.startedAt || "")}">${esc(elapsedSince(loop.startedAt))}</span></small></span>
+      <span><b>${esc(loop.title)}</b><small>${esc(provider.label)} · ${esc(activePhase.label)} · <span data-runtime-started-at="${esc(loop.startedAt || "")}">${esc(elapsedSince(loop.startedAt))}</span></small></span>
       <i aria-hidden="true"></i>
     </button>`;
   }
@@ -162,7 +167,7 @@ window.LoadToAgentAppFactories.createRuntimeOverview = function createRuntimeOve
     return `<div class="runtime-loop-cycle" role="img" aria-label="${esc(t("runtime.loop_flow_state", { phase: activePhase.label }))}" style="--loop-progress:${activeIndex / Math.max(1, phases.length - 1) * 100}%">
       <div class="runtime-loop-spine" aria-hidden="true"><span></span></div>
       ${phases.map((phase, index) => `<div class="runtime-loop-phase ${phase.state}" data-loop-phase="${phase.key}">
-        <span class="runtime-loop-phase-index">0${index + 1}</span>
+        <span class="runtime-loop-phase-index">0${index + 1}<em>${esc(phaseStatusLabel(phase.state))}</em></span>
         <i aria-hidden="true">${phase.state === "done" ? "✓" : phase.state === "active" ? "●" : "·"}</i>
         <b>${esc(phase.label)}</b>
         <small>${esc(phase.detail)}</small>
@@ -180,14 +185,21 @@ window.LoadToAgentAppFactories.createRuntimeOverview = function createRuntimeOve
     const iterationLabel = iteration > 0
       ? t("runtime.iteration_value", { count: iteration })
       : session.loop ? t("runtime.iteration_observed") : t("runtime.iteration_scheduled");
+    const activePhase = loopPhases(session).find((phase) => phase.state === "active") || loopPhases(session)[0];
+    const activityTitle = window.LoadToAgentI18n.observedText(activity.title);
+    const activityDetail = window.LoadToAgentI18n.observedText(activity.detail || session.statusDetail || "");
     return `<article id="runtime-loop-panel-${esc(session.id)}" class="runtime-loop-detail" role="tabpanel" aria-labelledby="runtime-loop-tab-${esc(session.id)}" style="${providerStyle(session.provider)}" data-motion-key="runtime-loop:${esc(session.id)}" data-motion-value="${esc(session.updatedAt || "")}">
       <header>
         <div><span class="runtime-loop-kicker"><i></i>${esc(t("runtime.active_loop"))}</span><h3>${esc(session.title)}</h3><p>${esc(provider.label)} · ${esc(session.model || t("session.model_unknown"))}</p></div>
-        <button type="button" class="runtime-open-task" data-loop-open="${esc(session.id)}">${esc(t("runtime.open_task"))}<span aria-hidden="true">↗</span></button>
+        <div class="runtime-loop-header-actions"><span class="runtime-active-phase"><small>${esc(t("runtime.current_phase"))}</small><b>${esc(activePhase.label)}</b></span><button type="button" class="runtime-open-task" data-loop-open="${esc(session.id)}">${esc(t("runtime.open_task"))}<span aria-hidden="true">↗</span></button></div>
       </header>
+      <section class="runtime-now-strip" aria-label="${esc(t("runtime.now_working"))}">
+        <span class="runtime-now-mark" aria-hidden="true">NOW</span>
+        <div><small>${esc(t("runtime.now_working"))}</small><b title="${esc(activityTitle)}">${esc(activityTitle)}</b><p title="${esc(activityDetail)}">${esc(activityDetail)}</p></div>
+        <time data-runtime-updated-at="${esc(session.updatedAt || session.startedAt || "")}">${esc(t("runtime.last_signal_time", { time: elapsedSince(session.updatedAt || session.startedAt) }))}</time>
+      </section>
       ${loopDiagram(session)}
       <footer class="runtime-loop-footer">
-        <div class="runtime-current-signal"><span aria-hidden="true">⌁</span><div><small>${esc(t("runtime.latest_signal"))}</small><b>${esc(window.LoadToAgentI18n.observedText(activity.title))}</b><p>${esc(window.LoadToAgentI18n.observedText(activity.detail || session.statusDetail || ""))}</p></div></div>
         <dl>
           <div><dt>${esc(t("runtime.running_time"))}</dt><dd data-runtime-started-at="${esc(session.startedAt || "")}">${esc(elapsedSince(session.startedAt))}</dd></div>
           <div><dt>${esc(t("runtime.iteration"))}</dt><dd>${esc(iterationLabel)}</dd></div>
@@ -208,6 +220,9 @@ window.LoadToAgentAppFactories.createRuntimeOverview = function createRuntimeOve
     });
     section.querySelectorAll("[data-runtime-started-at]").forEach((element) => {
       element.textContent = elapsedSince(element.dataset.runtimeStartedAt);
+    });
+    section.querySelectorAll("[data-runtime-updated-at]").forEach((element) => {
+      element.textContent = t("runtime.last_signal_time", { time: elapsedSince(element.dataset.runtimeUpdatedAt) });
     });
   }
 

@@ -61,7 +61,9 @@ function providerFromWindowsProcess(processInfo = {}) {
   const args = commandLine.toLowerCase().replace(/\\/g, '/');
   if (name === 'claude.exe') {
     if (args.includes('/windowsapps/claude_') || args.includes('--type=')) return null;
-    if (/^(?:"?[a-z]:)?[^\r\n]*\/\.local\/bin\/claude\.exe"?\s*$/i.test(args) || /^claude(?:\.exe)?\s*$/i.test(args)) return 'claude';
+    if (/\bdaemon\s+run\b/i.test(args)) return null;
+    if (/^(?:"?[a-z]:)?[^\r\n]*\/\.local\/bin\/claude\.exe"?(?:\s|$)/i.test(args)
+      || /^claude(?:\.exe)?(?:\s|$)/i.test(args)) return 'claude';
     return null;
   }
   if (name === 'codex.exe') {
@@ -81,7 +83,7 @@ function providerFromWindowsProcess(processInfo = {}) {
 function providerFromPosixProcess(processInfo = {}) {
   const name = String(processInfo.name || processInfo.command || '').toLowerCase().split('/').pop();
   const args = String(processInfo.commandLine || processInfo.args || '').toLowerCase();
-  if (name === 'claude') return /--type=|\/applications\/claude\.app/.test(args) ? null : 'claude';
+  if (name === 'claude') return /--type=|\/applications\/claude\.app|\bdaemon\s+run\b/.test(args) ? null : 'claude';
   if (name === 'codex' || /^codex-/.test(name)) return /\bapp-server\b|\/applications\/(?:chatgpt|codex)\.app/.test(args) ? null : 'codex';
   if (name === 'gemini') return 'gemini';
   if (name === 'grok') return 'grok';
@@ -129,10 +131,39 @@ function processRows(value) {
   })).filter(item => item.pid > 0);
 }
 
+function commandArgument(commandLine, name) {
+  const escaped = String(name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = String(commandLine || '').match(new RegExp(`(?:^|\\s)${escaped}\\s+(?:"([^"]+)"|'([^']+)'|(\\S+))`, 'i'));
+  return match ? String(match[1] || match[2] || match[3] || '').trim() : '';
+}
+
+function processSessionExternalId(processInfo = {}, provider = '') {
+  const commandLine = String(processInfo.commandLine || processInfo.CommandLine || '');
+  if (provider === 'claude') {
+    const sessionId = commandArgument(commandLine, '--session-id');
+    if (sessionId) return pathlessSessionId(sessionId);
+    return pathlessSessionId(commandArgument(commandLine, '--resume'));
+  }
+  if (provider === 'codex') {
+    const match = commandLine.match(/(?:^|\s)resume\s+(?:--last\s+)?(?:"([^"]+)"|'([^']+)'|(\S+))/i);
+    return pathlessSessionId(match && (match[1] || match[2] || match[3]));
+  }
+  return '';
+}
+
+function pathlessSessionId(value) {
+  const text = String(value || '').trim().replace(/^"|"$/g, '');
+  if (!text) return '';
+  const basename = text.replace(/\\/g, '/').split('/').pop() || text;
+  return basename.replace(/\.jsonl$/i, '');
+}
+
 function selectAgentProcesses(rows, options = {}) {
   const providerResolver = options.providerResolver || providerFromWindowsProcess;
   const environment = options.environment || 'windows';
-  const candidates = rows.map(item => ({ ...item, provider: providerResolver(item) })).filter(item => item.provider);
+  const candidates = rows
+    .map(item => ({ ...item, provider: providerResolver(item) }))
+    .filter(item => item.provider && !utilityProcess(item));
   const byParent = new Map();
   for (const item of candidates) {
     if (!byParent.has(item.parentPid)) byParent.set(item.parentPid, []);
@@ -160,30 +191,38 @@ function selectAgentProcesses(rows, options = {}) {
     parentPid: item.parentPid,
     command: String(item.name || '').replace(/\.exe$/i, '').split(/[\\/]/).pop(),
     startedAt: item.startedAt,
+    externalId: processSessionExternalId(item, item.provider),
   })).sort((a, b) => a.provider.localeCompare(b.provider) || a.pid - b.pid);
 }
 
+function utilityProcess(processInfo = {}) {
+  const commandLine = String(processInfo.commandLine || processInfo.args || '');
+  return /Extract durable memory candidates from this Claude Code transcript tail/i.test(commandLine)
+    || /Reply with exactly OK\. Do not use tools\.?/i.test(commandLine)
+    || /You are a memory extraction/i.test(commandLine);
+}
+
 function utilitySession(session) {
-  return /^(?:extract durable memory candidates|approved command prefix saved|you are a memory extraction)/i.test(String(session.title || '').trim());
+  return Boolean(session && session.utilityKind)
+    || /^(?:extract durable memory candidates|approved command prefix saved|you are a memory extraction|reply with exactly ok\. do not use tools)/i.test(String(session && session.title || '').trim());
 }
 
 function runtimeLinkScore(session, processInfo, now = Date.now()) {
   if (!session || session.provider !== processInfo.provider) return -Infinity;
   if (!session.environment || session.environment.kind !== processInfo.environment) return -Infinity;
+  if (utilitySession(session)) return -Infinity;
+  if (/^(?:claude-desktop|codex-desktop|codex-ide)$/i.test(String(session.clientKind || ''))) return -Infinity;
   let score = session.parentId ? -800 : 2_000;
-  if (utilitySession(session)) score -= 10_000;
   if (session.status === 'running' || session.status === 'starting') score += 3_000;
   else if (session.status === 'waiting') score += 1_000;
   const ageMinutes = Math.max(0, (now - Date.parse(session.updatedAt || 0)) / 60_000);
   score += Math.max(0, 2_880 - ageMinutes);
   const sessionStart = Date.parse(session.startedAt || 0);
   const processStart = Date.parse(processInfo.startedAt || 0);
-  if (Number.isFinite(sessionStart) && Number.isFinite(processStart)) {
-    const deltaMinutes = Math.abs(sessionStart - processStart) / 60_000;
-    if (deltaMinutes <= 3) score += 6_000;
-    else if (deltaMinutes <= 30) score += 2_500;
-    else if (deltaMinutes <= 180) score += 800;
-  }
+  if (!Number.isFinite(sessionStart) || !Number.isFinite(processStart)) return -Infinity;
+  const deltaMinutes = Math.abs(sessionStart - processStart) / 60_000;
+  if (deltaMinutes > 5) return -Infinity;
+  score += 6_000 - deltaMinutes * 200;
   return score;
 }
 
@@ -191,13 +230,6 @@ function markRuntime(session, presence) {
   const existing = Array.isArray(session.runtimePresence) ? session.runtimePresence : [];
   if (!existing.some(item => item.id === presence.id)) existing.push(presence);
   session.runtimePresence = existing;
-  session.status = 'running';
-  session.statusObserved = true;
-  session.statusDetail = presence.kind === 'tmux'
-    ? `tmux에서 AI 프로세스 실행 중 · PID ${presence.pid}`
-    : (presence.kind === 'bridge'
-      ? `안전하게 연결된 외부 터미널 · PID ${presence.pid}`
-      : `AI CLI 프로세스 실행 중 · PID ${presence.pid}`);
   return session;
 }
 
@@ -243,6 +275,7 @@ function syntheticRuntimeSession(processInfo, now = Date.now()) {
 function bridgeLinkScore(session, bridge, now = Date.now()) {
   if (!session || session.provider !== bridge.provider) return -Infinity;
   if (!session.environment || session.environment.kind !== bridge.environment) return -Infinity;
+  if (utilitySession(session)) return -Infinity;
   if (session.clientKind === 'codex-desktop' || session.clientKind === 'codex-ide' || session.clientKind === 'claude-desktop') return -Infinity;
   let score = session.parentId ? -500 : 3_000;
   const sessionCwd = String(session.cwd || '').replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
@@ -280,7 +313,19 @@ function applyRuntimePresence(agentSessions, tmuxSnapshot, processSnapshot, now 
   const usedBridgeIds = new Set();
   const bridgePairs = [];
   for (const bridge of bridges || []) {
+    const explicitId = [bridge.linkedSessionId, bridge.sessionId, bridge.bridgeId, bridge.id]
+      .map(value => String(value || ''))
+      .find(id => id && byId.has(id));
+    const linked = explicitId && byId.get(explicitId);
+    if (!linked || linked.provider !== bridge.provider || utilitySession(linked)) continue;
+    usedBridgeIds.add(bridge.id);
+    usedSessionIds.add(linked.id);
+    markRuntime(linked, { ...bridge, kind: 'bridge', label: 'LoadToAgent 세션 터미널', linkScore: 'explicit' });
+  }
+  for (const bridge of bridges || []) {
+    if (usedBridgeIds.has(bridge.id)) continue;
     for (const session of sessions) {
+      if (usedSessionIds.has(session.id)) continue;
       const score = bridgeLinkScore(session, bridge, now);
       if (score > 0) bridgePairs.push({ bridge, session, score });
     }
@@ -316,8 +361,23 @@ function applyRuntimePresence(agentSessions, tmuxSnapshot, processSnapshot, now 
 
   const bridgePids = new Set((bridges || []).map(item => Number(item.pid || 0)).filter(Boolean));
   const processes = (processSnapshot && processSnapshot.processes || []).filter(item => !bridgePids.has(Number(item.pid || 0)));
+  const usedProcessIds = new Set();
+  for (const processInfo of processes) {
+    const externalId = String(processInfo.externalId || '');
+    if (!externalId) continue;
+    const linked = sessions.find(session => !usedSessionIds.has(session.id)
+      && session.provider === processInfo.provider
+      && session.environment && session.environment.kind === processInfo.environment
+      && (String(session.externalId || '') === externalId || String(session.id || '').endsWith(`:${externalId}`)));
+    if (!linked) continue;
+    usedProcessIds.add(processInfo.id);
+    usedSessionIds.add(linked.id);
+    const label = processInfo.environment === 'macos' ? 'macOS CLI' : (processInfo.environment === 'linux' ? 'Linux CLI' : 'Windows CLI');
+    markRuntime(linked, { ...processInfo, kind: processInfo.environment || 'windows', label, linkScore: 'explicit-session-id' });
+  }
   const pairs = [];
   for (const processInfo of processes) {
+    if (usedProcessIds.has(processInfo.id)) continue;
     for (const session of sessions) {
       if (usedSessionIds.has(session.id)) continue;
       const score = runtimeLinkScore(session, processInfo, now);
@@ -325,16 +385,12 @@ function applyRuntimePresence(agentSessions, tmuxSnapshot, processSnapshot, now 
     }
   }
   pairs.sort((a, b) => b.score - a.score);
-  const usedProcessIds = new Set();
   for (const pair of pairs) {
     if (usedProcessIds.has(pair.processInfo.id) || usedSessionIds.has(pair.session.id)) continue;
     usedProcessIds.add(pair.processInfo.id);
     usedSessionIds.add(pair.session.id);
     const label = pair.processInfo.environment === 'macos' ? 'macOS CLI' : (pair.processInfo.environment === 'linux' ? 'Linux CLI' : 'Windows CLI');
     markRuntime(pair.session, { ...pair.processInfo, kind: pair.processInfo.environment || 'windows', label, linkScore: Math.round(pair.score) });
-  }
-  for (const processInfo of processes) {
-    if (!usedProcessIds.has(processInfo.id)) sessions.push(syntheticRuntimeSession(processInfo, now));
   }
   for (const bridge of bridges || []) {
     if (!usedBridgeIds.has(bridge.id)) sessions.push(syntheticBridgeSession(bridge, now));
@@ -388,6 +444,8 @@ module.exports = {
   posixProcessRows,
   elapsedSeconds,
   selectAgentProcesses,
+  processSessionExternalId,
+  utilityProcess,
   runtimeLinkScore,
   bridgeLinkScore,
   applyRuntimePresence,

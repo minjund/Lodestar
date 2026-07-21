@@ -47,12 +47,12 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
         <b>${esc(label)}</b>
         <span title="${esc(fullTime)}">${esc(timeOnly(message.timestamp))}</span>
         ${message.status ? `<span>${esc(statusLabel(message.status))}</span>` : ""}
-        </div>${messageContentHtml(renderedMessage)}</div>
+        </div>${messageContentHtml(renderedMessage, session.id)}</div>
         </div>`;
       })
       .join("");
     const activityHtml = activities.length
-      ? `<details class="chat-activities">
+      ? `<details class="chat-activities" data-disclosure-key="${esc(`drawer:${session.id}:activities`)}">
       <summary>${esc(t("drawer.activities_view", { count: activities.length }))}</summary>
       <div>${activities
         .map(
@@ -60,7 +60,7 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
       <header>
       <b>${esc(window.LoadToAgentI18n.observedText(message.title || (message.role === "tool" ? t("drawer.tool_execution") : t("drawer.system"))))}</b>
       <span>${esc(statusLabel(message.status))} · ${esc(timeOnly(message.timestamp))}</span>
-      </header>${messageContentHtml({ ...message, text: window.LoadToAgentI18n.observedText(message.text) })}</article>`,
+      </header>${messageContentHtml({ ...message, text: window.LoadToAgentI18n.observedText(message.text) }, session.id)}</article>`,
         )
         .join("")}</div>
       </details>`
@@ -195,7 +195,7 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
         </article>`;
       })
       .join("");
-    return `<details class="chat-activities subagent-coordination" data-subagent-coordination-count="${events.length}">
+    return `<details class="chat-activities subagent-coordination" data-subagent-coordination-count="${events.length}" data-disclosure-key="${esc(`drawer:${session.id}:coordination`)}">
       <summary>${esc(t("drawer.coordination_events", { count: events.length }))}</summary><div>${rows}</div>
     </details>`;
   }

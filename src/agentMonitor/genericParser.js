@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('path');
+const { createExecutionTracker } = require('./executionActivity');
 
 const TOOL_START_PATTERN = /tool_use|tool-call|tool_start/;
 const TOOL_END_PATTERN = /tool_result|tool-result|tool_end/;
@@ -22,6 +23,8 @@ function createGenericParser(dependencies) {
     sumUsage,
     timestamp,
     trimSession,
+    assistantRequestsUserResponse,
+    isUserInputTool,
   } = dependencies;
 
   function normalizeUsage(raw = {}) {
@@ -72,6 +75,7 @@ function createGenericParser(dependencies) {
     const session = baseSession(provider, externalId, fileInfo.file, fileInfo);
     session.truncated = parsed.truncated;
     session.cwd = root.cwd || root.projectPath || root.project_path || '';
+    session.originCwd = session.cwd;
     session.model = root.model || root.modelId || '';
     session.startedAt = timestamp(root.startTime || root.startedAt || root.created_at, session.updatedAt);
     session.parentId = root.parent_session_id ? `${provider}:${root.parent_session_id}` : null;
@@ -79,8 +83,12 @@ function createGenericParser(dependencies) {
     return { rows, root, session };
   }
 
-  function recordToolStart(session, event) {
+  function recordToolStart(session, state, event) {
     const tool = event.tool_name || event.name || event.tool || 'tool';
+    const callId = event.tool_call_id || event.tool_use_id || event.id;
+    const args = event.parameters || event.args || event.input || {};
+    state.toolCalls.set(String(callId || ''), { name: tool, args });
+    state.executionTracker.recordCall({ name: tool, callId, args, rawInput: args, at: event.timestamp });
     addMessage(session, {
       id: event.id,
       role: 'tool',
@@ -99,8 +107,17 @@ function createGenericParser(dependencies) {
     });
   }
 
-  function recordToolEnd(session, event) {
+  function recordToolEnd(session, state, event) {
     const callId = event.tool_call_id || event.tool_use_id || event.id;
+    const call = state.toolCalls.get(String(callId || ''));
+    state.executionTracker.recordOutput({
+      name: call && call.name,
+      callId,
+      args: call && call.args || {},
+      output: event.output || event.result || event.content || event,
+      at: event.timestamp,
+      isError: Boolean(event.error),
+    });
     settleLifecycle(session, callId, event.error ? 'failed' : 'done', event.timestamp);
     addLifecycle(session, {
       id: `result:${event.id || event.tool_call_id}`,
@@ -112,7 +129,13 @@ function createGenericParser(dependencies) {
   }
 
   function processEvents(session, events) {
-    const state = { running: false, failed: false };
+    const state = {
+      running: false,
+      failed: false,
+      pendingUserInputCalls: new Set(),
+      toolCalls: new Map(),
+      executionTracker: createExecutionTracker({ compactText, timestamp }),
+    };
     for (const event of events) {
       const type = String(event.type || event.event || event.kind || '').toLowerCase();
       if (type === 'init') {
@@ -127,10 +150,15 @@ function createGenericParser(dependencies) {
         });
       }
       if (TOOL_START_PATTERN.test(type)) {
-        recordToolStart(session, event);
+        recordToolStart(session, state, event);
         state.running = true;
+        const toolName = event.tool_name || event.name || event.tool;
+        if (isUserInputTool(toolName)) state.pendingUserInputCalls.add(String(event.id || toolName));
       }
-      if (TOOL_END_PATTERN.test(type)) recordToolEnd(session, event);
+      if (TOOL_END_PATTERN.test(type)) {
+        recordToolEnd(session, state, event);
+        state.pendingUserInputCalls.delete(String(event.tool_call_id || event.tool_use_id || event.id || ''));
+      }
       if (type === 'result' || /session_end|completed/.test(type)) state.running = false;
       if (type === 'error' || event.error) state.failed = true;
       const usage = normalizeUsage(event);
@@ -194,10 +222,17 @@ function createGenericParser(dependencies) {
         usages.push(usage);
       }
     }
-    [...messages.values()]
-      .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) || a.order - b.order)
-      .forEach(message => addMessage(session, message));
-    return { firstUser, usages };
+    const orderedMessages = [...messages.values()]
+      .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) || a.order - b.order);
+    orderedMessages.forEach(message => addMessage(session, message));
+    const lastConversation = [...orderedMessages].reverse()
+      .find(message => message.role === 'assistant' || message.role === 'user');
+    return {
+      firstUser,
+      usages,
+      lastConversationRole: lastConversation && lastConversation.role || '',
+      lastAssistantText: lastConversation && lastConversation.role === 'assistant' ? lastConversation.text : '',
+    };
   }
 
   function finalizeSession(session, provider, root, eventState, messageState, fileInfo) {
@@ -208,15 +243,23 @@ function createGenericParser(dependencies) {
     const context = modelContextWindow(provider, session.model, root.context_window || root.contextWindow);
     session.context = contextInfo(session.turnUsage.total || session.usage.total, context);
     const age = Date.now() - fileInfo.mtimeMs;
+    const pendingUserInput = eventState.pendingUserInputCalls.size > 0;
+    const conversationalInput = messageState.lastConversationRole === 'assistant'
+      && assistantRequestsUserResponse(messageState.lastAssistantText);
     session.status = eventState.failed
       ? 'failed'
-      : ((eventState.running && age < STALE_TURN_THRESHOLD_MS) || age < ACTIVE_THRESHOLD_MS
+      : (pendingUserInput || (!eventState.running && conversationalInput)
+        ? 'waiting'
+        : ((eventState.running && age < STALE_TURN_THRESHOLD_MS) || age < ACTIVE_THRESHOLD_MS
         ? 'running'
-        : 'idle');
+        : 'idle'));
     session.statusDetail = eventState.failed
       ? '오류 발생'
-      : (session.status === 'running' ? '실시간 이벤트 수신 중' : '다음 요청 대기');
-    session.statusObserved = eventState.running;
+      : (session.status === 'waiting'
+        ? (pendingUserInput ? '선택 또는 입력 대기' : '답변 또는 선택 대기')
+        : (session.status === 'running' ? '실시간 이벤트 수신 중' : '다음 요청 대기'));
+    session.statusObserved = eventState.running || session.status === 'waiting';
+    session.executions = eventState.executionTracker.finalize();
     trimSession(session);
     return session;
   }

@@ -41,47 +41,28 @@
   }
 }
 
-/* Compact screens ≤ 980px: collapse content columns and simplify the side rail. */
+/* Compact screens ≤ 980px: keep project filtering readable while reducing the side rail. */
 @media (max-width:980px) {
   :root {
-    --sidebar: 76px;
+    --sidebar: 220px;
   }
 
-  .brand>div:last-child,
-  .nav-item span:not(.nav-icon),
-  .nav-item b,
-  .nav-group-label,
-  .section-title span,
-  .provider-rail-item strong,
+  .brand small,
   .provider-rail-item small,
-  .sidebar-footer div,
+  .sidebar-footer small,
   .sidebar-app-version {
     display: none;
   }
 
-  .workspace-section {
-    display: none;
-  }
-
-  .brand,
-  .provider-rail-item,
-  .section-title,
-  .sidebar-footer {
-    justify-content: center;
-    padding-right: 0;
-    padding-left: 0;
-  }
-
-  .nav-item {
-    grid-template-columns: 1fr;
-    place-items: center;
-  }
+  .sidebar { padding: 20px 13px 16px; }
+  .brand { padding-bottom: 18px; }
+  .sidebar-section { margin-top: 19px; }
 }
 
 /* Compact screens ≤ 900px: collapse content columns and simplify the side rail. */
 @media (max-width:900px) {
   :root {
-    --sidebar: 72px;
+    --sidebar: 210px;
   }
 
   .topbar {
@@ -141,6 +122,10 @@
     overscroll-behavior: contain;
   }
 
+  body[data-current-view="terminal"] .main-stage {
+    padding-bottom: calc(92px + env(safe-area-inset-bottom));
+  }
+
   .sidebar {
     position: fixed;
     z-index: 18;
@@ -171,6 +156,26 @@
     display: none!important;
   }
 
+  .advanced-tools-nav {
+    display: contents;
+  }
+
+  .advanced-tools-nav > summary {
+    display: none;
+  }
+
+  .advanced-tools-list {
+    display: contents!important;
+  }
+
+  .advanced-tools-list .nav-item {
+    display: none;
+  }
+
+  .advanced-tools-list .runtime-nav-item {
+    display: grid;
+  }
+
   .nav-item {
     min-width: 0;
     height: 54px;
@@ -189,7 +194,7 @@
     max-width: 100%;
     overflow: hidden;
     color: inherit;
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 700;
     letter-spacing: -.04em;
     text-overflow: ellipsis;
@@ -405,7 +410,7 @@
 /* Compact screens ≤ 430px: trim labels and spacing for the narrowest supported window. */
 @media (max-width:430px) {
   .sidebar .nav-item>span:nth-child(2) {
-    font-size: 8px;
+    font-size: 12px;
   }
 }
 
@@ -447,11 +452,11 @@
   }
 
   .token-row span {
-    font-size: 8px;
+    font-size: 12px;
   }
 
   .token-row b {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .chat-row {

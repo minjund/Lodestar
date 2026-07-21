@@ -28,6 +28,7 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
     statusIcon,
     renderProviderRail,
     isProjectlessSession,
+    sessionOriginPath,
     sessionWorkspaceLabel,
     renderWorkspaces,
     renderGlobalStats,
@@ -42,6 +43,10 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
     executionModeBadge,
     renderAgentMap,
     renderTmuxMap,
+    renderAttentionInbox,
+    renderOperationsOverview,
+    progressHtml,
+    healthHtml,
   } = context;
 
   function recentConversation(session) {
@@ -74,6 +79,8 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
     const activityCopy = latestWorkCopy(session) || window.LoadToAgentI18n.observedText(session.statusDetail) || t("session.waiting_for_new_event");
     const activityPreview = readablePreview(activityCopy, 116);
     const accessibleId = `session-${String(session.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+    const originPath = sessionOriginPath(session);
+    const originLabel = sessionWorkspaceLabel(session);
     return `<article class="session-card ${opts.live ? "live-card" : ""} ${statusClass(session.status)} ${session.parentId ? "subagent" : ""}"
       data-session-id="${esc(session.id)}"
       data-motion-key="session:${esc(session.id)}"
@@ -92,8 +99,9 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
         <span>${esc(model)}</span>
         <i>
         </i>
-        <span title="${esc(isProjectlessSession(session) ? window.LoadToAgentI18n.t("ui.session_not_linked_to_a_specific_project") : session.cwd)}">
-          ${esc(sessionWorkspaceLabel(session))}
+        <span class="origin-project" title="${esc(isProjectlessSession(session) ? window.LoadToAgentI18n.t("ui.session_not_linked_to_a_specific_project") : originPath)}"
+          aria-label="${esc(t("project.origin_named", { name: originLabel }))}">
+          <small>${esc(t("project.origin"))}</small><b>${esc(originLabel)}</b>
         </span>${
           session.agentName
             ? `<i>
@@ -106,6 +114,8 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
         <div><b>${running ? `${esc(t("session.now"))}: ` : ""}${esc(activity.title)}</b><span title="${esc(activityPreview.full)}">${esc(activityPreview.text)}</span></div>
         ${running ? '<span class="activity-wave"><i></i><i></i><i></i><i></i><i></i></span>' : ""}
       </div>
+      ${progressHtml(session, true)}
+      ${healthHtml(session, true)}
       ${
         runtime.length
           ? `<div class="runtime-strip">
@@ -158,7 +168,7 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
     </article>`;
   }
 
-  function renderSessions(motionKind = "refresh", deferMotion = false) {
+  function renderSessionsContent(motionKind = "refresh", deferMotion = false) {
     const previousLayout = deferMotion ? null : captureMotionLayout();
     syncViewChrome();
     renderGuide();
@@ -166,13 +176,17 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
     const terminalView = state.view === "terminal";
     const settingsView = state.view === "settings";
     const runtimeView = state.view === "runtime";
+    const attentionView = state.view === "waiting";
+    const operationsView = state.view === "all" || state.view === "active";
     const focusedToolView = tmuxView || terminalView || settingsView || runtimeView;
     $("#terminalSection").classList.toggle("hidden", !terminalView);
     $("#tmuxSection").classList.toggle("hidden", !tmuxView);
     $("#settingsSection").classList.toggle("hidden", !settingsView);
     $("#globalStats").classList.toggle("hidden", focusedToolView);
-    $("#providerOverview").classList.toggle("hidden", focusedToolView);
-    $("#sessionSection").classList.toggle("hidden", focusedToolView);
+    $("#providerOverview").classList.toggle("hidden", focusedToolView || state.view !== "all");
+    $("#sessionSection").classList.toggle("hidden", focusedToolView || state.view === "active" || attentionView);
+    $("#operationsOverview").classList.toggle("hidden", !operationsView);
+    $("#attentionInbox").classList.toggle("hidden", !attentionView);
     if (runtimeView) renderRuntimeOverview();
     $("#automationOverview").classList.toggle("hidden", !runtimeView);
     const guideVisible = state.view === "all" && state.guideExpanded && !state.graphFocusId;
@@ -211,19 +225,23 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
     }
     if (window.LoadToAgentTerminal) window.LoadToAgentTerminal.deactivate();
     const sessions = filteredSessions();
+    if (operationsView) renderOperationsOverview();
+    const attentionCount = attentionView ? renderAttentionInbox() : 0;
     const showMap = ["all", "active"].includes(state.view);
     const graphLiveCount = showMap ? renderAgentMap(graphFilteredSessions(), motionKind) : 0;
     const regular = state.view === "all" ? sessions.filter((session) => !isLiveSession(session)) : state.view === "active" ? [] : sessions;
     const visible = regular.slice(0, state.visibleLimit);
-    const resultCount = graphLiveCount + regular.length;
+    const resultCount = attentionView ? attentionCount : graphLiveCount + regular.length;
     $("#sessionResultSummary").textContent = window.LoadToAgentI18n.t("quality.results_summary", { count: resultCount });
-    $("#liveSection").classList.toggle("hidden", graphLiveCount === 0);
+    const activeEmpty = state.view === "active" && graphLiveCount === 0;
+    $("#activeEmptyState").classList.toggle("hidden", !activeEmpty);
+    $("#liveSection").classList.toggle("hidden", attentionView || (graphLiveCount === 0 && state.view !== "active"));
     $("#viewTitle").textContent = VIEW_TITLES[state.view] || window.LoadToAgentI18n.t("ui.recent_conversations_and_tasks");
     $("#sessionGrid").innerHTML = visible.map((session) => sessionCard(session)).join("");
     $("#sessionGrid").classList.toggle("hidden", visible.length === 0);
     $("#loadMoreBtn").classList.toggle("hidden", regular.length <= state.visibleLimit);
     $("#loadMoreBtn").textContent = window.LoadToAgentI18n.t("common.remaining", { count: regular.length - state.visibleLimit });
-    $("#emptyState").classList.toggle("hidden", graphLiveCount + regular.length !== 0);
+    $("#emptyState").classList.toggle("hidden", attentionView || graphLiveCount + regular.length !== 0);
     const hasConditions = Boolean(state.search || state.providerFilters.size || state.workspace !== "all" || state.sort !== "recent");
     $("#emptyClearFiltersBtn").classList.toggle("hidden", resultCount !== 0 || !hasConditions);
     if (graphLiveCount + regular.length === 0) {
@@ -241,18 +259,36 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
     if (motionKind === "view") animateVisibleSections();
   }
 
+  function renderSessions(motionKind = "refresh", deferMotion = false) {
+    const restoreScroll = window.LoadToAgentRendererUtils.preserveScrollPositions([".main-stage", ".sidebar"]);
+    context.rememberDisclosureStates?.(document);
+    try {
+      return renderSessionsContent(motionKind, deferMotion);
+    } finally {
+      context.restoreDisclosureStates?.(document);
+      restoreScroll();
+    }
+  }
+
   function render(motionKind = "refresh") {
-    const previousLayout = captureMotionLayout();
-    renderProviderRail();
-    renderWorkspaces();
-    renderGlobalStats();
-    renderProviderOverview();
-    renderProviderFilter();
-    renderProviderVisibilitySettings();
-    renderSessions(motionKind, true);
-    if (state.selectedId && $("#detailDrawer").classList.contains("open")) context.renderDrawer();
-    playMotionLayout(previousLayout, motionKind);
-    if (motionKind === "view") animateVisibleSections();
+    const restoreScroll = window.LoadToAgentRendererUtils.preserveScrollPositions([".main-stage", ".sidebar"]);
+    context.rememberDisclosureStates?.(document);
+    try {
+      const previousLayout = captureMotionLayout();
+      renderProviderRail();
+      renderWorkspaces();
+      renderGlobalStats();
+      renderProviderOverview();
+      renderProviderFilter();
+      renderProviderVisibilitySettings();
+      renderSessions(motionKind, true);
+      if (state.selectedId && $("#detailDrawer").classList.contains("open")) context.renderDrawer();
+      playMotionLayout(previousLayout, motionKind);
+      if (motionKind === "view") animateVisibleSections();
+    } finally {
+      context.restoreDisclosureStates?.(document);
+      restoreScroll();
+    }
   }
 
   return {

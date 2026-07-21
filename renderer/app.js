@@ -22,7 +22,7 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     search: "",
     sort: "recent",
     selectedId: null,
-    drawerTab: "chat",
+    drawerTab: "summary",
     drawerMode: "session",
     runProvider: "claude",
     details: new Map(),
@@ -31,6 +31,7 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     visibleLimit: 30,
     graphFocusId: null,
     graphExpandedProviders: new Set(),
+    expandedExecutionSessions: new Set(),
     expandedCompletedSubagents: new Set(),
     expandedTmuxSubagents: new Set(),
     selectedRuntimeLoopId: null,
@@ -39,7 +40,10 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     agentCommandTargets: new Map(),
     agentCommandSending: new Set(),
     stopRequests: new Set(),
+    runControlRequests: new Set(),
+    managementFilter: "all",
     detailErrors: new Map(),
+    disclosureStates: new Map(),
     guideCompleted: new Set(),
     guideExpanded: true,
     platform: { id: "win32", label: "Windows", localShell: "powershell", localShellLabel: t("terminal.windows_shell"), nativeTmux: false },
@@ -60,6 +64,21 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     ready: false, modalTimer: 0, modalFocusTimer: 0, toastTimer: 0, drawerTimer: 0, drawerContentTimer: 0,
     drawerRenderKey: "", drawerTab: "", activeDialogTrigger: null, dialogGeneration: 0,
   };
+  function disclosureElements(root = document) {
+    const elements = [];
+    if (root instanceof Element && root.matches("details[data-disclosure-key]")) elements.push(root);
+    root.querySelectorAll?.("details[data-disclosure-key]").forEach((element) => elements.push(element));
+    return elements;
+  }
+  function rememberDisclosureStates(root = document) {
+    disclosureElements(root).forEach((element) => state.disclosureStates.set(element.dataset.disclosureKey, element.open));
+  }
+  function restoreDisclosureStates(root = document) {
+    disclosureElements(root).forEach((element) => {
+      const key = element.dataset.disclosureKey;
+      if (state.disclosureStates.has(key)) element.open = state.disclosureStates.get(key);
+    });
+  }
   document.documentElement.dataset.motion = motionPreference.matches ? "reduced" : "full";
   motionPreference.addEventListener("change", (event) => {
     document.documentElement.dataset.motion = event.matches ? "reduced" : "full";
@@ -137,7 +156,7 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     get: (_target, property) => keys[property] ? t(keys[property]) : undefined,
   });
   const STATUS = localizedLookup({
-    starting: "ui.preparing", running: "ui.working", waiting: "app.nav.needs_review", idle: "ui.idle",
+    starting: "ui.preparing", running: "ui.working", paused: "management.status.paused", waiting: "app.nav.needs_review", idle: "ui.idle",
     completed: "ui.completed", failed: "ui.problem", cancelled: "ui.stopped",
   });
   const VIEW_TITLES = localizedLookup({
@@ -220,12 +239,16 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
       else item.removeAttribute("aria-current");
     });
     const advancedView = ["terminal", "tmux", "settings"].includes(state.view);
+    const advancedToolsView = ["runtime", "terminal", "tmux"].includes(state.view);
+    if (advancedToolsView) $("#advancedToolsNav")?.setAttribute("open", "");
+    $("#advancedToolsNav")?.classList.toggle("active", advancedToolsView);
     $("#mobileMoreBtn")?.classList.toggle("active", advancedView);
     if (advancedView) $("#mobileMoreBtn")?.setAttribute("aria-current", "page");
     else $("#mobileMoreBtn")?.removeAttribute("aria-current");
   }
   function selectView(view, options = {}) {
     state.view = view;
+    state.managementFilter = view === "waiting" ? (options.managementFilter || "all") : "all";
     state.visibleLimit = 30;
     if (view === "active" || view === "waiting") markGuideStep(view);
     syncViewChrome();
@@ -242,6 +265,7 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
       : t("navigation.view_results", { view: VIEW_TITLES[view] || view, count: resultCount }));
   }
   function currentDialog() {
+    if (!$("#mobileToolsMenu")?.classList.contains("hidden")) return $("#mobileToolsMenu");
     if (!$("#quickPaletteModal")?.classList.contains("hidden")) return $("#quickPaletteModal");
     if (!$("#shortcutHelpModal")?.classList.contains("hidden")) return $("#shortcutHelpModal");
     if (!$("#runModal").classList.contains("hidden")) return $("#runModal");
@@ -297,8 +321,8 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     }
     dialog.setAttribute("inert", "");
     dialog.setAttribute("aria-hidden", "true");
-    const anotherDialog = [$("#runModal"), $("#tmuxCreateModal"), $("#detailDrawer"), $("#quickPaletteModal"), $("#shortcutHelpModal")]
-      .some((item) => item && item !== dialog && !item.classList.contains("hidden") && (item.classList.contains("open") || item.matches(".modal-backdrop")));
+    const anotherDialog = [$("#mobileToolsMenu"), $("#runModal"), $("#tmuxCreateModal"), $("#detailDrawer"), $("#quickPaletteModal"), $("#shortcutHelpModal")]
+      .some((item) => item && item !== dialog && !item.classList.contains("hidden") && (item.classList.contains("open") || item.matches(".modal-backdrop") || item.id === "mobileToolsMenu"));
     if (!anotherDialog) {
       shell?.removeAttribute("inert");
       document.body.classList.remove("dialog-open");
@@ -420,7 +444,7 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     if (fence) output.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`);
     return `<div class="chat-content markdown">${output.join("")}</div>`;
   }
-  function roadmapHtml(value) {
+  function roadmapHtml(value, disclosureId = "") {
     const text = String(value || "").trim();
     const lines = text
       .replace(/\r\n/g, "\n")
@@ -436,7 +460,8 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
       .slice(0, 3)
       .map((line) => readablePreview(line.replace(/^(?:[-*]\s+|\d+[.)]\s+|#{2,3}\s+)/, "").replace(/\*\*/g, ""), 92).text);
     const countLabel = steps.length ? t("content.roadmap.steps", { count: steps.length }) : t("content.roadmap.long_plan");
-    return `<details class="chat-roadmap" data-roadmap-collapsed="true">
+    const disclosureKey = `roadmap:${disclosureId || `${text.length}:${title}`}`;
+    return `<details class="chat-roadmap" data-roadmap-collapsed="true" data-disclosure-key="${esc(disclosureKey)}">
       <summary>
       <span class="chat-roadmap-mark" aria-hidden="true">MAP</span>
       <span>
@@ -449,7 +474,7 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
       <div class="chat-roadmap-full">${markdownHtml(text)}</div>
       </details>`;
   }
-  function messageContentHtml(message) {
+  function messageContentHtml(message, ownerId = "") {
     const text = String((message && message.text) || "").trim();
     if (!text) return `<div class="chat-content empty">${esc(t("content.no_displayable_content"))}</div>`;
     if (/^[\[{]/.test(text) && /[\]}]$/.test(text)) {
@@ -469,7 +494,8 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
         // A normal chat message may begin with JSON punctuation without being JSON.
       }
     }
-    const roadmap = message && message.role === "assistant" ? roadmapHtml(text) : "";
+    const messageId = message && (message.id || message.timestamp) || text.length;
+    const roadmap = message && message.role === "assistant" ? roadmapHtml(text, `${ownerId}:${messageId}`) : "";
     if (roadmap) return roadmap;
     return markdownHtml(text);
   }
@@ -515,7 +541,7 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     return labels[String(value || "").toLowerCase()] || String(value || window.LoadToAgentI18n.t("ui.assistance"));
   }
   function statusClass(status) {
-    return ["running", "waiting", "completed", "failed", "cancelled"].includes(status) ? status : "";
+    return ["running", "paused", "waiting", "completed", "failed", "cancelled"].includes(status) ? status : "";
   }
   function currentActivity(session) {
     const items = session.lifecycle || [];
@@ -605,6 +631,8 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     state,
     motionPreference,
     motionState,
+    rememberDisclosureStates,
+    restoreDisclosureStates,
     STATUS,
     VIEW_TITLES,
     VIEW_META,

@@ -551,15 +551,18 @@
 
 .workspace-list {
   display: grid;
-  overflow: auto;
-  padding-right: 2px;
-  gap: 5px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 4px;
+  gap: 3px;
+  scrollbar-width: thin;
+  scrollbar-color: #314352 transparent;
 }
 
 .workspace-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0,1fr) 34px;
+  grid-template-columns: minmax(0,1fr) 44px;
   align-items: center;
   gap: 4px;
 }
@@ -573,14 +576,15 @@
   transition: transform var(--motion-fast) var(--motion-ease),background-color var(--motion-fast) ease,border-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-medium) ease,opacity var(--motion-fast) ease;
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 0 8px;
+  gap: 8px;
+  padding: 0 9px;
   border-radius: 9px;
-  min-height: 42px;
+  min-height: 44px;
   height: auto;
   font-size: 13px;
   position: relative;
   width: 100%;
+  min-width: 0;
   border: 1px solid transparent;
   background: transparent;
   color: #b4bfcc;
@@ -607,19 +611,23 @@
 }
 
 .workspace-remove {
-  width: 40px;
-  height: 40px;
-  border: 0;
-  border-radius: 9px;
-  background: #131c27;
-  color: #94a2b2;
-  font-size: 15px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #8292a1;
+  font-size: 14px;
   cursor: pointer;
+  opacity: .72;
 }
 
 .workspace-remove:hover {
+  border-color: rgba(255, 107, 127, .25);
   background: #2d1d24;
   color: #ff9baa;
+  opacity: 1;
 }
 
 .child-row {

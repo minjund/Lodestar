@@ -18,6 +18,22 @@ function createHierarchyAttacher(dependencies) {
       const parent = byId.get(session.parentId);
       if (parent && !parent.childIds.includes(session.id)) parent.childIds.push(session.id);
     }
+    const inheritOrigin = (session, seen = new Set()) => {
+      if (!session || !session.parentId || seen.has(session.id)) return;
+      seen.add(session.id);
+      const parent = byId.get(session.parentId);
+      if (!parent) return;
+      inheritOrigin(parent, seen);
+      const hadOrigin = Boolean(session.originCwd || session.cwd);
+      if (!session.cwd) session.cwd = parent.cwd;
+      if (!session.originCwd) session.originCwd = parent.originCwd || parent.cwd;
+      if (!hadOrigin) {
+        session.workspace = parent.workspace;
+        session.projectless = parent.projectless;
+      }
+      if (!session.environment) session.environment = parent.environment;
+    };
+    for (const session of sessions) inheritOrigin(session);
     return byId;
   }
 
@@ -57,6 +73,7 @@ function createHierarchyAttacher(dependencies) {
     child.clientKind = parent.clientKind;
     child.model = parent.model;
     child.cwd = parent.cwd;
+    child.originCwd = parent.originCwd || parent.cwd;
     child.workspace = parent.workspace;
     child.projectless = parent.projectless;
     child.environment = parent.environment;

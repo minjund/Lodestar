@@ -210,6 +210,12 @@
   color: #c6f8e4;
 }
 
+.drawer-meta .origin-project-meta {
+  border-color: rgba(89,216,255,.24);
+  background: rgba(89,216,255,.06);
+  color: #79cce4;
+}
+
 .drawer-meta .work-state.working {
   border-color: rgba(76,227,154,.3);
   background: rgba(76,227,154,.09);

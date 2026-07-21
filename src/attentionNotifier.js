@@ -7,24 +7,28 @@ class AttentionNotifier {
     this.copy = options.copy || (() => ({ title: '내 확인이 필요합니다', body: '응답이나 선택을 기다리는 AI 세션이 있습니다.' }));
     this.onOpen = options.onOpen || (() => {});
     this.onFallback = options.onFallback || (() => {});
-    this.waitingIds = null;
+    this.attentionIds = null;
     this.notifications = new Set();
   }
 
   sync(snapshot) {
-    const waiting = (snapshot && Array.isArray(snapshot.sessions) ? snapshot.sessions : [])
-      .filter(session => session && session.id && session.status === 'waiting');
-    const nextIds = new Set(waiting.map(session => String(session.id)));
+    const needsAttention = (snapshot && Array.isArray(snapshot.sessions) ? snapshot.sessions : [])
+      .filter(session => session && session.id && (
+        session.attention?.required
+        || session.health?.level === 'critical'
+        || session.status === 'waiting'
+      ));
+    const nextIds = new Set(needsAttention.map(session => String(session.id)));
 
-    if (this.waitingIds === null) {
-      this.waitingIds = nextIds;
+    if (this.attentionIds === null) {
+      this.attentionIds = nextIds;
       return [];
     }
 
-    const newlyWaiting = waiting.filter(session => !this.waitingIds.has(String(session.id)));
-    this.waitingIds = nextIds;
-    newlyWaiting.forEach(session => this.notify(session));
-    return newlyWaiting.map(session => String(session.id));
+    const newlyActionable = needsAttention.filter(session => !this.attentionIds.has(String(session.id)));
+    this.attentionIds = nextIds;
+    newlyActionable.forEach(session => this.notify(session));
+    return newlyActionable.map(session => String(session.id));
   }
 
   notify(session) {

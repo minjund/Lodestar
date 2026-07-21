@@ -619,6 +619,27 @@
 
 /* Compact screens ≤ 640px: stack relationship cards and route connectors vertically. */
 @media (max-width:640px) {
+  .execution-activity-card>summary {
+    grid-template-columns: 30px minmax(0,1fr);
+  }
+
+  .execution-activity-state {
+    grid-column: 2;
+    align-items: flex-start;
+    max-width: 100%;
+    text-align: left;
+  }
+
+  .execution-activity-state>span:first-child,
+  .execution-activity-disclosure { justify-content: flex-start; }
+
+  .execution-activity-detail { padding: 12px; }
+
+  .execution-activity-detail dl { grid-template-columns: 1fr; }
+
+  .execution-activity-panel>header {
+    flex-direction: column;
+  }
   .live-section-head {
     flex-wrap: wrap;
   }
@@ -768,7 +789,10 @@
 
 /* Reduced motion: preserve state changes while removing decorative movement. */
 @media (prefers-reduced-motion:reduce) {
-  .live-beacon {
+  .live-beacon,
+  .execution-activity-card.running .execution-activity-state>span:first-child i {
     animation: none!important;
   }
+
+  .execution-activity-disclosure i { transition: none; }
 }

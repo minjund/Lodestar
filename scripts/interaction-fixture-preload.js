@@ -1,6 +1,7 @@
 'use strict';
 
 const { contextBridge } = require('electron');
+const { enrichSession } = require('../src/sessionIntelligence');
 
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const now = new Date().toISOString();
@@ -43,10 +44,15 @@ const messages = [
 
 const rootSession = {
   id: 'fixture-root', externalId: 'fixture-root-external', provider: 'claude', model: 'claude-fixture',
-  title: '현재 프로그램의 모든 화면에서 긴 사용자 요청이 카드 전체를 밀어내지 않도록 지금 목표를 읽기 좋은 길이로 요약하고 원문은 상세 대화에 보존하면서 작은 화면과 큰 화면 모두에서 버튼과 상태 정보가 안정적으로 보이게 상호작용을 검증해줘', cwd: 'D:\\fixture', workspace: 'fixture', status: 'running',
+  title: '현재 프로그램의 모든 화면에서 긴 사용자 요청이 카드 전체를 밀어내지 않도록 지금 목표를 읽기 좋은 길이로 요약하고 원문은 상세 대화에 보존하면서 작은 화면과 큰 화면 모두에서 버튼과 상태 정보가 안정적으로 보이게 상호작용을 검증해줘', cwd: 'D:\\fixture', originCwd: 'D:\\fixture', workspace: 'fixture', status: 'running',
   statusDetail: '버튼 동작을 확인하는 중', updatedAt: now, parentId: null, childIds: ['fixture-child', 'fixture-resting'],
   messages, usage, turnUsage: usage, context, runId: 'fixture-run',
   lifecycle: [{ type: 'start', status: 'running', label: '검증 시작', detail: 'DOM 이벤트 확인', timestamp: now }],
+  executions: [
+    { id: 'fixture-shell-running', callId: 'fixture-shell-running', kind: 'shell', mode: 'background', tool: 'exec_command', runtime: 'PowerShell', label: '개발 서버 실행', command: 'npm run dev', cwd: 'D:\\fixture', status: 'running', statusDetail: '백그라운드 cell fixture-cell-1', output: '개발 서버가 http://localhost:4173 에서 실행 중입니다.', backgroundId: 'fixture-cell-1', backgroundIdType: 'cell', exitCode: null, startedAt: now, updatedAt: now, completedAt: null, source: 'tool-call' },
+    { id: 'fixture-shell-completed', callId: 'fixture-shell-completed', kind: 'shell', mode: 'foreground', tool: 'shell_command', runtime: 'PowerShell', label: '회귀 테스트', command: 'npm test', cwd: 'D:\\fixture', status: 'completed', statusDetail: '종료 코드 0', output: '128개 테스트 통과\n실패 0개', backgroundId: '', backgroundIdType: '', exitCode: 0, startedAt: now, updatedAt: now, completedAt: now, source: 'tool-call' },
+    { id: 'fixture-background-running', callId: 'fixture-background-running', kind: 'background', mode: 'background', tool: 'background_job', runtime: 'Background', label: '인덱스 갱신', command: '', cwd: 'D:\\fixture', status: 'running', statusDetail: '백그라운드에서 계속 실행 중', output: '', backgroundId: 'fixture-task-2', backgroundIdType: 'task', exitCode: null, startedAt: now, updatedAt: now, completedAt: null, source: 'tool-call' },
+  ],
   runtimePresence: [{ kind: 'terminal', terminalId: 'terminal-main', pid: 41001, label: 'fixture terminal' }],
   sourceLabel: '인메모리 테스트 기록',
   collaboration: {
@@ -63,7 +69,7 @@ const rootSession = {
 const childSession = {
   ...rootSession, id: 'fixture-child', externalId: 'fixture-child-external', provider: 'gpt', model: 'gpt-fixture',
   title: '하위 상호작용 검증', parentId: 'fixture-root', childIds: ['fixture-grandchild'], agentName: 'button-auditor', agentRole: 'tester',
-  runtimePresence: [], runId: '', collaboration: { communications: [
+  runtimePresence: [], executions: [], runId: '', collaboration: { communications: [
     { id: 'nested-assignment', kind: 'assignment', label: '새 작업 배정', from: '/root/child', to: '/root/child/nested_check', taskName: 'nested_check', childId: 'fixture-grandchild', text: '하위 흐름을 검증해줘', timestamp: now },
     { id: 'nested-started', kind: 'started', label: '서브에이전트 실행 시작', from: 'Codex 런타임', to: '/root/child/nested_check', taskName: 'nested_check', childId: 'fixture-grandchild', text: 'started', timestamp: now },
     { id: 'nested-result', kind: 'result', label: '결과 반환', from: '/root/child/nested_check', to: '/root/child', taskName: 'nested_check', childId: 'fixture-grandchild', text: '중첩 흐름 정상', timestamp: now },
@@ -87,7 +93,7 @@ const restingSession = {
 const endedSession = {
   ...rootSession, id: 'fixture-ended', externalId: 'fixture-ended-external', provider: 'gpt', model: 'gpt-fixture',
   title: '완료된 대화 상세 검증', status: 'completed', statusDetail: '검증 완료', parentId: null, childIds: [],
-  runtimePresence: [], runId: '',
+  runtimePresence: [], executions: [], runId: '',
   messages: [
     { id: 'ended-user', role: 'user', text: '이 요청은 상세 대화에서 생략하지 말고 전체 내용을 보여주되, AI가 만든 긴 로드맵은 처음부터 전부 펼치지 말고 읽기 좋은 형태로 정리해줘.', timestamp: now },
     { id: 'ended-roadmap', role: 'assistant', text: `## 반응형 UI 개선 로드맵
@@ -112,6 +118,18 @@ const waitingSession = {
   title: '사용자 확인 대기 검증', status: 'waiting', statusDetail: '사용자 선택 대기',
 };
 
+const failedSession = {
+  ...endedSession, id: 'fixture-failed', externalId: 'fixture-failed-external', provider: 'codex',
+  title: '실패 후 다시 실행 검증', status: 'failed', statusDetail: '테스트 실패로 사용자 확인 필요',
+  runId: 'fixture-failed-run', completionObserved: true,
+};
+
+const pausedSession = {
+  ...rootSession, id: 'fixture-paused-run', externalId: 'fixture-paused-external', provider: 'claude',
+  title: '일시정지 실행 검증', status: 'paused', statusDetail: '사용자가 실행을 일시정지함',
+  runId: 'fixture-paused-run', runtimePresence: [], executions: [], childIds: [],
+};
+
 const extraLiveSessions = Array.from({ length: 7 }, (_, index) => ({
   ...rootSession,
   id: `fixture-live-${index}`,
@@ -119,6 +137,7 @@ const extraLiveSessions = Array.from({ length: 7 }, (_, index) => ({
   title: `추가 진행 작업 ${index + 1}`,
   childIds: [],
   runtimePresence: [],
+  executions: [],
   runId: '',
   loop: index < 5 ? { iteration: index + 1, phase: index === 0 ? 'act' : 'observe' } : null,
 }));
@@ -131,8 +150,12 @@ const originSession = {
   title: 'Codex 원래 작업 열기 검증',
   childIds: [],
   runtimePresence: [],
+  executions: [],
   runId: '',
   clientKind: 'codex-desktop',
+  cwd: 'D:\\moved-worktree',
+  originCwd: 'D:\\unregistered-origin',
+  workspace: 'unregistered-origin',
 };
 
 const projectlessSession = {
@@ -142,6 +165,7 @@ const projectlessSession = {
   provider: 'codex',
   title: '프로젝트 없이 시작한 Codex 대화',
   cwd: 'C:\\Users\\fixture\\Documents\\Codex\\2026-07-16\\new-chat',
+  originCwd: 'C:\\Users\\fixture\\Documents\\Codex\\2026-07-16\\new-chat',
   workspace: 'new-chat',
   clientKind: 'codex-desktop',
 };
@@ -172,9 +196,15 @@ const tmuxWindow = { id: 'tmux-window-id', nativeId: '@3', index: 0, name: 'fixt
 const tmuxSession = { id: 'tmux-session-id', nativeId: '$2', name: 'fixture-session', attached: false, windows: [tmuxWindow] };
 const tmuxDistro = { id: 'tmux-distro-id', name: 'FixtureLinux', tmuxVersion: 'tmux 3.4', sessions: [tmuxSession] };
 
+const sessionRecords = [
+  rootSession, childSession, grandchildSession, restingSession, originSession, projectlessSession,
+  ...extraLiveSessions, endedSession, waitingSession, failedSession, pausedSession, ...extraEndedSessions,
+];
+const enrichedSessionRecords = sessionRecords.map(session => enrichSession(session, sessionRecords, Date.now()));
+
 const snapshot = {
   generatedAt: now,
-  sessions: [rootSession, childSession, grandchildSession, restingSession, originSession, projectlessSession, ...extraLiveSessions, endedSession, waitingSession, ...extraEndedSessions],
+  sessions: enrichedSessionRecords,
   automations: [
     {
       id: 'fixture-daily', kind: 'cron', name: '매일 품질 점검', status: 'ACTIVE', enabled: true,
@@ -232,6 +262,7 @@ const snapshot = {
 const initialTerminals = [
   { id: 'terminal-main', type: 'powershell', title: 'Fixture PowerShell', status: 'running', pid: 41001, cwd: 'D:\\fixture' },
   { id: 'terminal-ended', type: 'powershell', title: 'Fixture Ended', status: 'exited', pid: 41002, cwd: 'D:\\fixture' },
+  { id: 'terminal-failed', type: 'powershell', title: 'Fixture Failed', status: 'failed', pid: null, cwd: 'D:\\fixture' },
   { id: 'terminal-race-a', type: 'powershell', title: 'Fixture Race A', status: 'running', pid: 41003, cwd: 'D:\\fixture' },
   { id: 'terminal-race-b', type: 'powershell', title: 'Fixture Race B', status: 'running', pid: 41004, cwd: 'D:\\fixture' },
 ];
@@ -325,6 +356,9 @@ const api = {
   },
   runAgent: options => controlled('runAgent', [options], { ok: true, runId: 'fixture-new-run' }),
   stopAgent: runId => controlled('stopAgent', [runId], { ok: true }),
+  pauseAgent: runId => controlled('pauseAgent', [runId], { ok: true, status: 'paused' }),
+  resumeAgentRun: runId => controlled('resumeAgentRun', [runId], { ok: true, status: 'running' }),
+  retryAgent: runId => controlled('retryAgent', [runId], { ok: true, runId: 'fixture-retry-run', retriedFrom: runId }),
   activeRuns: async () => [],
   probeProviders: async () => controlled('probeProviders', [], Object.fromEntries(providers.map(provider => [provider.id, true]))),
   setProviderVisibility: preference => controlled('setProviderVisibility', [preference]),
@@ -411,6 +445,7 @@ const testApi = {
   restoreCurrentUpdate: () => { update = clone(currentUpdate); updateStateListeners.forEach(listener => listener(clone(update))); return clone(update); },
   triggerAttention: sessionId => { attentionListeners.forEach(listener => listener({ sessionId })); return attentionListeners.size; },
   emitSnapshot: () => { snapshotListeners.forEach(listener => listener(clone(snapshot))); return snapshotListeners.size; },
+  emitTerminalData: (id, data) => { terminalDataListeners.forEach(listener => listener({ id, data })); return terminalDataListeners.size; },
 };
 
 contextBridge.exposeInMainWorld('loadtoagent', api);

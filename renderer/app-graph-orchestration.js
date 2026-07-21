@@ -14,6 +14,7 @@ window.LoadToAgentAppFactories.createGraphOrchestration = function createGraphOr
     connectedGraphSessions,
     sortGraphNodes,
     runtimeAgentSummary,
+    liveTmuxEntries,
     runtimeSeparatedOverview,
     focusedGraph,
     scheduleAgentWorkflowConnections,
@@ -49,21 +50,24 @@ window.LoadToAgentAppFactories.createGraphOrchestration = function createGraphOr
       $("#graphResetBtn").classList.remove("hidden");
       scheduleAgentWorkflowConnections();
     } else {
-      const runtime = runtimeAgentSummary(model);
-      $("#liveSessionGrid").innerHTML = `<details class="runtime-disclosure" open>
+      const runtime = runtimeAgentSummary(model, liveTmuxEntries(state.snapshot && state.snapshot.tmux));
+      $("#liveSessionGrid").innerHTML = `<details class="runtime-disclosure" data-disclosure-key="home:runtime-overview" open>
         <summary>
         <span>
         <b>${esc(t("graph.ai_working_count", { count: runtime.activeCount }))}</b>
-        <small>${esc(t("graph.runtime_count_explanation", { sessions: runtime.activeCount, helpers: runtime.activeHelperCount }))}</small>
+        <small>${esc(t("graph.runtime_count_explanation", { standard: runtime.standardCount, tmux: runtime.tmuxCount, helpers: runtime.activeHelperCount }))}${runtime.runningExecutionCount ? ` · ${esc(t("graph.runtime_execution_count", { shell: runtime.shellExecutionCount, background: runtime.backgroundExecutionCount }))}` : ""}</small>
         </span>
         <em>${esc(t("graph.view_detailed_flow"))} <i aria-hidden="true">↓</i>
         </em>
         </summary>${runtimeSeparatedOverview(roots, model)}</details>`;
       $("#graphBreadcrumbs").innerHTML =
         `<span class="map-hint">
-          ${esc(t("graph.main_sessions"))} <b>${runtime.rootCount}</b> ·
+          ${esc(t("graph.standard_ai"))} <b>${runtime.standardCount}</b> ·
+          ${esc(t("graph.tmux_ai"))} <b>${runtime.tmuxCount}</b> ·
           ${esc(t("graph.active_helper_ai"))} <b>${runtime.activeHelperCount}</b> ·
-          ${esc(t("graph.helper_ai_history"))} <b>${runtime.helperRecordCount}</b>
+          ${esc(t("graph.helper_ai_history"))} <b>${runtime.helperRecordCount}</b> ·
+          ${esc(t("graph.running_shell"))} <b>${runtime.shellExecutionCount}</b> ·
+          ${esc(t("graph.running_background"))} <b>${runtime.backgroundExecutionCount}</b>
         </span>`;
       $("#graphResetBtn").classList.add("hidden");
       return runtime.activeCount;

@@ -4,7 +4,29 @@ LoadToAgent는 제공사별 이벤트를 아래 공통 단계로 정규화합니
 
 `queued → session-start → turn-start → reasoning/tool/message → turn-complete → session-end`
 
-상태는 `starting`, `running`, `waiting`, `idle`, `completed`, `failed`, `cancelled` 중 하나입니다. 구조화 완료 이벤트가 없는 외부 세션은 파일 갱신 시각과 마지막 메시지 역할을 이용해 `running`, `waiting`, `idle`을 구분합니다.
+상태는 `starting`, `running`, `paused`, `waiting`, `idle`, `completed`, `failed`, `cancelled` 중 하나입니다. `paused`는 LoadToAgent가 시작하고 사용자가 일시정지한 관리 실행에만 사용합니다. 구조화 완료 이벤트가 없는 외부 세션은 파일 갱신 시각과 마지막 메시지 역할을 이용해 `running`, `waiting`, `idle`을 구분합니다. 명시적인 사용자 입력 도구가 응답을 기다리거나 최종 assistant 메시지가 질문·선택 요청으로 끝나면, WCC 사용 여부와 관계없이 `waiting`으로 분류합니다. 이후 실제 사용자 메시지가 기록되면 해당 대기는 해제됩니다.
+
+## 관리 인텔리전스 계약
+
+제공사별 원본 세션은 화면에 전달되기 전에 다음 관리 정보로 보강됩니다.
+
+- `attention`: 승인·결정·입력·오류·일시정지처럼 사용자 조치가 필요한 이유와 관측 신뢰도
+- `progress`: 현재 단계, 완료율, 최근 체크포인트, 막힘 사유와 마지막 활동 시각
+- `health`: 실패, 정체, 장시간 대기, 컨텍스트 위험, 반복 실패, 고아 에이전트 신호
+- `controlCapabilities`: 실제 연결과 관리 실행 상태에 근거한 응답·중지·일시정지·재개·재시도·재배정 가능 여부
+- `evidence`: 상태·계층·완료 판단이 직접 관측인지 추론인지와 근거 출처
+- `outcome`: 완료 요약, 감지된 파일·테스트·커밋, 검증 이벤트와 완료 관측 여부
+
+관측 이벤트가 없는 값은 사실로 단정하지 않고 `inferred` 또는 `unverified`로 표시합니다. 시간 기반 건강 신호는 매분 다시 계산됩니다.
+
+## 셸·백그라운드 실행 계약
+
+- 각 AI 세션은 `executions`에 자신이 시작한 셸과 백그라운드 실행을 별도 실행 단위로 보관합니다. 서브에이전트 세션과 섞어 세지 않습니다.
+- 공통 필드는 `kind(shell|background)`, `mode(foreground|background)`, `status(running|completed|failed)`, 명령, 작업 폴더, 호출 ID, 시작·갱신·완료 시각입니다.
+- Codex는 `shell_command`, `exec_command`와 `custom_tool_call: exec` 안의 `tools.exec_command(...)`를 인식합니다. 장기 실행이 반환한 cell/session ID는 후속 `wait`·`write_stdin` 호출과 연결합니다.
+- Claude는 `Bash` 계열의 `run_in_background`와 후속 `TaskOutput`·`BashOutput`을 같은 실행으로 연결합니다. Gemini/Grok의 구조화 `tool_use`·`tool_result`에서도 셸 도구를 같은 계약으로 정규화합니다.
+- 완료·실패 판정은 실행 도구의 바깥 결과 헤더와 실제 종료 코드 행을 우선합니다. 명령 출력 본문에 우연히 포함된 `session`이나 `exitCode` 문자열은 런타임 ID 또는 실패로 해석하지 않습니다.
+- 스냅샷에는 최근 120개 실행을 보존하고, UI는 실행 중 항목을 먼저 표시한 뒤 최근 완료 기록을 제한적으로 보여 줍니다.
 
 ## Claude
 

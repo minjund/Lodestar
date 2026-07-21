@@ -1,0 +1,247 @@
+'use strict';
+
+const LIVE_STATUSES = new Set(['starting', 'running']);
+const COMPLETE_STATUSES = new Set(['completed', 'cancelled', 'failed']);
+const FAILURE_PATTERN = /(?:error|failed|failure|fatal|exception|오류|실패)/i;
+const PERMISSION_PATTERN = /(?:permission|approve|approval|권한|승인)/i;
+const DECISION_PATTERN = /(?:choose|select|decision|선택|결정|골라)/i;
+const INPUT_PATTERN = /(?:input|reply|answer|confirm|provide|입력|답변|확인|알려|제공)/i;
+const TEST_PATTERN = /(?:test|spec|검증|테스트)/i;
+
+function text(value, limit = 1200) {
+  const output = String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
+  return output.length > limit ? `${output.slice(0, limit).trimEnd()}…` : output;
+}
+
+function timestamp(value) {
+  const parsed = Date.parse(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function latestActivity(session) {
+  const values = [session.updatedAt, session.startedAt];
+  for (const row of session.messages || []) values.push(row && row.timestamp);
+  for (const row of session.lifecycle || []) values.push(row && (row.completedAt || row.timestamp));
+  const millis = Math.max(0, ...values.map(timestamp));
+  return millis ? new Date(millis).toISOString() : null;
+}
+
+function latestMeaningfulText(session) {
+  const messages = [...(session.messages || [])].reverse();
+  const preferred = messages.find(row => row && row.role === 'assistant' && text(row.text));
+  const fallback = messages.find(row => row && text(row.text));
+  return text((preferred || fallback || {}).text || session.statusDetail || session.result || '', 360);
+}
+
+function controlCapabilities(session) {
+  const live = LIVE_STATUSES.has(session.status);
+  const managed = Boolean(session.runId);
+  const resumable = Boolean(session.externalId && ['claude', 'codex', 'gemini'].includes(session.provider));
+  const directlyControllable = (session.runtimePresence || []).some(item => item && (item.terminalId || item.paneId || item.nativeId));
+  const canSend = directlyControllable || resumable;
+  return {
+    managed,
+    respond: (session.status === 'waiting' || live) && canSend,
+    approve: session.status === 'waiting' && canSend,
+    deny: session.status === 'waiting' && canSend,
+    sendInstruction: canSend,
+    stop: managed && (live || session.status === 'paused'),
+    pause: managed && session.status === 'running',
+    resume: (managed && session.status === 'paused') || (!live && resumable),
+    retry: managed && ['failed', 'cancelled'].includes(session.status),
+    reassign: Boolean(session.cwd && (session.title || session.sharedGoal || latestMeaningfulText(session))),
+    openOrigin: ['claude-desktop', 'codex-desktop'].includes(session.clientKind),
+  };
+}
+
+function evidenceFor(session) {
+  const statusObserved = Boolean(session.statusObserved || session.runId || session.runtimePresence?.length);
+  const delegation = session.delegation || {};
+  const hierarchyObserved = !session.parentId
+    || Boolean(delegation.assignmentObserved && delegation.assignmentSource !== 'unavailable')
+    || session.source === 'collaboration-history';
+  const completionObserved = Boolean(session.completionObserved || (session.runId && COMPLETE_STATUSES.has(session.status)));
+  const sources = [session.sourceLabel, statusObserved ? 'runtime-event' : 'activity-inference'];
+  if (session.parentId) sources.push(hierarchyObserved ? 'delegation-event' : 'hierarchy-inference');
+  if (completionObserved) sources.push('completion-event');
+  return {
+    confidence: statusObserved && hierarchyObserved ? 'high' : statusObserved || hierarchyObserved ? 'medium' : 'low',
+    status: statusObserved ? 'observed' : 'inferred',
+    hierarchy: hierarchyObserved ? 'observed' : 'inferred',
+    completion: completionObserved ? 'observed' : 'unverified',
+    sources: [...new Set(sources.filter(Boolean).map(value => text(value, 80)))],
+  };
+}
+
+function progressFor(session, attention) {
+  const lifecycle = (session.lifecycle || []).filter(Boolean);
+  const checkpoints = lifecycle.slice(-12).map((row, index) => ({
+    id: String(row.id || `${session.id}:checkpoint:${index}`),
+    label: text(row.label || row.type || 'Activity', 140),
+    detail: text(row.detail || '', 240),
+    status: ['failed', 'error'].includes(row.status) ? 'failed'
+      : ['running', 'pending', 'started'].includes(row.status) ? 'running'
+        : 'completed',
+    timestamp: row.completedAt || row.timestamp || session.updatedAt || null,
+  }));
+  const completedSteps = checkpoints.filter(row => row.status === 'completed').length;
+  const failedSteps = checkpoints.filter(row => row.status === 'failed').length;
+  const running = [...checkpoints].reverse().find(row => row.status === 'running');
+  const last = checkpoints.at(-1);
+  const totalSteps = checkpoints.length;
+  let percent = totalSteps ? Math.round(completedSteps / totalSteps * 100) : 0;
+  if (session.status === 'completed') percent = 100;
+  else if (LIVE_STATUSES.has(session.status) && percent >= 100) percent = 95;
+  const stage = session.status === 'completed' ? 'completed'
+    : session.status === 'failed' ? 'failed'
+      : session.status === 'waiting' ? 'waiting'
+        : session.status === 'paused' ? 'paused'
+          : LIVE_STATUSES.has(session.status) ? 'executing' : 'idle';
+  return {
+    stage,
+    percent,
+    completedSteps,
+    failedSteps,
+    totalSteps,
+    currentStep: text((running || last || {}).label || session.statusDetail || '', 180),
+    blocker: attention.required ? attention.summary : '',
+    lastActivityAt: latestActivity(session),
+    source: totalSteps ? 'lifecycle-events' : 'session-status',
+    checkpoints,
+  };
+}
+
+function extractArtifacts(session) {
+  const body = [
+    session.result,
+    ...(session.messages || []).map(row => row && row.text),
+    ...(session.lifecycle || []).map(row => row && `${row.label || ''} ${row.detail || ''}`),
+  ].filter(Boolean).join('\n');
+  const artifacts = [];
+  const seen = new Set();
+  const add = (kind, value, verified = false) => {
+    const clean = text(value, 260).replace(/[),.;:]+$/, '');
+    const key = `${kind}:${clean.toLowerCase()}`;
+    if (!clean || seen.has(key) || artifacts.length >= 24) return;
+    seen.add(key);
+    artifacts.push({ kind, value: clean, verified });
+  };
+  const filePattern = /(?:[A-Za-z]:\\|\/)?(?:[\w.@-]+[\\/])+[\w.@()+-]+\.[A-Za-z0-9]{1,12}/g;
+  for (const match of body.match(filePattern) || []) add(TEST_PATTERN.test(match) ? 'test' : 'file', match, false);
+  if (/(?:commit|커밋)/i.test(body)) {
+    for (const match of body.match(/\b[0-9a-f]{7,40}\b/gi) || []) add('commit', match, true);
+  }
+  return artifacts;
+}
+
+function outcomeFor(session, evidence) {
+  const artifacts = extractArtifacts(session);
+  const checks = (session.lifecycle || [])
+    .filter(row => row && TEST_PATTERN.test(`${row.label || ''} ${row.detail || ''}`))
+    .slice(-12)
+    .map(row => ({
+      label: text(row.label || row.detail || 'Test', 180),
+      status: row.status === 'failed' ? 'failed' : row.status === 'running' ? 'running' : 'passed',
+      timestamp: row.completedAt || row.timestamp || null,
+    }));
+  const latestAssistant = [...(session.messages || [])].reverse().find(row => row && row.role === 'assistant' && text(row.text));
+  return {
+    status: session.status === 'completed' ? 'completed'
+      : session.status === 'failed' ? 'failed'
+        : session.status === 'cancelled' ? 'cancelled' : 'in-progress',
+    summary: text(session.result || (COMPLETE_STATUSES.has(session.status) && latestAssistant && latestAssistant.text) || session.statusDetail || '', 800),
+    verified: evidence.completion === 'observed',
+    verification: evidence.completion,
+    completedAt: session.completedAt || session.endedAt || null,
+    artifacts,
+    checks,
+  };
+}
+
+function attentionFor(session) {
+  const latest = latestMeaningfulText(session);
+  const combined = `${session.statusDetail || ''} ${latest}`;
+  let kind = 'none';
+  if (session.status === 'failed' || (session.status === 'waiting' && FAILURE_PATTERN.test(session.statusDetail || ''))) kind = 'error';
+  else if (session.status === 'paused') kind = 'paused';
+  else if (session.status === 'waiting' && PERMISSION_PATTERN.test(combined)) kind = 'approval';
+  else if (session.status === 'waiting' && DECISION_PATTERN.test(combined)) kind = 'decision';
+  else if (session.status === 'waiting' && INPUT_PATTERN.test(combined)) kind = 'input';
+  else if (session.status === 'waiting') kind = 'response';
+  const required = kind !== 'none';
+  const summaries = {
+    error: session.statusDetail || latest || 'The run failed and needs review.',
+    paused: session.statusDetail || 'The run is paused.',
+    approval: latest || session.statusDetail || 'Approval is required.',
+    decision: latest || session.statusDetail || 'A decision is required.',
+    input: latest || session.statusDetail || 'Input is required.',
+    response: latest || session.statusDetail || 'A response is required.',
+  };
+  return {
+    required,
+    kind,
+    summary: required ? text(summaries[kind], 360) : '',
+    requestedAt: required ? latestActivity(session) : null,
+    source: session.statusObserved || session.runId ? 'observed-status' : 'message-inference',
+    confidence: session.statusObserved || session.runId ? 'high' : required ? 'medium' : 'low',
+  };
+}
+
+function healthFor(session, sessions, attention, progress, evidence, nowValue) {
+  const now = Number(nowValue || Date.now());
+  const byId = new Map((sessions || []).map(row => [row.id, row]));
+  const signals = [];
+  const add = (code, severity, detail = '') => signals.push({ code, severity, detail: text(detail, 240) });
+  const activity = timestamp(progress.lastActivityAt);
+  const ageMs = activity ? Math.max(0, now - activity) : 0;
+  if (session.status === 'failed') add('run-failed', 'critical', session.statusDetail);
+  if (session.status === 'paused') add('run-paused', 'warning', session.statusDetail);
+  if (LIVE_STATUSES.has(session.status) && ageMs >= 10 * 60_000) add('stalled', 'critical', progress.currentStep);
+  else if (LIVE_STATUSES.has(session.status) && ageMs >= 2 * 60_000) add('stale', 'warning', progress.currentStep);
+  if (session.status === 'waiting' && ageMs >= 60 * 60_000) add('waiting-too-long', 'critical', attention.summary);
+  else if (session.status === 'waiting' && ageMs >= 10 * 60_000) add('waiting-too-long', 'warning', attention.summary);
+  const contextPercent = Number(session.context && session.context.percent || 0);
+  if (contextPercent >= 90) add('context-critical', 'critical', `${contextPercent.toFixed(1)}%`);
+  else if (contextPercent >= 75) add('context-warning', 'warning', `${contextPercent.toFixed(1)}%`);
+  if (progress.failedSteps >= 2) add('repeated-failures', 'critical', String(progress.failedSteps));
+  if (session.parentId && !byId.has(session.parentId)) add('orphan-agent', 'warning', session.parentId);
+  if (evidence.confidence === 'low') add('low-confidence', 'info', evidence.sources.join(', '));
+  const rank = { info: 1, warning: 2, critical: 3 };
+  const max = signals.reduce((value, signal) => Math.max(value, rank[signal.severity] || 0), 0);
+  return {
+    level: max >= 3 ? 'critical' : max === 2 ? 'warning' : attention.required ? 'attention' : max === 1 ? 'unknown' : 'healthy',
+    score: Math.max(0, 100 - signals.reduce((sum, signal) => sum + (signal.severity === 'critical' ? 35 : signal.severity === 'warning' ? 18 : 5), 0)),
+    signals,
+    lastActivityAt: progress.lastActivityAt,
+    ageSeconds: activity ? Math.round(ageMs / 1000) : null,
+  };
+}
+
+function enrichSession(session, sessions = [], nowValue = Date.now()) {
+  if (!session) return session;
+  const attention = attentionFor(session);
+  const progress = progressFor(session, attention);
+  const evidence = evidenceFor(session);
+  const controls = controlCapabilities(session);
+  const health = healthFor(session, sessions, attention, progress, evidence, nowValue);
+  return {
+    ...session,
+    attention,
+    progress,
+    health,
+    controlCapabilities: controls,
+    evidence,
+    outcome: outcomeFor(session, evidence),
+  };
+}
+
+module.exports = {
+  attentionFor,
+  controlCapabilities,
+  enrichSession,
+  evidenceFor,
+  extractArtifacts,
+  healthFor,
+  outcomeFor,
+  progressFor,
+};

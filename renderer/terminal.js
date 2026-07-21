@@ -4,6 +4,7 @@
   const { $, esc, uiLocale, providerLabel, reportRecoverableError } = window.LoadToAgentRendererUtils;
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
   const SESSION_ORDER_KEY = 'loadtoagent:terminal-session-order:v1';
+  const TERMINAL_VIEW_KEY = 'loadtoagent:terminal-view:v1';
 
   function loadSessionOrder() {
     try {
@@ -14,6 +15,19 @@
       return [];
     }
   }
+
+  function loadTerminalViewPreferences() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(TERMINAL_VIEW_KEY) || '{}');
+      const fontSize = Math.min(20, Math.max(12, Number(saved.fontSize) || 15));
+      return { fontSize };
+    } catch (error) {
+      reportRecoverableError('terminal-view-load', error);
+      return { fontSize: 15 };
+    }
+  }
+
+  const terminalViewPreferences = loadTerminalViewPreferences();
 
   const state = {
     sessions: [],
@@ -28,6 +42,7 @@
     remoteCapture: '',
     remoteViewportAnchor: null,
     remoteViewportAtBottom: false,
+    remoteCaptureApplying: false,
     captureTimer: null,
     captureInFlight: false,
     captureGeneration: 0,
@@ -42,14 +57,23 @@
     historyCollapsed: false,
     historyRefreshTimer: null,
     historyRequests: new Map(),
+    historyRenderKey: '',
+    historyPointerActive: false,
+    historyUserRevision: 0,
+    historyFollowFrame: 0,
+    historyRenderPending: false,
+    historyFlushFrame: 0,
     commandDrafts: new Map(),
     commandHistory: new Map(),
     commandHistoryNavigation: { targetId: '', index: -1, draft: '' },
     commandSending: false,
     pendingActions: new Set(),
     sessionOrder: loadSessionOrder(),
+    sessionRenderKey: '',
     draggedSessionId: '',
     sessionDragJustEnded: false,
+    terminalFontSize: terminalViewPreferences.fontSize,
+    terminalFocusMode: false,
     platform: { id: 'win32', label: 'Windows', localShell: 'powershell', localShellLabel: 'Windows Terminal', nativeTmux: false },
   };
 
@@ -188,6 +212,58 @@
     element.dataset.status = status;
   }
 
+  function persistTerminalViewPreferences() {
+    try {
+      localStorage.setItem(TERMINAL_VIEW_KEY, JSON.stringify({ fontSize: state.terminalFontSize }));
+    } catch (error) {
+      reportRecoverableError('terminal-view-save', error);
+    }
+  }
+
+  function syncTerminalViewControls() {
+    const section = $('#terminalSection');
+    const focusButton = $('#terminalFocusBtn');
+    section?.classList.toggle('terminal-focus-mode', state.terminalFocusMode);
+    $('#terminalResourcePanel')?.toggleAttribute('inert', state.terminalFocusMode);
+    $('#terminalHistoryPanel')?.toggleAttribute('inert', state.terminalFocusMode);
+    if ($('#terminalFontSizeLabel')) $('#terminalFontSizeLabel').textContent = `${state.terminalFontSize}px`;
+    if ($('#terminalFontDecreaseBtn')) $('#terminalFontDecreaseBtn').disabled = state.terminalFontSize <= 12;
+    if ($('#terminalFontIncreaseBtn')) $('#terminalFontIncreaseBtn').disabled = state.terminalFontSize >= 20;
+    if (focusButton) {
+      focusButton.setAttribute('aria-pressed', state.terminalFocusMode ? 'true' : 'false');
+      focusButton.title = state.terminalFocusMode ? t('terminal.view.focus_exit') : t('terminal.view.focus');
+      const label = focusButton.querySelector('span');
+      if (label) label.textContent = state.terminalFocusMode ? t('terminal.view.focus_exit') : t('terminal.view.focus');
+    }
+  }
+
+  function refitVisibleTerminal() {
+    const session = currentSession();
+    const entry = session ? state.terminals.get(session.id) : state.remoteTerminal;
+    fitEntry(entry, session?.id || '');
+  }
+
+  function setTerminalFontSize(value) {
+    const next = Math.min(20, Math.max(12, Math.round(Number(value) || 15)));
+    if (next === state.terminalFontSize) return;
+    state.terminalFontSize = next;
+    for (const entry of [...state.terminals.values(), state.remoteTerminal].filter(Boolean)) {
+      entry.terminal.options.fontSize = next;
+      entry.terminal.options.lineHeight = next >= 17 ? 1.32 : 1.28;
+    }
+    persistTerminalViewPreferences();
+    syncTerminalViewControls();
+    refitVisibleTerminal();
+    window.LoadToAgentA11y?.announce(t('terminal.view.font_size_value', { size: next }));
+  }
+
+  function toggleTerminalFocusMode() {
+    state.terminalFocusMode = !state.terminalFocusMode;
+    syncTerminalViewControls();
+    requestAnimationFrame(refitVisibleTerminal);
+    window.LoadToAgentA11y?.announce(state.terminalFocusMode ? t('terminal.view.focus_on') : t('terminal.view.focus_off'));
+  }
+
   function currentTargetId() {
     const session = currentSession();
     if (session) return session.id;
@@ -215,6 +291,140 @@
     }
   }
 
+  function observedProgressText(value) {
+    const observed = window.LoadToAgentI18n.observedText
+      ? window.LoadToAgentI18n.observedText(value)
+      : String(value || '');
+    const readable = window.LoadToAgentApp?.readableActivityDetail?.(observed);
+    return String(readable || observed || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function terminalSubagentRecords(root) {
+    const sessions = Array.isArray(state.snapshot?.sessions) ? state.snapshot.sessions : [];
+    const byId = new Map(sessions.map(session => [session.id, session]));
+    // A detail refresh can contain newer root collaboration events than the card
+    // in the snapshot, so keep it as the authoritative root record.
+    byId.set(root.id, root);
+    const records = [];
+    const seen = new Set([root.id]);
+    const visit = (parent, depth) => {
+      const declaredIds = Array.isArray(parent?.childIds) ? parent.childIds : [];
+      const inferredIds = sessions
+        .filter(session => session?.parentId === parent?.id)
+        .map(session => session.id);
+      for (const id of [...new Set([...declaredIds, ...inferredIds])]) {
+        if (!id || seen.has(id)) continue;
+        const session = byId.get(id);
+        if (!session) continue;
+        seen.add(id);
+        records.push({ session, parent, depth });
+        visit(session, depth + 1);
+      }
+    };
+    visit(root, 1);
+
+    return records.map(record => {
+      const { session, parent, depth } = record;
+      const taskName = session.taskName || session.delegation?.taskName || session.title || '';
+      const communications = Array.isArray(parent?.collaboration?.communications)
+        ? parent.collaboration.communications
+        : [];
+      const related = communications
+        .filter(event => event && !event.protected)
+        .filter(event => ['assignment', 'started', 'followup', 'message', 'result', 'interrupt'].includes(event.kind))
+        .filter(event => event.childId === session.id || (taskName && event.taskName === taskName));
+      const assignmentEvent = [...related].reverse().find(event => event.kind === 'assignment' && observedProgressText(event.text));
+      const delegation = session.delegation || {};
+      const assignment = delegation.assignmentObserved && !delegation.assignmentProtected && observedProgressText(delegation.assignment)
+        ? observedProgressText(delegation.assignment)
+        : (assignmentEvent ? observedProgressText(assignmentEvent.text) : observedProgressText(session.title || taskName));
+      const lifecycle = (Array.isArray(session.lifecycle) ? session.lifecycle : [])
+        .filter(item => item && (item.label || item.detail))
+        .map((item, index) => ({
+          id: item.id || `lifecycle:${index}`,
+          kind: item.type || 'activity',
+          label: observedProgressText(item.label || t('ui.progress')),
+          detail: observedProgressText(item.detail),
+          timestamp: item.timestamp || session.updatedAt || '',
+        }));
+      const coordination = related
+        .filter(event => event.kind !== 'assignment')
+        .map(event => ({
+          id: event.id || `${event.kind}:${event.timestamp || ''}`,
+          kind: event.kind,
+          label: observedProgressText(event.label || event.kind),
+          detail: event.kind === 'started' && String(event.text || '').trim().toLowerCase() === 'started'
+            ? ''
+            : observedProgressText(event.text),
+          timestamp: event.timestamp || session.updatedAt || '',
+        }));
+      const events = [...lifecycle, ...coordination]
+        .sort((left, right) => (Date.parse(left.timestamp || 0) || 0) - (Date.parse(right.timestamp || 0) || 0))
+        .filter((event, index, items) => index === items.findIndex(candidate => (
+          candidate.kind === event.kind
+          && candidate.label === event.label
+          && candidate.detail === event.detail
+          && candidate.timestamp === event.timestamp
+        )))
+        .slice(-4);
+      const workState = window.LoadToAgentApp?.subagentWorkState?.(session)
+        || (session.status === 'running' || session.status === 'starting' ? 'working' : (session.status === 'failed' ? 'attention' : 'resting'));
+      const stateLabel = window.LoadToAgentApp?.subagentWorkLabel?.(session)
+        || ({ working: t('ui.working'), attention: t('ui.needs_attention'), resting: t('ui.idle') })[workState];
+      return {
+        session,
+        depth,
+        taskName,
+        assignment,
+        events,
+        workState,
+        stateLabel,
+        name: observedProgressText(session.agentName || taskName || session.title || providerLabel(session.provider)),
+        role: observedProgressText(session.agentRole || providerLabel(session.provider)),
+        statusDetail: observedProgressText(session.statusDetail),
+      };
+    });
+  }
+
+  function terminalSubagentProgress(root) {
+    const records = terminalSubagentRecords(root);
+    if (!records.length) return { html: '', key: [], count: 0, working: 0, attention: 0 };
+    const working = records.filter(record => record.workState === 'working').length;
+    const attention = records.filter(record => record.workState === 'attention').length;
+    const summary = [
+      t('tmux.subagents.connected_count', { count: records.length }),
+      working ? t('tmux.subagents.working_count', { count: working }) : t('tmux.subagents.all_idle'),
+      attention ? t('tmux.subagents.attention_count', { count: attention }) : '',
+    ].filter(Boolean).join(' · ');
+    const cards = records.map(record => {
+      const events = record.events.length
+        ? record.events.map(event => `<li data-terminal-subagent-event="${esc(event.kind)}">
+            <i></i><div><b>${esc(event.label || t('ui.progress'))}</b>${event.detail ? `<span>${esc(event.detail)}</span>` : ''}</div><time>${esc(timeLabel(event.timestamp))}</time>
+          </li>`).join('')
+        : `<li class="empty"><i></i><span>${esc(t('terminal.subagents.no_updates'))}</span></li>`;
+      return `<article class="terminal-subagent-card ${esc(record.workState)}" data-terminal-subagent-id="${esc(record.session.id)}" data-terminal-subagent-state="${esc(record.workState)}" data-terminal-subagent-depth="${record.depth}" style="--terminal-subagent-depth:${Math.min(record.depth - 1, 3)}">
+        <header><div><span>${record.depth > 1 ? '↳ ' : ''}${esc(record.name)}</span><small>${esc(record.role)}</small></div><b>${esc(record.stateLabel)}</b></header>
+        <div class="terminal-subagent-assignment"><em>${esc(t('drawer.assignment'))}</em><span>${esc(record.assignment || t('tmux.subagents.checking_assignment'))}</span></div>
+        ${record.statusDetail ? `<div class="terminal-subagent-current"><em>${esc(t('terminal.subagents.current'))}</em><span>${esc(record.statusDetail)}</span></div>` : ''}
+        <ol>${events}</ol>
+      </article>`;
+    }).join('');
+    return {
+      html: `<section class="terminal-subagent-progress" data-terminal-subagent-progress data-terminal-subagent-count="${records.length}">
+        <header><div><b>${esc(t('terminal.subagents.title'))}</b><span>${esc(t('terminal.subagents.description'))}</span></div><small>${esc(summary)}</small></header>
+        <div class="terminal-subagent-cards">${cards}</div>
+      </section>`,
+      key: records.map(record => [
+        record.session.id, record.session.parentId || '', record.depth, record.workState,
+        record.name, record.role, record.assignment, record.statusDetail,
+        record.events.map(event => [event.id, event.kind, event.label, event.detail, event.timestamp]),
+      ]),
+      count: records.length,
+      working,
+      attention,
+    };
+  }
+
   function renderHistoryPanel(forceBottom = false) {
     const panel = $('#terminalHistoryPanel');
     if (!panel) return;
@@ -233,21 +443,65 @@
     const messages = allMessages.filter(message => message.role === 'user' || message.role === 'assistant');
     const activityCount = allMessages.length - messages.length;
     const shown = messages.slice(-80);
+    const subagents = terminalSubagentProgress(agent);
     $('#terminalHistoryTitle').textContent = agent.title || t('terminal.history.provider_session', { provider: providerLabel(agent.provider) });
     $('#terminalHistoryMeta').textContent = [
       providerLabel(agent.provider),
       window.LoadToAgentI18n.t('session.messages', { count: messages.length }),
+      subagents.count ? t('tmux.subagents.connected_count', { count: subagents.count }) : '',
       activityCount ? window.LoadToAgentI18n.t('terminal.activity_details', { count: activityCount }) : '',
       messages.length > shown.length ? window.LoadToAgentI18n.t('session.latest_count', { count: shown.length }) : '',
     ].filter(Boolean).join(' · ');
     const list = $('#terminalHistoryList');
-    const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 90;
-    list.innerHTML = shown.length ? shown.map(message => {
-      const role = message.role === 'assistant' ? 'assistant' : (message.role === 'tool' ? 'tool' : (message.role === 'system' ? 'system' : 'user'));
-      const label = role === 'assistant' ? providerLabel(agent.provider) : (role === 'tool' ? (message.title || t('terminal.history.tool')) : (role === 'system' ? t('terminal.history.system') : t('terminal.history.me')));
-      return `<article class="terminal-history-message ${role}"><header><b>${esc(label)}</b><time>${esc(timeLabel(message.timestamp))}</time></header>${historyMessageHtml(message.text)}</article>`;
-    }).join('') : `<div class="terminal-history-empty"><b>${t('terminal.history.empty_title')}</b><span>${t('terminal.history.empty_description')}</span></div>`;
-    if (forceBottom || nearBottom) requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
+    const previousTop = list.scrollTop;
+    const wasAtBottom = window.LoadToAgentRendererUtils.isScrolledToEnd(list);
+    const renderKey = JSON.stringify([
+      agent.id,
+      uiLocale(),
+      providerLabel(agent.provider),
+      subagents.key,
+      shown.map(message => [message.id || '', message.role || '', message.title || '', message.timestamp || '', message.text || '']),
+    ]);
+    const contentChanged = state.historyRenderKey !== renderKey;
+    const selection = window.getSelection?.();
+    const selectionInside = Boolean(selection && !selection.isCollapsed && (
+      (selection.anchorNode && list.contains(selection.anchorNode))
+      || (selection.focusNode && list.contains(selection.focusNode))
+    ));
+    if (contentChanged && !forceBottom && (state.historyPointerActive || selectionInside)) {
+      state.historyRenderPending = true;
+      return;
+    }
+    state.historyRenderPending = false;
+    if (contentChanged) {
+      const conversationHtml = shown.length ? shown.map(message => {
+        const role = message.role === 'assistant' ? 'assistant' : (message.role === 'tool' ? 'tool' : (message.role === 'system' ? 'system' : 'user'));
+        const label = role === 'assistant' ? providerLabel(agent.provider) : (role === 'tool' ? (message.title || t('terminal.history.tool')) : (role === 'system' ? t('terminal.history.system') : t('terminal.history.me')));
+        return `<article class="terminal-history-message ${role}"><header><b>${esc(label)}</b><time>${esc(timeLabel(message.timestamp))}</time></header>${historyMessageHtml(message.text)}</article>`;
+      }).join('') : `<div class="terminal-history-empty${subagents.count ? ' with-subagents' : ''}"><b>${t('terminal.history.empty_title')}</b><span>${t('terminal.history.empty_description')}</span></div>`;
+      list.innerHTML = `${subagents.html}${conversationHtml}`;
+      state.historyRenderKey = renderKey;
+    }
+
+    const shouldFollow = forceBottom || (contentChanged && wasAtBottom && !state.historyPointerActive && !selectionInside);
+    if (state.historyFollowFrame) cancelAnimationFrame(state.historyFollowFrame);
+    state.historyFollowFrame = 0;
+    if (!contentChanged && !forceBottom) return;
+    if (!shouldFollow) {
+      list.scrollTop = Math.min(previousTop, Math.max(0, list.scrollHeight - list.clientHeight));
+      return;
+    }
+    const revision = state.historyUserRevision;
+    state.historyFollowFrame = requestAnimationFrame(() => {
+      state.historyFollowFrame = 0;
+      if (revision !== state.historyUserRevision || state.historyPointerActive) return;
+      const activeSelection = window.getSelection?.();
+      if (activeSelection && !activeSelection.isCollapsed && (
+        (activeSelection.anchorNode && list.contains(activeSelection.anchorNode))
+        || (activeSelection.focusNode && list.contains(activeSelection.focusNode))
+      )) return;
+      list.scrollTop = list.scrollHeight;
+    });
   }
 
   function bindAgent(agentSession, target) {
@@ -361,8 +615,8 @@
       convertEol: readOnly,
       screenReaderMode: true,
       fontFamily: '"Cascadia Code", Consolas, monospace',
-      fontSize: 13,
-      lineHeight: 1.22,
+      fontSize: state.terminalFontSize,
+      lineHeight: state.terminalFontSize >= 17 ? 1.32 : 1.28,
       scrollback: 10_000,
       theme: {
         background: '#080c12',
@@ -422,6 +676,8 @@
       notice,
       reorderSession,
       moveSessionByOffset,
+      setTerminalFontSize,
+      toggleTerminalFocusMode,
     });
   }
 
@@ -468,7 +724,12 @@
       // The binding is explicitly cleared when the terminal closes, and the
       // provider visibility guard above prevents hidden providers from leaking.
       if (updated && updated.updatedAt !== state.boundAgent.updatedAt) queueHistoryRefresh(updated);
+      // Child sessions are updated independently from their parent. The render
+      // key prevents unnecessary DOM replacement while still reflecting their
+      // latest lifecycle and collaboration events in the terminal history.
+      renderHistoryPanel();
     }
+    renderSessions();
     renderTmuxResources();
     renderTarget();
     if (state.active && state.selectedTmux) startCapture();
@@ -481,6 +742,20 @@
     const buffer = state.remoteTerminal.terminal.buffer.active;
     state.remoteViewportAnchor = Number(buffer.viewportY) || 0;
     state.remoteViewportAtBottom = state.remoteViewportAnchor >= Number(buffer.baseY || 0);
+    return true;
+  }
+
+  function scrollTmuxByLines(lines) {
+    if (!state.remoteTerminal) return false;
+    state.remoteTerminal.terminal.scrollLines(Math.trunc(Number(lines) || 0));
+    return true;
+  }
+
+  function scrollTerminalToLine(id, line) {
+    const entry = state.terminals.get(String(id || ''));
+    if (!entry) return false;
+    entry.userScrollRevision += 1;
+    entry.terminal.scrollToLine(Math.max(0, Math.floor(Number(line) || 0)));
     return true;
   }
 
@@ -498,6 +773,7 @@
       state.wslDistros = Array.isArray(environments) ? environments : [];
       state.initialized = true;
       configurePlatform();
+      syncTerminalViewControls();
       renderAll();
     })().catch(error => {
       state.initialized = false;
@@ -520,11 +796,14 @@
     openForAgent,
     resumeForAgent,
     scrollTmuxToLine,
+    scrollTmuxByLines,
+    scrollTerminalToLine,
   };
   window.addEventListener('loadtoagent:locale-changed', () => {
     refreshStatusLabels();
     if (!state.initialized) return;
     configurePlatform();
+    syncTerminalViewControls();
     renderAll();
   });
   init().catch(error => notice(t('terminal.error.initialization_failed', { message: errorMessage(error) }), 'error'));

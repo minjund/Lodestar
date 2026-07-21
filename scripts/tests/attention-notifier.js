@@ -48,6 +48,17 @@ function registerAttentionNotifierTests(context) {
     notifier.sync({ sessions: [] });
     assert.deepEqual(notifier.sync({ sessions: [second] }), ['waiting-b']);
     assert.equal(FakeNotification.created.length, 2);
+
+    const failed = {
+      id: 'failed-c',
+      provider: 'codex',
+      title: '검증 실패',
+      status: 'failed',
+      attention: { required: true, kind: 'error' },
+      health: { level: 'critical' },
+    };
+    assert.deepEqual(notifier.sync({ sessions: [second, failed] }), ['failed-c']);
+    assert.equal(FakeNotification.created.length, 3);
     notifier.dispose();
     assert.equal(FakeNotification.created.every(item => item.closed), true);
   });

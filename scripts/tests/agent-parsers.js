@@ -3,7 +3,8 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { parseClaude, parseCodex, attachHierarchy, isProjectlessSession } = require('../../src/agentMonitor');
+const { AgentMonitor, parseClaude, parseCodex, attachHierarchy, isProjectlessSession } = require('../../src/agentMonitor');
+const { assistantRequestsUserResponse } = require('../../src/agentMonitor/responseIntent');
 
 function registerClaudeParserTests(context) {
   const { test, temp, jsonl } = context;
@@ -16,12 +17,32 @@ function registerClaudeParserTests(context) {
     ]);
     const session = parseClaude(info);
     assert.equal(session.provider, 'claude');
+    assert.equal(session.originCwd, 'D:\\repo');
     assert.equal(session.title, '로그인 버그를 고쳐줘');
     assert.equal(session.usage.input, 280);
     assert.equal(session.usage.cachedInput, 50);
     assert.equal(session.usage.output, 60);
     assert.equal(session.context.window, 1_000_000);
     assert.ok(session.messages.some(item => item.type === 'tool'));
+
+    const backgroundShell = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'background-shell.jsonl'), [
+      { type: 'user', uuid: 'bg-u', timestamp: '2026-07-14T01:05:00Z', message: { role: 'user', content: '개발 서버를 백그라운드로 실행해줘' } },
+      { type: 'assistant', uuid: 'bg-a1', timestamp: '2026-07-14T01:05:01Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'bash-bg', name: 'Bash', input: { command: 'npm run dev', description: '개발 서버', run_in_background: true } }] } },
+      { type: 'user', uuid: 'bg-result-1', timestamp: '2026-07-14T01:05:02Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'bash-bg', content: 'Command running in background with ID: shell-42' }] } },
+      { type: 'assistant', uuid: 'bg-a2', timestamp: '2026-07-14T01:05:03Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'task-output', name: 'TaskOutput', input: { task_id: 'shell-42', block: true } }] } },
+      { type: 'user', uuid: 'bg-result-2', timestamp: '2026-07-14T01:05:04Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'task-output', content: 'Process exited with code 0' }] } },
+    ]));
+    assert.deepStrictEqual(backgroundShell.executions.map(item => [item.kind, item.mode, item.status]), [['shell', 'background', 'completed']]);
+    assert.equal(backgroundShell.executions[0].backgroundId, 'shell-42');
+    assert.equal(backgroundShell.executions[0].command, 'npm run dev');
+
+    const waiting = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'question.jsonl'), [
+      { type: 'user', uuid: 'question-u', timestamp: '2026-07-14T01:10:00Z', message: { role: 'user', content: '실행 환경을 정해줘' } },
+      { type: 'assistant', uuid: 'question-a', timestamp: '2026-07-14T01:10:01Z', message: { role: 'assistant', content: [{ type: 'text', text: 'WSL과 Windows 중 어떤 환경으로 진행할까요?' }] } },
+      { type: 'system', subtype: 'turn_complete', timestamp: '2026-07-14T01:10:02Z' },
+    ]));
+    assert.equal(waiting.status, 'waiting');
+    assert.equal(waiting.statusDetail, '답변 또는 선택 대기');
   });
 
   test('Claude 데스크톱 기록과 터미널 CLI 기록을 구분한다', () => {
@@ -37,6 +58,15 @@ function registerClaudeParserTests(context) {
     assert.equal(desktop.clientKind, 'claude-desktop');
     assert.equal(desktop.sourceLabel, 'Claude 데스크톱 앱');
     assert.equal(cli.clientKind, 'claude-cli');
+
+    const scheduled = parseClaude(jsonl(path.join(temp, 'claude', 'desktop', 'scheduled.jsonl'), [
+      { type: 'queue-operation', operation: 'enqueue', timestamp: '2026-07-14T01:10:00Z', sessionId: 'scheduled', content: '/scheduled-run --tick order-verify\n\nThis is an unattended scheduled wake-up.' },
+      { type: 'queue-operation', operation: 'dequeue', timestamp: '2026-07-14T01:10:01Z', sessionId: 'scheduled' },
+      { type: 'last-prompt', timestamp: '2026-07-14T01:10:02Z', sessionId: 'scheduled', lastPrompt: '/scheduled-run --tick order-verify…' },
+      { type: 'assistant', uuid: 'scheduled-a', timestamp: '2026-07-14T01:10:03Z', message: { role: 'assistant', content: [{ type: 'text', text: '예약 작업을 실행 중입니다.' }] } },
+    ]));
+    assert.equal(scheduled.title, '/scheduled-run --tick order-verify');
+    assert.equal(scheduled.clientKind, 'claude-desktop');
   });
 
   test('Claude 서브에이전트를 부모 세션에 연결한다', () => {
@@ -54,39 +84,132 @@ function registerClaudeParserTests(context) {
       { type: 'assistant', uuid: 'a1', timestamp: '2026-07-14T01:00:02Z', message: { role: 'assistant', content: [{ type: 'text', text: '처리 중입니다.' }] } },
       { type: 'user', uuid: 'u2', timestamp: '2026-07-14T01:00:03Z', message: { role: 'user', content: '<objective>가장 최근 실제 작업</objective>' } },
       { type: 'user', uuid: 'u3', timestamp: '2026-07-14T01:00:04Z', message: { role: 'user', content: '<task-notification><task-id>worker</task-id><status>completed</status></task-notification>' } },
+      { type: 'user', uuid: 'u4', timestamp: '2026-07-14T01:00:05Z', isMeta: true, sourceToolUseID: 'tool-memory', message: { role: 'user', content: '# memory-add\n내부 메모리 명령' } },
     ]));
     assert.equal(session.title, '가장 최근 실제 작업');
     assert.equal(session.messages.some(item => /local-command-caveat/.test(item.text)), false);
+    assert.equal(session.messages.some(item => /memory-add|내부 메모리 명령/.test(item.text)), false);
+  });
+
+  test('Claude 메모리 추출과 인증 점검은 사용자 작업 목록에서 제외한다', () => {
+    const home = path.join(temp, 'utility-home');
+    const project = path.join(home, '.claude', 'projects', 'D--repo');
+    const memory = parseClaude(jsonl(path.join(project, 'memory.jsonl'), [
+      { type: 'user', timestamp: '2026-07-14T01:20:00Z', message: { role: 'user', content: 'Extract durable memory candidates from this Claude Code transcript tail. Return ONLY JSON array. No markdown.' } },
+      { type: 'assistant', timestamp: '2026-07-14T01:20:01Z', message: { role: 'assistant', content: '[]' } },
+    ]));
+    const authentication = parseClaude(jsonl(path.join(project, 'authentication.jsonl'), [
+      { type: 'user', timestamp: '2026-07-14T01:21:00Z', message: { role: 'user', content: 'Reply with exactly OK. Do not use tools.' } },
+      { type: 'assistant', timestamp: '2026-07-14T01:21:01Z', message: { role: 'assistant', content: 'OK' } },
+    ]));
+    assert.equal(memory.utilityKind, 'memory-extraction');
+    assert.equal(authentication.utilityKind, 'authentication-check');
+    assert.equal(memory.messages.some(item => item.role === 'user'), false);
+    assert.equal(authentication.messages.some(item => item.role === 'user'), false);
+
+    const snapshot = new AgentMonitor({ home }).scanNow();
+    assert.deepStrictEqual(snapshot.sessions.filter(session => session.provider === 'claude'), []);
   });
 
 }
 
 function registerCodexParserTests(context) {
   const { test, temp, jsonl } = context;
-  test('Codex thread, turn, item, token_count를 정규화한다', () => {
+  test('Codex thread, turn, item, token_count와 사용자 응답 대기를 정규화한다', () => {
     const file = path.join(temp, 'codex', 'rollout-test.jsonl');
     const info = jsonl(file, [
       { timestamp: '2026-07-14T02:00:00Z', type: 'session_meta', payload: { id: 'codex-session', cwd: 'D:\\repo', originator: 'Codex Desktop', source: 'vscode', thread_source: 'user', git: { branch: 'main' } } },
-      { timestamp: '2026-07-14T02:00:01Z', type: 'turn_context', payload: { model: 'gpt-5.4', cwd: 'D:\\repo' } },
+      { timestamp: '2026-07-14T02:00:01Z', type: 'turn_context', payload: { model: 'gpt-5.4', cwd: 'D:\\repo\\packages\\dashboard' } },
       { timestamp: '2026-07-14T02:00:02Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-1', started_at: '2026-07-14T02:00:02Z' } },
       { timestamp: '2026-07-14T02:00:03Z', type: 'event_msg', payload: { type: 'user_message', client_id: 'u1', message: '테스트를 실행해줘' } },
       { timestamp: '2026-07-14T02:00:04Z', type: 'response_item', payload: { type: 'function_call', id: 'call-1', call_id: 'call-1', name: 'shell_command', arguments: '{"command":"npm test"}' } },
+      { timestamp: '2026-07-14T02:00:04.500Z', type: 'response_item', payload: { type: 'function_call_output', call_id: 'call-1', output: 'Exit code: 0\nOutput:\nall tests passed' } },
       { timestamp: '2026-07-14T02:00:05Z', type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 200, cached_input_tokens: 150, output_tokens: 30, reasoning_output_tokens: 20, total_tokens: 250 }, last_token_usage: { input_tokens: 120, output_tokens: 20, reasoning_output_tokens: 10, total_tokens: 150 }, model_context_window: 258400 } } },
       { timestamp: '2026-07-14T02:00:06Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-1', last_agent_message: '완료', completed_at: '2026-07-14T02:00:06Z' } },
     ]);
     const session = parseCodex(info);
     assert.equal(session.id, 'codex:codex-session');
     assert.equal(session.model, 'gpt-5.4');
+    assert.equal(session.originCwd, 'D:\\repo');
+    assert.equal(session.cwd, 'D:\\repo\\packages\\dashboard');
     assert.equal(session.title, '테스트를 실행해줘');
     assert.equal(session.usage.total, 250);
     assert.equal(session.context.window, 258400);
     assert.equal(session.status, 'idle');
     assert.equal(session.clientKind, 'codex-desktop');
+    assert.deepStrictEqual(session.executions.map(item => [item.kind, item.mode, item.status]), [['shell', 'foreground', 'completed']]);
+    assert.equal(session.executions[0].command, 'npm test');
+    assert.match(session.executions[0].output, /all tests passed/);
+
+    const backgroundShell = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-background-shell.jsonl'), [
+      { timestamp: '2026-07-14T02:05:00Z', type: 'session_meta', payload: { id: 'background-shell', cwd: 'D:\\repo' } },
+      { timestamp: '2026-07-14T02:05:01Z', type: 'event_msg', payload: { type: 'user_message', message: '서버를 실행해줘' } },
+      { timestamp: '2026-07-14T02:05:02Z', type: 'response_item', payload: { type: 'custom_tool_call', call_id: 'custom-exec', name: 'exec', input: 'const r = await tools.exec_command({\n  cmd: "npm run dev",\n  workdir: "D:\\\\repo",\n  yield_time_ms: 1000\n});\ntext(r.output)' } },
+      { timestamp: '2026-07-14T02:05:03Z', type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'custom-exec', output: [{ type: 'input_text', text: 'Script running with cell ID cell-77' }] } },
+      { timestamp: '2026-07-14T02:05:04Z', type: 'response_item', payload: { type: 'function_call', call_id: 'wait-exec', name: 'wait', arguments: '{"cell_id":"cell-77","yield_time_ms":10000}' } },
+      { timestamp: '2026-07-14T02:05:05Z', type: 'response_item', payload: { type: 'function_call_output', call_id: 'wait-exec', output: 'Script completed\nExit code: 0' } },
+      { timestamp: '2026-07-14T02:05:06Z', type: 'response_item', payload: { type: 'custom_tool_call', call_id: 'custom-complete', name: 'exec', input: 'const r = await tools.exec_command({ cmd: "rg session renderer" });\ntext(r.output)' } },
+      { timestamp: '2026-07-14T02:05:07Z', type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'custom-complete', output: [{ type: 'input_text', text: 'Script completed\nWall time 0.1 seconds\nOutput:\nconst session = drawer; process.exitCode = 1;' }] } },
+      { timestamp: '2026-07-14T02:05:08Z', type: 'response_item', payload: { type: 'custom_tool_call', call_id: 'custom-session', name: 'exec', input: 'const r = await tools.exec_command({ cmd: "npm run watch", yield_time_ms: 1000 });\ntext(r.output)' } },
+      { timestamp: '2026-07-14T02:05:09Z', type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'custom-session', output: [{ type: 'input_text', text: 'Process running with session ID 912' }] } },
+      { timestamp: '2026-07-14T02:05:10Z', type: 'response_item', payload: { type: 'custom_tool_call', call_id: 'custom-stdin', name: 'exec', input: 'const r = await tools.write_stdin({ session_id: 912, yield_time_ms: 1000 });\ntext(r.output)' } },
+      { timestamp: '2026-07-14T02:05:11Z', type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'custom-stdin', output: [{ type: 'input_text', text: 'Process exited with code 0' }] } },
+    ]));
+    assert.deepStrictEqual(backgroundShell.executions.map(item => [item.kind, item.mode, item.status]), [
+      ['shell', 'background', 'completed'],
+      ['shell', 'foreground', 'completed'],
+      ['shell', 'background', 'completed'],
+    ]);
+    assert.equal(backgroundShell.executions[0].backgroundId, 'cell-77');
+    assert.equal(backgroundShell.executions[0].command, 'npm run dev');
+    assert.equal(backgroundShell.executions[1].backgroundId, '');
+    assert.match(backgroundShell.executions[1].output, /const session = drawer/);
+    assert.equal(backgroundShell.executions[2].backgroundId, '912');
+    assert.equal(backgroundShell.executions[2].command, 'npm run watch');
+
+    const question = '실행 환경은 WSL과 Windows 중에서 선택할 수 있습니다.\n\n어떤 방식으로 갈까요?';
+    const waiting = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-question.jsonl'), [
+      { timestamp: '2026-07-14T03:00:00Z', type: 'session_meta', payload: { id: 'question', cwd: 'D:\\repo' } },
+      { timestamp: '2026-07-14T03:00:01Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'question-turn' } },
+      { timestamp: '2026-07-14T03:00:02Z', type: 'event_msg', payload: { type: 'user_message', message: '회귀 검증 계획을 잡아줘' } },
+      { timestamp: '2026-07-14T03:00:03Z', type: 'event_msg', payload: { type: 'agent_message', phase: 'final_answer', message: question } },
+      { timestamp: '2026-07-14T03:00:04Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'question-turn', last_agent_message: question } },
+    ]));
+    assert.equal(waiting.status, 'waiting');
+    assert.equal(waiting.statusDetail, '답변 또는 선택 대기');
+
+    const answered = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-question-answered.jsonl'), [
+      { timestamp: '2026-07-14T03:10:00Z', type: 'session_meta', payload: { id: 'question-answered', cwd: 'D:\\repo' } },
+      { timestamp: '2026-07-14T03:10:01Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'question-turn' } },
+      { timestamp: '2026-07-14T03:10:02Z', type: 'event_msg', payload: { type: 'user_message', message: '회귀 검증 계획을 잡아줘' } },
+      { timestamp: '2026-07-14T03:10:03Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'question-turn', last_agent_message: question } },
+      { timestamp: '2026-07-14T03:10:04Z', type: 'event_msg', payload: { type: 'user_message', message: 'WSL로 진행해줘' } },
+    ]));
+    assert.notEqual(answered.status, 'waiting');
+
+    const structured = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-input-tool.jsonl'), [
+      { timestamp: '2026-07-14T03:20:00Z', type: 'session_meta', payload: { id: 'input-tool', cwd: 'D:\\repo' } },
+      { timestamp: '2026-07-14T03:20:01Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'input-turn' } },
+      { timestamp: '2026-07-14T03:20:02Z', type: 'response_item', payload: { type: 'function_call', name: 'request_user_input', call_id: 'input-1', arguments: '{}' } },
+    ]));
+    assert.equal(structured.status, 'waiting');
+    assert.equal(structured.statusDetail, '선택 또는 입력 대기');
+
+    assert.equal(assistantRequestsUserResponse('실행 환경을 골라주세요:\n- WSL\n- Windows'), true);
+    assert.equal(assistantRequestsUserResponse('수정을 완료했습니다.'), false);
+    assert.equal(assistantRequestsUserResponse('질문 표기는 \`ready?\`이며 처리를 완료했습니다.'), false);
+    assert.equal(assistantRequestsUserResponse('궁금한 점이 있으면 알려주세요.'), false);
+    assert.equal(assistantRequestsUserResponse('order resend 미커밋분은 stash에 보존했습니다.'), false);
+    assert.equal(assistantRequestsUserResponse('다시 세팅 완료됐어. 현재 전부 attached 상태야.\n\n창 attach를 직접 다시 해놨어. 지금 최종 검수 기준으로는 정상 상태야.'), false);
+    assert.equal(assistantRequestsUserResponse('Please send the log file.'), true);
+    assert.equal(assistantRequestsUserResponse('To continue, please confirm the branch.'), true);
+    assert.equal(assistantRequestsUserResponse('Could you select one?\n- WSL\n- Windows'), true);
   });
 
   test('Codex 데스크톱의 new-chat 임시 경로를 프로젝트 없는 세션으로 분류한다', () => {
     const projectless = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-projectless.jsonl'), [
       { timestamp: '2026-07-16T00:00:00Z', type: 'session_meta', payload: { id: 'projectless', cwd: '/Users/test/Documents/Codex/2026-07-16/new-chat', originator: 'Codex Desktop' } },
+      { timestamp: '2026-07-16T00:00:01Z', type: 'turn_context', payload: { cwd: '/Users/test/worktrees/later-location' } },
       { timestamp: '2026-07-16T00:00:01Z', type: 'event_msg', payload: { type: 'user_message', message: '프로젝트 없이 시작한 대화' } },
     ]));
     const namedProject = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-named-project.jsonl'), [
@@ -163,6 +286,8 @@ function registerCollaborationSummaryTests(context) {
     assert.equal(parent.collaboration.communications.some(item => item.kind === 'result' && item.text === '버튼 12개 확인 완료'), true);
     assert.equal(child.status, 'completed');
     assert.equal(child.title, 'button_audit');
+    assert.equal(child.originCwd, 'D:\\repo');
+    assert.equal(child.cwd, 'D:\\repo');
     assert.equal(child.sharedGoal, '버튼 정확도를 검사해줘');
     assert.equal(child.delegation.assignment, '버튼의 실제 동작을 검사해줘');
   });
@@ -290,11 +415,13 @@ function registerCodexRecoveryTests(context) {
       { timestamp: '2026-07-14T02:00:01Z', type: 'event_msg', payload: { type: 'user_message', message: '<skill><name>efficiency-alarm-overnight-loop</name><instructions>내부 스킬 지침</instructions></skill>' } },
       { timestamp: '2026-07-14T02:00:02Z', type: 'event_msg', payload: { type: 'user_message', message: '<codex_internal_context source="goal"><objective>실시간 토큰 게이지를 크게 보여줘</objective></codex_internal_context>' } },
       { timestamp: '2026-07-14T02:00:03Z', type: 'response_item', payload: { id: 'later-user', type: 'message', role: 'user', content: [{ type: 'input_text', text: '<codex_internal_context source="goal"><objective>서브에이전트 관계를 마인드맵으로 보여줘</objective></codex_internal_context>' }] } },
+      { timestamp: '2026-07-14T02:00:04Z', type: 'event_msg', payload: { type: 'user_message', message: '<subagent_notification><agent_id>worker</agent_id><status>completed</status><summary>내부 완료 알림</summary></subagent_notification>' } },
     ]));
     assert.equal(session.title, '완료된 서브에이전트는 기본으로 숨기고 펼쳐서 보게 해줘');
     assert.equal(session.messages.some(item => /Filesystem sandboxing/.test(item.text)), false);
     assert.equal(session.messages.some(item => /efficiency-alarm-overnight-loop/.test(item.text)), false);
     assert.equal(session.messages.some(item => /실시간 토큰 게이지|서브에이전트 관계/.test(item.text)), false);
+    assert.equal(session.messages.some(item => /subagent_notification|내부 완료 알림/.test(item.text)), false);
     assert.deepStrictEqual(session.loop, { kind: 'goal', iteration: 2 });
   });
 

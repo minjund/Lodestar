@@ -288,16 +288,47 @@ window.LoadToAgentAppFactories.createQualityEnhancements = function createQualit
     }
   }
 
-  function safeBackdrop(modal, close) {
-    let startedOnBackdrop = null;
-    modal.addEventListener("pointerdown", (event) => {
-      startedOnBackdrop = event.target === modal;
-    });
-    modal.addEventListener("click", (event) => {
-      // HTMLElement.click() does not emit pointerdown. Treat that as a normal
-      // backdrop activation while still rejecting a drag that began in the dialog.
-      if (event.target === modal && startedOnBackdrop !== false) close();
-      startedOnBackdrop = null;
+  function safeBackdrop(backdrop, close, separateSurface = null) {
+    const pointerRoot = separateSurface ? document : backdrop;
+    let press = null;
+    let releaseTimer = 0;
+    const updateMovement = (event) => {
+      if (!press || press.pointerId !== event.pointerId) return;
+      if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > 6) press.moved = true;
+    };
+    pointerRoot.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || (separateSurface && backdrop.classList.contains("hidden"))) {
+        press = null;
+        return;
+      }
+      clearTimeout(releaseTimer);
+      press = {
+        pointerId: event.pointerId,
+        startedOnBackdrop: event.target === backdrop,
+        x: event.clientX,
+        y: event.clientY,
+        moved: false,
+      };
+    }, Boolean(separateSurface));
+    pointerRoot.addEventListener("pointermove", updateMovement, Boolean(separateSurface));
+    pointerRoot.addEventListener("pointerup", (event) => {
+      updateMovement(event);
+      clearTimeout(releaseTimer);
+      // Keep the press through the following click event, then discard it if
+      // the pointerup did not produce a click on the backdrop.
+      releaseTimer = setTimeout(() => { press = null; }, 0);
+    }, Boolean(separateSurface));
+    pointerRoot.addEventListener("pointercancel", () => {
+      clearTimeout(releaseTimer);
+      press = null;
+    }, Boolean(separateSurface));
+    backdrop.addEventListener("click", (event) => {
+      if (event.target !== backdrop) return;
+      const directActivation = !press && event.detail === 0;
+      const safePointerActivation = Boolean(press && press.startedOnBackdrop && !press.moved);
+      clearTimeout(releaseTimer);
+      press = null;
+      if (directActivation || safePointerActivation) close();
     });
   }
 

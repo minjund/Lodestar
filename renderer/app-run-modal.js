@@ -151,8 +151,6 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
       ? state.workspace
       : state.workspace === PROJECTLESS_WORKSPACE ? "" : (state.workspaces[0] && state.workspaces[0].path) || "";
     $("#runCwd").placeholder = state.platform.id === "win32" ? "D:\\project" : "/Users/me/project";
-    const advanced = $("#runForm .run-advanced");
-    if (advanced) advanced.open = Boolean($("#runModel").value.trim());
     $("#runError").classList.add("hidden");
     syncRunComposer();
     clearTimeout(motionState.modalTimer);

@@ -32,7 +32,7 @@ async function waitForWindow() {
 
 async function waitForRenderer(win) {
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    const ready = await win.webContents.executeJavaScript(`document.readyState === 'complete' && typeof window.LoadToAgentApp.renderSessions === 'function'`);
+    const ready = await win.webContents.executeJavaScript(`document.readyState === 'complete' && window.LoadToAgentApp?.initialized === true`);
     if (ready) return;
     await wait(100);
   }
@@ -81,7 +81,7 @@ async function layoutMetrics(win) {
       .filter(section => section.scrollWidth > section.clientWidth + 2)
       .map(section => section.id || section.className);
     const compact = window.innerWidth <= 720;
-    const iconSidebar = window.innerWidth > 720 && window.innerWidth <= 980;
+    const narrowSidebar = window.innerWidth > 720 && window.innerWidth <= 980;
     const terminalActionLabels = [...document.querySelectorAll('[data-terminal-signal="interrupt"] span, [data-terminal-signal="clear"] span')]
       .every(label => getComputedStyle(label).display !== 'none' && label.getBoundingClientRect().width > 0 && label.textContent.trim());
     const tmuxShortcut = document.querySelector('#openTmuxFromAgentWork');
@@ -104,11 +104,18 @@ async function layoutMetrics(win) {
       }),
       navAccessibleNames: visibleNavItems.every(item => item.getAttribute('aria-label')?.trim()),
       sidebarNoInternalOverflow: Boolean(sidebar && sidebar.scrollWidth <= sidebar.clientWidth + 2),
-      iconSidebarLabelsHidden: !iconSidebar || visibleNavItems.every(item => {
+      sidebarOverflowItems: sidebar && sidebar.scrollWidth > sidebar.clientWidth + 2
+        ? [...sidebar.querySelectorAll('*')].filter(item => item.getBoundingClientRect().right > sidebarRect.right + 1).slice(0, 8).map(item => ({ tag: item.tagName, className: item.className, text: item.textContent.trim().slice(0, 40), right: Math.round(item.getBoundingClientRect().right), sidebarRight: Math.round(sidebarRect.right) }))
+        : [],
+      narrowSidebarLabelsVisible: !narrowSidebar || visibleNavItems.every(item => {
         const label = item.querySelector(':scope > span:not(.nav-icon)');
-        return !label || getComputedStyle(label).display === 'none';
+        return Boolean(label && getComputedStyle(label).display !== 'none' && label.getBoundingClientRect().width > 0);
       }),
-      iconSidebarTitles: !iconSidebar || visibleNavItems.every(item => item.getAttribute('title')?.trim()),
+      narrowSidebarTitles: !narrowSidebar || visibleNavItems.every(item => item.getAttribute('title')?.trim()),
+      projectFilterAvailable: !['all', 'active', 'waiting'].includes(window.LoadToAgentApp?.state?.view)
+        || (window.innerWidth <= 720
+          ? Boolean(document.querySelector('#mobileWorkspaceList'))
+          : Boolean(document.querySelector('.workspace-section')?.getBoundingClientRect().width > 0 && document.querySelector('#workspaceList')?.getBoundingClientRect().height > 0)),
       compactContentClearance: !compact || Number.parseFloat(getComputedStyle(stage).paddingBottom) >= (sidebarRect?.height || 0) + 12,
       terminalActionLabels,
       tmuxShortcutVisible: !liveSectionVisible || Boolean(tmuxShortcutRect && tmuxShortcutRect.width > 0 && tmuxShortcutRect.height >= 40),
@@ -120,7 +127,7 @@ async function layoutMetrics(win) {
 function assertLayout(metrics, context) {
   const compactNavValid = !metrics.compact
     || JSON.stringify(metrics.visibleNavItems) === JSON.stringify(['all', 'active', 'waiting', 'runtime', 'mobileMoreBtn']);
-  if (metrics.documentOverflow || metrics.stageOverflow || metrics.sectionOverflow.length || !metrics.sidebarInsideViewport || !metrics.compactNavAtBottom || metrics.navCount < 5 || !metrics.navItemsInsideViewport || !metrics.navAccessibleNames || !metrics.sidebarNoInternalOverflow || !metrics.iconSidebarLabelsHidden || !metrics.iconSidebarTitles || !metrics.compactContentClearance || !compactNavValid || !metrics.tmuxShortcutVisible || !metrics.tmuxShortcutInsideViewport) {
+  if (metrics.documentOverflow || metrics.stageOverflow || metrics.sectionOverflow.length || !metrics.sidebarInsideViewport || !metrics.compactNavAtBottom || metrics.navCount < 5 || !metrics.navItemsInsideViewport || !metrics.navAccessibleNames || !metrics.sidebarNoInternalOverflow || !metrics.narrowSidebarLabelsVisible || !metrics.narrowSidebarTitles || !metrics.projectFilterAvailable || !metrics.compactContentClearance || !compactNavValid || !metrics.tmuxShortcutVisible || !metrics.tmuxShortcutInsideViewport) {
     throw new Error(`${context} 반응형 배치가 올바르지 않습니다: ${JSON.stringify(metrics)}`);
   }
 }
@@ -367,6 +374,46 @@ app.whenReady().then(async () => {
       if (width === 720 || width === 360) {
         const image = await win.webContents.capturePage();
         fs.writeFileSync(path.join(outputDir, `loadtoagent-responsive-${width}.png`), image.toPNG());
+      }
+      if (width === 360) {
+        const mobileProjects = await win.webContents.executeJavaScript(`(() => {
+          document.querySelector('#appShell')?.removeAttribute('inert');
+          document.body.classList.remove('dialog-open');
+          document.querySelector('#mobileMoreBtn')?.click();
+          const picker = document.querySelector('.mobile-project-picker');
+          if (picker) picker.open = true;
+          const menu = document.querySelector('#mobileToolsMenu');
+          const list = document.querySelector('#mobileWorkspaceList');
+          const selectedItem = list?.querySelector('[aria-pressed="true"]');
+          const menuRect = menu?.getBoundingClientRect();
+          return {
+            visible: Boolean(menu && !menu.classList.contains('hidden') && picker?.open),
+            selected: selectedItem?.textContent.trim() || '',
+            selectedRepresentedOnce: Boolean(selectedItem && getComputedStyle(selectedItem).display === 'none'),
+            singleScrollRegion: Boolean(list && list.scrollHeight <= list.clientHeight + 1),
+            noHorizontalOverflow: Boolean(menu && menu.scrollWidth <= menu.clientWidth + 2 && list && list.scrollWidth <= list.clientWidth + 2),
+            insideViewport: Boolean(menuRect && menuRect.left >= -1 && menuRect.right <= window.innerWidth + 1 && menuRect.top >= -1 && menuRect.bottom <= window.innerHeight + 1),
+          };
+        })()`);
+        if (!mobileProjects.visible || !mobileProjects.selected || !mobileProjects.selectedRepresentedOnce || !mobileProjects.singleScrollRegion || !mobileProjects.noHorizontalOverflow || !mobileProjects.insideViewport) throw new Error(`360×520 모바일 프로젝트 선택기가 올바르지 않습니다: ${JSON.stringify(mobileProjects)}`);
+        await wait(120);
+        fs.writeFileSync(path.join(outputDir, 'loadtoagent-responsive-projects-360.png'), (await win.webContents.capturePage()).toPNG());
+        const projectSelection = await win.webContents.executeJavaScript(`(() => {
+          const choice = [...document.querySelectorAll('#mobileWorkspaceList [data-workspace]')].find(item => item.getAttribute('aria-pressed') !== 'true');
+          choice?.click();
+          return choice?.dataset.workspace || '';
+        })()`);
+        await wait(120);
+        const projectSelectionResult = await win.webContents.executeJavaScript(`(() => ({
+          menuClosed: document.querySelector('#mobileToolsMenu')?.classList.contains('hidden'),
+          expanded: document.querySelector('#mobileMoreBtn')?.getAttribute('aria-expanded'),
+          focusedMain: !document.hasFocus() || document.activeElement?.id === 'mainContent' || Boolean(document.activeElement?.closest?.('[data-session-id], [data-graph-focus], [data-open-session]')),
+          activeElement: { id: document.activeElement?.id || '', tag: document.activeElement?.tagName || '', hasFocus: document.hasFocus() },
+          focusContext: { appInert: document.querySelector('#appShell')?.inert, mainInert: document.querySelector('#mainContent')?.inert, mainTabIndex: document.querySelector('#mainContent')?.tabIndex, mainRects: document.querySelector('#mainContent')?.getClientRects().length },
+          workspace: window.LoadToAgentApp.state.workspace,
+        }))()`);
+        if (!projectSelection || !projectSelectionResult.menuClosed || projectSelectionResult.expanded !== 'false' || !projectSelectionResult.focusedMain || projectSelectionResult.workspace !== projectSelection) throw new Error(`360×520 모바일 프로젝트 선택 후 닫기·포커스 복귀가 올바르지 않습니다: ${JSON.stringify(projectSelectionResult)}`);
+        await win.webContents.executeJavaScript(`(() => { window.LoadToAgentApp.state.workspace = 'all'; window.LoadToAgentApp.renderWorkspaces(); window.LoadToAgentApp.renderSessions('filter'); })()`);
       }
 
       const overlays = await overlayMetrics(win, width === 720 || width === 360 ? path.join(outputDir, `loadtoagent-responsive-new-run-${width}.png`) : '');

@@ -199,7 +199,7 @@
   }
 
   .settings-head p:last-child {
-    font-size: 10px;
+    font-size: 12px;
   }
 
   .settings-emblem {
@@ -317,33 +317,61 @@
     left: 10px;
     max-width: 430px;
     margin-left: auto;
+    max-height: calc(100dvh - 96px - env(safe-area-inset-bottom));
+    overflow-y: auto;
     padding: 12px;
     border: 1px solid #324456;
     border-radius: 16px;
     background: #111925;
-    box-shadow: 0 24px 70px rgba(0,0,0,.62);
+    scrollbar-width: thin;
+    scrollbar-color: #516272 #111925;
+    box-shadow: 0 0 0 100vmax rgba(3,7,12,.62), 0 24px 70px rgba(0,0,0,.62);
   }
+
+  .mobile-tools-menu::-webkit-scrollbar { width: 7px; }
+  .mobile-tools-menu::-webkit-scrollbar-track { background: #111925; border-radius: 999px; }
+  .mobile-tools-menu::-webkit-scrollbar-thumb { border: 2px solid #111925; border-radius: 999px; background: #607181; }
 
   .mobile-tools-menu:not(.hidden) {
     display: grid;
     gap: 7px;
   }
 
-  .mobile-tools-menu>div {
-    padding: 4px 5px 8px;
+  .mobile-tools-menu>.mobile-tools-head {
+    min-height: 48px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    align-items: center;
+    gap: 10px;
+    padding: 0 2px 6px 5px;
   }
 
-  .mobile-tools-menu>div b {
+  .mobile-tools-menu>.mobile-tools-head>span { min-width: 0; margin: 0; }
+
+  .mobile-tools-menu>.mobile-tools-head b {
     display: block;
     font-size: 14px;
   }
 
-  .mobile-tools-menu>div span {
+  .mobile-tools-menu>.mobile-tools-head small {
     display: block;
     margin-top: 3px;
     color: #9ba9b8;
-    font-size: 11px;
+    font-size: 12px;
   }
+
+  #mobileToolsCloseBtn {
+    width: 44px;
+    min-height: 44px;
+    border: 1px solid #304557;
+    border-radius: 10px;
+    background: #0d1620;
+    color: #c9d7df;
+    font-size: 20px;
+    cursor: pointer;
+  }
+
+  #mobileToolsCloseBtn:hover { border-color: #5b778c; background: #172532; color: #fff; }
 
   .mobile-tools-menu>button {
     min-height: 58px;
@@ -363,6 +391,50 @@
   .mobile-tools-menu>button:hover {
     border-color: #45647a;
     background: #152230;
+  }
+
+  .mobile-project-picker {
+    border: 1px solid #2b4050;
+    border-radius: 12px;
+    background: #0d161f;
+    overflow: hidden;
+  }
+
+  .mobile-project-picker>summary {
+    min-height: 58px;
+    display: grid;
+    grid-template-columns: 40px minmax(0,1fr) 18px;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    color: #dce6ee;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .mobile-project-picker>summary::-webkit-details-marker { display: none; }
+  .mobile-project-picker>summary:hover { background: #152230; }
+  .mobile-project-picker>summary em { color: #94a8b6; font-style: normal; transition: transform .18s ease; }
+  .mobile-project-picker[open]>summary em { transform: rotate(180deg); }
+
+  .mobile-project-picker-body {
+    padding: 8px;
+    border-top: 1px solid #263947;
+    background: #0a111a;
+  }
+
+  .mobile-project-picker .workspace-list { max-height: none; overflow: visible; padding-right: 0; }
+  .mobile-project-picker .workspace-item { min-height: 44px; }
+  .mobile-project-picker .workspace-item[aria-pressed="true"],
+  .mobile-project-picker .workspace-row:has(.workspace-item[aria-pressed="true"]) { display: none; }
+  .mobile-project-picker-body>#mobileAddWorkspaceBtn {
+    width: 100%;
+    min-height: 44px;
+    margin-top: 8px;
+    border: 1px dashed #3a5668;
+    border-radius: 9px;
+    background: #111e29;
+    color: #9edff2;
   }
 
   .mobile-tools-menu i {
@@ -385,7 +457,7 @@
     display: block;
     margin-top: 4px;
     color: #94a3b3;
-    font-size: 10px;
+    font-size: 12px;
   }
 
   .guide-toggle {
@@ -554,11 +626,11 @@
 /* Compact screens ≤ 420px: keep compact forms and dialog actions inside the safe area. */
 @media (max-width:420px) {
   .primary-button {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .ghost-button {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .beginner-guide li {
@@ -591,7 +663,7 @@
   }
 
   .new-run-cta-copy b {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .run-composer .modal-head {
@@ -647,7 +719,7 @@
   }
 
   .guide-toggle b {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .run-provider-docs {

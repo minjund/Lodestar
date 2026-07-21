@@ -7,10 +7,11 @@ const path = require('path');
 const { EventEmitter } = require('events');
 const { parseArguments } = require('../../bin/loadtoagent');
 const { parseGeneric, buildSummary } = require('../../src/agentMonitor');
-const { commandSpec } = require('../../src/agentRunner');
+const { AgentRunner, commandSpec } = require('../../src/agentRunner');
 const { BridgeServer, decodeBase64 } = require('../../src/bridgeServer');
-const { ProcessMonitor, processRows, posixProcessRows, providerFromPosixProcess, selectAgentProcesses, bridgeLinkScore, applyRuntimePresence } = require('../../src/processMonitor');
+const { ProcessMonitor, processRows, posixProcessRows, providerFromPosixProcess, selectAgentProcesses, processSessionExternalId, bridgeLinkScore, applyRuntimePresence } = require('../../src/processMonitor');
 const { TerminalManager, normalizeLaunchOptions, launchSpec, resolveWindowsCommand, resolvePosixShell } = require('../../src/terminalManager');
+const { TerminalHostServer, TerminalHostClient } = require('../../src/terminalHost');
 const { TmuxController, safeName, safeTarget } = require('../../src/tmuxController');
 const { TmuxMonitor, normalizeWslList, parseTmuxProbe, buildDistroTopology, linkAgentSessions, providerFromProcess } = require('../../src/tmuxMonitor');
 
@@ -74,7 +75,7 @@ function registerTmuxAndProcessTests(context) {
     assert.equal(zeroTtlMonitor.discoveryTtlMs, 0);
   });
 
-  test('Windows AI CLI와 tmux 프로세스를 각각의 활성 세션으로 유지한다', () => {
+  test('Windows AI CLI와 tmux 연결은 대화 로그의 실제 상태를 덮어쓰지 않는다', () => {
     const csv = [
       'Node,CommandLine,CreationDate,Name,ParentProcessId,ProcessId',
       'PC,claude,20260714120000.000000+540,claude.exe,10,101',
@@ -91,20 +92,68 @@ function registerTmuxAndProcessTests(context) {
     };
     const usage = { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0 };
     const sessions = [
-      { id: 'claude:wsl', provider: 'claude', environment: { kind: 'wsl' }, status: 'idle', title: 'WSL Claude', updatedAt: '2026-07-14T03:00:00Z', usage, childIds: [] },
+      { id: 'claude:wsl', provider: 'claude', environment: { kind: 'wsl' }, status: 'running', title: 'WSL Claude', updatedAt: '2026-07-14T03:00:00Z', usage, childIds: [] },
       { id: 'claude:win', provider: 'claude', environment: { kind: 'windows' }, status: 'idle', title: 'Windows Claude', startedAt: '2026-07-14T03:00:00Z', updatedAt: '2026-07-14T03:00:00Z', usage, childIds: [] },
-      { id: 'codex:win', provider: 'codex', environment: { kind: 'windows' }, status: 'idle', title: 'Windows Codex', startedAt: '2026-07-14T03:00:01Z', updatedAt: '2026-07-14T03:00:01Z', usage, childIds: [] },
+      { id: 'codex:win', provider: 'codex', environment: { kind: 'windows' }, status: 'running', title: 'Windows Codex', startedAt: '2026-07-14T03:00:01Z', updatedAt: '2026-07-14T03:00:01Z', usage, childIds: [] },
     ];
     const active = applyRuntimePresence(sessions, base, { processes }, Date.parse('2026-07-14T03:01:00Z'));
-    assert.equal(active.filter(item => item.status === 'running').length, 3);
+    assert.equal(active.filter(item => item.status === 'running').length, 2);
     assert.equal(active.find(item => item.id === 'claude:wsl').runtimePresence[0].kind, 'tmux');
+    assert.equal(active.find(item => item.id === 'claude:win').status, 'idle');
+    assert.equal(active.find(item => item.id === 'claude:win').runtimePresence[0].pid, 101);
     assert.equal(active.find(item => item.id === 'codex:win').runtimePresence[0].pid, 202);
 
     const deadTmux = structuredClone(base);
     deadTmux.distros[0].sessions[0].windows[0].panes[0].dead = true;
     const afterDeadPane = applyRuntimePresence([sessions[0]], deadTmux, { processes: [] }, Date.parse('2026-07-14T03:01:00Z'));
-    assert.equal(afterDeadPane[0].status, 'idle');
+    assert.equal(afterDeadPane[0].status, 'running');
     assert.deepStrictEqual(afterDeadPane[0].runtimePresence || [], []);
+  });
+
+  test('인자가 있는 Windows Claude CLI는 감지하고 자동 점검·데몬은 제외한다', () => {
+    const rows = [
+      { pid: 401, parentPid: 40, name: 'claude.exe', commandLine: 'C:\\Users\\dev\\.local\\bin\\claude.exe --resume session-1', startedAt: '2026-07-14T03:00:00Z' },
+      { pid: 402, parentPid: 40, name: 'claude.exe', commandLine: 'C:\\Users\\dev\\.local\\bin\\claude.exe daemon run --json-path daemon.json', startedAt: '2026-07-14T03:00:00Z' },
+      { pid: 403, parentPid: 40, name: 'claude.exe', commandLine: 'C:\\Users\\dev\\.local\\bin\\claude.exe -p Reply with exactly OK. Do not use tools.', startedAt: '2026-07-14T03:00:00Z' },
+    ];
+    const processes = selectAgentProcesses(rows);
+    assert.deepStrictEqual(processes.map(item => [item.provider, item.pid, item.parentPid]), [['claude', 401, 40]]);
+    assert.equal(processes[0].externalId, 'session-1');
+    const runtime = applyRuntimePresence([], {}, { processes }, Date.parse('2026-07-14T03:01:00Z'));
+    assert.deepStrictEqual(runtime, []);
+
+    const linked = applyRuntimePresence([{
+      id: 'claude:session-1', externalId: 'session-1', provider: 'claude', environment: { kind: 'windows' },
+      clientKind: 'claude-desktop', status: 'idle', title: '사용자가 최근 실행한 대화',
+      startedAt: '2026-07-10T03:00:00Z', updatedAt: '2026-07-14T03:00:00Z', childIds: [],
+    }], {}, { processes }, Date.parse('2026-07-14T03:01:00Z'));
+    assert.equal(linked.length, 1);
+    assert.equal(linked[0].title, '사용자가 최근 실행한 대화');
+    assert.equal(linked[0].status, 'idle');
+    assert.equal(linked[0].runtimePresence[0].pid, 401);
+    assert.equal(linked[0].runtimePresence[0].linkScore, 'explicit-session-id');
+    const commandLine = 'claude.exe --session-id current-session --fork-session --resume C:\\Users\\dev\\.claude\\projects\\repo\\old-session.jsonl';
+    assert.equal(processSessionExternalId({ commandLine }, 'claude'), 'current-session');
+    assert.equal(processSessionExternalId({ commandLine: 'claude.exe --resume "C:\\Users\\dev\\.claude\\projects\\repo\\resumed-session.jsonl"' }, 'claude'), 'resumed-session');
+  });
+
+  test('세션 터미널은 추측 대신 명시된 AI 세션 ID에 연결한다', () => {
+    const usage = { input: 0, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0 };
+    const sessions = [
+      { id: 'claude:bound', provider: 'claude', environment: { kind: 'windows' }, clientKind: 'claude-desktop', status: 'idle', title: '이어갈 실제 대화', startedAt: '2026-07-10T00:00:00Z', updatedAt: '2026-07-10T00:00:00Z', usage, childIds: [] },
+      { id: 'claude:recent', provider: 'claude', environment: { kind: 'windows' }, clientKind: 'claude-cli', status: 'idle', title: '최근의 다른 대화', startedAt: '2026-07-14T03:00:00Z', updatedAt: '2026-07-14T03:00:00Z', usage, childIds: [] },
+    ];
+    const bridge = {
+      id: 'claude:bound', bridgeId: 'claude:bound', linkedSessionId: 'claude:bound', terminalId: 'terminal:resume',
+      provider: 'claude', pid: 501, cwd: 'D:\\repo', startedAt: '2026-07-14T03:01:00Z', environment: 'windows',
+    };
+    const active = applyRuntimePresence(sessions, {}, { processes: [] }, Date.parse('2026-07-14T03:01:00Z'), [bridge]);
+    const bound = active.find(item => item.id === 'claude:bound');
+    assert.equal(bound.status, 'idle');
+    assert.equal(bound.runtimePresence[0].terminalId, 'terminal:resume');
+    assert.equal(bound.runtimePresence[0].linkScore, 'explicit');
+    assert.equal(active.find(item => item.id === 'claude:recent').status, 'idle');
+    assert.equal(active.some(item => item.id.startsWith('bridge:')), false);
   });
 
 }
@@ -195,13 +244,34 @@ function registerGenericAgentTests(context) {
   test('Gemini/Grok 계열 JSON 세션을 공통 모델로 읽는다', () => {
     const file = path.join(temp, 'gemini', 'session.json');
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({ id: 'gem-1', model: 'gemini-3.5-flash', cwd: 'D:\\repo', messages: [{ id: 'u', role: 'user', content: '문서를 요약해줘' }, { id: 'a', role: 'model', content: '요약입니다.', usageMetadata: { promptTokenCount: 40, candidatesTokenCount: 10, totalTokenCount: 50 } }] }), 'utf8');
+    fs.writeFileSync(file, JSON.stringify({
+      id: 'gem-1', model: 'gemini-3.5-flash', cwd: 'D:\\repo',
+      messages: [{ id: 'u', role: 'user', content: '문서를 요약해줘' }, { id: 'a', role: 'model', content: '요약입니다.', usageMetadata: { promptTokenCount: 40, candidatesTokenCount: 10, totalTokenCount: 50 } }],
+      events: [
+        { id: 'gem-shell', type: 'tool_use', name: 'shell_command', parameters: { command: 'npm test', cwd: 'D:\\repo' }, timestamp: '2026-07-14T02:00:00Z' },
+        { id: 'gem-shell-result', type: 'tool_result', tool_call_id: 'gem-shell', output: 'Exit code: 0', timestamp: '2026-07-14T02:00:01Z' },
+      ],
+    }), 'utf8');
     const stat = fs.statSync(file);
     const session = parseGeneric({ file, mtimeMs: stat.mtimeMs, size: stat.size }, 'gemini');
     assert.equal(session.title, '문서를 요약해줘');
     assert.equal(session.turnUsage.total, 50);
     assert.equal(session.usage.total, 50);
     assert.equal(session.context.window, 1_048_576);
+    assert.deepStrictEqual(session.executions.map(item => [item.kind, item.mode, item.status, item.command]), [['shell', 'foreground', 'completed', 'npm test']]);
+
+    const questionFile = path.join(temp, 'gemini', 'question.json');
+    fs.writeFileSync(questionFile, JSON.stringify({
+      id: 'gem-question',
+      messages: [
+        { id: 'question-u', role: 'user', content: '실행 환경을 정해줘' },
+        { id: 'question-a', role: 'model', content: 'WSL과 Windows 중 어떤 환경으로 진행할까요?' },
+      ],
+    }), 'utf8');
+    const questionStat = fs.statSync(questionFile);
+    const waiting = parseGeneric({ file: questionFile, mtimeMs: questionStat.mtimeMs, size: questionStat.size }, 'gemini');
+    assert.equal(waiting.status, 'waiting');
+    assert.equal(waiting.statusDetail, '답변 또는 선택 대기');
   });
 
   test('Gemini/Grok 스트리밍 메시지는 같은 ID의 최종 내용만 시간순으로 표시한다', () => {
@@ -230,12 +300,38 @@ function registerGenericAgentTests(context) {
     assert.ok(commandSpec('grok', base, 'grok').args.includes('streaming-json'));
   });
 
+  test('실패한 관리 실행은 저장된 안전 설정으로 새 실행을 만든다', () => {
+    const runsDir = path.join(temp, 'agent-runs-retry');
+    const previousId = 'legacy-run';
+    const previousDir = path.join(runsDir, previousId);
+    fs.mkdirSync(previousDir, { recursive: true });
+    fs.writeFileSync(path.join(previousDir, 'meta.json'), JSON.stringify({
+      provider: 'codex', prompt: '검증을 다시 실행해줘', cwd: root, model: 'gpt-fixture', allowWrites: true,
+    }), 'utf8');
+    const runner = new AgentRunner({ runsDir });
+    let received = null;
+    runner.start = options => {
+      received = options;
+      return { ok: true, runId: 'new-run', sessionId: 'new-session' };
+    };
+    assert.deepStrictEqual(runner.retry(previousId), {
+      ok: true, runId: 'new-run', sessionId: 'new-session', retriedFrom: previousId,
+    });
+    assert.deepStrictEqual(received, {
+      provider: 'codex', prompt: '검증을 다시 실행해줘', cwd: root, model: 'gpt-fixture', allowWrites: true,
+    });
+    runner.active.set(previousId, {});
+    assert.equal(runner.retry(previousId).ok, false);
+    assert.equal(runner.retry('../escape').ok, false);
+  });
+
 }
 
 function registerTerminalLifecycleTests(context) {
-  const { test, root } = context;
+  const { test, temp, root } = context;
   test('PTY 터미널을 만들고 입력·명령·리사이즈·신호·재시작·종료를 제어한다', () => {
     const processes = [];
+    const storeFile = path.join(temp, 'terminal-sessions-lifecycle.json');
     class FakePty {
       constructor(pid) { this.pid = pid; this.writes = []; this.resizes = []; this.killed = false; }
       onData(callback) { this.dataCallback = callback; }
@@ -245,11 +341,12 @@ function registerTerminalLifecycleTests(context) {
       clear() { this.cleared = true; }
       kill() { this.killed = true; }
     }
-    const manager = new TerminalManager({ killTree: handle => handle.kill(), ptyModule: { spawn: () => {
+    const managerOptions = { storeFile, killTree: handle => handle.kill(), ptyModule: { spawn: () => {
       const processHandle = new FakePty(9000 + processes.length);
       processes.push(processHandle);
       return processHandle;
-    } } });
+    } } };
+    let manager = new TerminalManager(managerOptions);
     const session = manager.create({ type: 'powershell', cwd: root, cols: 100, rows: 30 });
     assert.equal(session.status, 'running');
     assert.equal(session.background, false);
@@ -264,8 +361,17 @@ function registerTerminalLifecycleTests(context) {
     assert.equal(processes[0].cleared, true);
     processes[0].dataCallback('PTY_OK');
     assert.equal(manager.get(session.id, true).replay, 'PTY_OK');
+    processes[0].exitCallback({ exitCode: 0, signal: 0 });
+    assert.equal(manager.list().length, 1);
+    assert.equal(manager.get(session.id).status, 'exited');
+    manager.dispose({ preserveSessions: true });
+    manager = new TerminalManager(managerOptions);
+    assert.equal(manager.list().length, 1);
+    assert.equal(manager.get(session.id).status, 'exited');
+    assert.equal(manager.get(session.id).pid, null);
+    assert.equal(manager.get(session.id, true).replay, 'PTY_OK');
     const restarted = manager.restart(session.id);
-    assert.equal(processes[0].killed, true);
+    assert.equal(processes[0].killed, false);
     assert.equal(restarted.pid, 9001);
     assert.equal(restarted.replay, '');
     manager.close(session.id);
@@ -273,7 +379,14 @@ function registerTerminalLifecycleTests(context) {
     assert.equal(manager.list().length, 0);
     const backgroundAgent = manager.create({ type: 'agent', provider: 'codex', cwd: root });
     assert.equal(backgroundAgent.background, true);
+    manager.dispose({ preserveSessions: true });
+    assert.equal(processes[2].killed, true);
+    manager = new TerminalManager(managerOptions);
+    assert.equal(manager.get(backgroundAgent.id).status, 'exited');
+    assert.equal(manager.get(backgroundAgent.id).pid, null);
     manager.close(backgroundAgent.id);
+    manager = new TerminalManager(managerOptions);
+    assert.equal(manager.list().length, 0);
     assert.equal(normalizeLaunchOptions({ type: 'cmd', cwd: root }).type, 'cmd');
     assert.ok(launchSpec(normalizeLaunchOptions({ type: 'powershell', cwd: root })).args.includes('-NoLogo'));
     const macShell = normalizeLaunchOptions({ cwd: root }, 'darwin');
@@ -299,6 +412,58 @@ function registerTerminalLifecycleTests(context) {
     const macTmux = launchSpec(normalizeLaunchOptions({ type: 'tmux', distro: 'macOS', tmuxSession: 'work' }, 'darwin'), 'darwin', undefined, { env: { SHELL: '/broken/login-shell' }, fileSystem: posixFs });
     assert.notEqual(macTmux.file, 'wsl.exe');
     assert.equal(macTmux.file, '/bin/zsh');
+    manager.dispose();
+  });
+
+  test('앱 클라이언트가 종료되어도 터미널 호스트의 PTY와 세션 ID를 유지하고 다시 연결한다', async () => {
+    const processes = [];
+    class FakePty {
+      constructor(pid) { this.pid = pid; this.writes = []; this.killed = false; }
+      onData(callback) { this.dataCallback = callback; }
+      onExit(callback) { this.exitCallback = callback; }
+      write(value) { this.writes.push(value); }
+      resize() {}
+      kill() { this.killed = true; }
+    }
+    const manager = new TerminalManager({
+      storeFile: path.join(temp, 'terminal-host-sessions.json'),
+      killTree: handle => handle.kill(),
+      ptyModule: { spawn: () => {
+        const handle = new FakePty(12_000 + processes.length);
+        processes.push(handle);
+        return handle;
+      } },
+    });
+    const endpoint = process.platform === 'win32'
+      ? `\\\\.\\pipe\\loadtoagent-host-test-${process.pid}-${Date.now()}`
+      : path.join(temp, `terminal-host-${Date.now()}.sock`);
+    const discovery = path.join(temp, 'terminal-host-discovery.json');
+    const server = new TerminalHostServer({ manager, endpoint, discoveryFile: discovery, token: 'host-test-token' });
+    await server.start();
+    const spawnHost = () => { throw new Error('실행 중인 테스트 호스트를 다시 시작하면 안 됩니다.'); };
+    const firstClient = new TerminalHostClient({ discoveryFile: discovery, spawnHost });
+    await firstClient.connect();
+    const created = await firstClient.create({ type: 'powershell', cwd: root, title: '재시작 유지 검증' });
+    processes[0].dataCallback('BEFORE_RESTART');
+    assert.equal(created.status, 'running');
+    assert.equal(firstClient.list()[0].id, created.id);
+    firstClient.dispose();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(processes[0].killed, false);
+    assert.equal(manager.get(created.id).status, 'running');
+
+    const secondClient = new TerminalHostClient({ discoveryFile: discovery, spawnHost });
+    await secondClient.connect();
+    assert.equal(secondClient.list()[0].id, created.id);
+    assert.equal(secondClient.list()[0].status, 'running');
+    assert.match((await secondClient.get(created.id, true)).replay, /BEFORE_RESTART/);
+    await secondClient.command(created.id, 'Write-Output AFTER_RESTART');
+    assert.equal(processes[0].writes.at(-1), 'Write-Output AFTER_RESTART\r');
+    await secondClient.close(created.id);
+    assert.equal(processes[0].killed, true);
+    secondClient.dispose();
+    server.dispose();
+    manager.dispose();
   });
 
 }
@@ -335,14 +500,27 @@ function registerTerminalFailureTests(context) {
     assert.throws(() => server.handle(client, { type: 'input', data: '%%%' }), /인코딩/);
   });
 
-  test('시작 실패한 PTY는 세션 슬롯을 점유하거나 기존 replay를 중복 전송하지 않는다', () => {
-    const manager = new TerminalManager({ ptyModule: { spawn: () => { throw new Error('spawn failed'); } } });
+  test('시작 실패한 PTY도 사용자가 닫기 전까지 실패 상태와 replay를 보존한다', () => {
+    const storeFile = path.join(temp, 'terminal-sessions-failed.json');
+    let manager = new TerminalManager({ storeFile, ptyModule: { spawn: () => { throw new Error('spawn failed'); } } });
     const chunks = [];
     manager.on('data', payload => chunks.push(payload.data));
     assert.throws(() => manager.create({ type: 'powershell', cwd: root }), /spawn failed/);
-    assert.equal(manager.list().length, 0);
+    assert.equal(manager.list().length, 1);
+    assert.equal(manager.list()[0].status, 'failed');
+    assert.match(manager.get(manager.list()[0].id, true).replay, /spawn failed/);
     assert.equal(chunks.length, 1);
     assert.equal((chunks[0].match(/spawn failed/g) || []).length, 1);
+    const failedId = manager.list()[0].id;
+    manager.dispose({ preserveSessions: true });
+    manager = new TerminalManager({ storeFile });
+    assert.equal(manager.get(failedId).status, 'failed');
+    assert.match(manager.get(failedId, true).replay, /spawn failed/);
+    manager.close(manager.list()[0].id);
+    assert.equal(manager.list().length, 0);
+    manager = new TerminalManager({ storeFile });
+    assert.equal(manager.list().length, 0);
+    manager.dispose();
   });
 
   test('Windows npm AI 명령은 실행 가능한 PowerShell 호스트로 연다', () => {

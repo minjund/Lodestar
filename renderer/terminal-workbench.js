@@ -19,26 +19,29 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
     const fit = new window.FitAddon.FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host);
+    const entry = { terminal, fit, host, readOnly, userScrollRevision: 0, outputWritePending: 0 };
     const syncScrollState = viewportY => {
-      host.dataset.viewportY = String(Number(viewportY) || 0);
-      host.dataset.baseY = String(Number(terminal.buffer.active.baseY) || 0);
+      const normalizedViewport = Number(viewportY) || 0;
+      const baseY = Number(terminal.buffer.active.baseY) || 0;
+      host.dataset.viewportY = String(normalizedViewport);
+      host.dataset.baseY = String(baseY);
+      // Xterm may consume wheel events before they bubble to the host. Its
+      // scroll event is the reliable source for mouse, keyboard and scrollbar
+      // viewport changes.
+      if (readOnly && !state.remoteCaptureApplying) {
+        state.remoteViewportAnchor = normalizedViewport;
+        state.remoteViewportAtBottom = normalizedViewport >= baseY;
+      }
     };
     terminal.onScroll(syncScrollState);
     syncScrollState(0);
-    const entry = { terminal, fit, host, readOnly };
-    if (readOnly) {
-      const rememberUserViewport = () => requestAnimationFrame(() => {
-        const buffer = terminal.buffer.active;
-        state.remoteViewportAnchor = Number(buffer.viewportY) || 0;
-        state.remoteViewportAtBottom = state.remoteViewportAnchor >= Number(buffer.baseY || 0);
-      });
-      host.addEventListener('wheel', rememberUserViewport, { passive: true });
-      host.addEventListener('pointerup', rememberUserViewport);
-      host.addEventListener('keyup', event => {
-        if (['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown'].includes(event.key)) rememberUserViewport();
-      });
-    }
     if (!readOnly) {
+      const rememberUserScroll = () => { entry.userScrollRevision += 1; };
+      host.addEventListener('wheel', rememberUserScroll, { capture: true, passive: true });
+      host.addEventListener('pointerup', rememberUserScroll, true);
+      host.addEventListener('keyup', event => {
+        if (['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown'].includes(event.key)) rememberUserScroll();
+      }, true);
       terminal.onData(data => {
         if (state.selectedId === key) Promise.resolve(window.loadtoagent.terminalWrite(key, data)).catch(error => notice(errorMessage(error), 'error'));
       });
@@ -89,22 +92,55 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
     $('#terminalEmpty').classList.add('hidden');
   }
 
+  function linkedAgentSession(session) {
+    if (!session) return null;
+    if (state.boundTargetId === session.id && state.boundAgent) return state.boundAgent;
+    const bridgeId = String(session.bridgeId || '');
+    return bridgeId && Array.isArray(state.snapshot?.sessions)
+      ? state.snapshot.sessions.find(item => item.id === bridgeId) || null
+      : null;
+  }
+
+  function terminalPresentation(session) {
+    const agent = linkedAgentSession(session);
+    if (agent?.attention?.required || agent?.status === 'waiting') return { tone: 'attention', label: t('app.nav.needs_review') };
+    if (agent?.status === 'failed' || session?.status === 'failed') return { tone: 'failed', label: t('terminal.status.failed') };
+    if (agent?.status === 'completed') return { tone: 'completed', label: t('ui.completed') };
+    if (agent && ['running', 'starting'].includes(agent.status)) return { tone: 'running', label: t('ui.working') };
+    if (session?.status === 'running' || session?.status === 'starting') return { tone: 'running', label: STATUS_LABELS[session.status] || session.status };
+    return { tone: session?.status || 'idle', label: STATUS_LABELS[session?.status] || session?.status || t('ui.idle') };
+  }
+
   function renderSessions() {
     const general = modeSessions('general');
     const running = general.filter(item => item.status === 'running').length;
     const background = general.filter(item => item.background && item.status === 'running').length;
+    const attention = general.filter(item => terminalPresentation(item).tone === 'attention').length;
     $('#navTerminalCount').textContent = running;
     const terminalNav = document.querySelector('.nav-item[data-view="terminal"]');
     if (terminalNav) terminalNav.setAttribute('aria-label', t('quality.nav_count', { label: t('app.nav.session_terminal'), count: running }));
     $('#terminalSessionSummary').textContent = [
       window.LoadToAgentI18n.t('common.active', { count: running }),
+      attention ? t('terminal.monitor.attention_count', { count: attention }) : '',
       background ? window.LoadToAgentI18n.t('session.background_count', { count: background }) : '',
       window.LoadToAgentI18n.t('session.total_count', { count: general.length }),
     ].filter(Boolean).join(' · ');
-    $('#terminalSessionList').innerHTML = general.length ? general.map((session, index) => `
+    const renderKey = JSON.stringify([
+      state.selectedId,
+      general.map(session => {
+        const presentation = terminalPresentation(session);
+        return [session.id, session.title, session.type, session.status, session.cwd, session.background, presentation.tone, presentation.label];
+      }),
+    ]);
+    if (renderKey === state.sessionRenderKey) return;
+    state.sessionRenderKey = renderKey;
+    $('#terminalSessionList').innerHTML = general.length ? general.map((session, index) => {
+      const presentation = terminalPresentation(session);
+      return `
       <div class="terminal-session-row">
         <button type="button" draggable="true"
           class="terminal-session-item ${state.selectedId === session.id ? 'active' : ''}"
+          data-status="${esc(presentation.tone)}"
           data-terminal-id="${esc(session.id)}"
           role="option"
           aria-selected="${state.selectedId === session.id ? 'true' : 'false'}"
@@ -112,16 +148,17 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
           aria-pressed="${state.selectedId === session.id ? 'true' : 'false'}"
           aria-grabbed="false"
           aria-describedby="terminalReorderHelp"
-          title="${esc(window.LoadToAgentI18n.t('terminal.reorder_hint'))}">
+          title="${esc(session.cwd || window.LoadToAgentI18n.t('terminal.reorder_hint'))}">
           <span class="terminal-session-icon">${esc(terminalTypeMark(session))}</span>
-          <span><b>${esc(session.title)}</b><small>${esc(terminalTypeLabel(session))}${session.background ? ` · ${t('terminal.background_kept')}` : ''} · ${esc(STATUS_LABELS[session.status] || session.status)}</small><em>${esc(session.cwd || session.distro || `PID ${session.pid || '--'}`)}</em><span class="sr-only">${index + 1}/${general.length}</span></span>
-          <i class="${session.status === 'running' ? 'live' : ''}"></i>
+          <span><b>${esc(session.title)}</b><small>${esc(terminalTypeLabel(session))}${session.background ? ` · ${t('terminal.background_kept')}` : ''}</small><em>${esc(session.cwd || session.distro || `PID ${session.pid || '--'}`)}</em><span class="sr-only">${index + 1}/${general.length}</span></span>
+          <span class="terminal-session-status" data-status="${esc(presentation.tone)}"><i></i>${esc(presentation.label)}</span>
         </button>
         <span class="terminal-reorder-actions" aria-label="${esc(window.LoadToAgentI18n.t('terminal.reorder_group', { title: session.title }))}">
           <button type="button" data-session-move="-1" data-session-move-id="${esc(session.id)}" aria-label="${esc(window.LoadToAgentI18n.t('terminal.move_up', { title: session.title }))}" ${index === 0 ? 'disabled' : ''}>↑</button>
           <button type="button" data-session-move="1" data-session-move-id="${esc(session.id)}" aria-label="${esc(window.LoadToAgentI18n.t('terminal.move_down', { title: session.title }))}" ${index === general.length - 1 ? 'disabled' : ''}>↓</button>
         </span>
-      </div>`).join('') : `<div class="terminal-resource-empty">${t('terminal.empty.general')}</div>`;
+      </div>`;
+    }).join('') : `<div class="terminal-resource-empty">${t('terminal.empty.general')}</div>`;
   }
 
   function renderTmuxResources() {
@@ -168,12 +205,15 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
     $('#terminalAttachBtn').classList.toggle('hidden', !remote || Boolean(session));
     $('#terminalTmuxTools').classList.toggle('hidden', !remote || Boolean(session));
     if (session) {
-      setConnectionState(STATUS_LABELS[session.status] || session.status, session.status);
+      const presentation = terminalPresentation(session);
+      setConnectionState(presentation.label, presentation.tone);
       $('#terminalTargetIcon').textContent = terminalTypeMark(session);
       $('#terminalTargetMeta').innerHTML = `<b>${esc(session.title)}</b><span>${bound ? `● ${t('terminal.bound_ai_session')} · ` : ''}${esc(session.type.toUpperCase())} · PID ${session.pid || '--'} · ${esc(session.cwd || session.distro || '')}</span>`;
       $('#terminalConsoleCaption').textContent = `${terminalTypeLabel(session)} · PID ${session.pid || '--'}`;
-      $('#terminalConsoleState').textContent = canInput ? window.LoadToAgentI18n.t("ui.direct_input_available") : window.LoadToAgentI18n.t("ui.ended_session");
-      $('#terminalConsoleState').dataset.status = session.status;
+      $('#terminalConsoleState').textContent = presentation.tone === 'attention' || presentation.tone === 'completed'
+        ? presentation.label
+        : canInput ? window.LoadToAgentI18n.t("ui.direct_input_available") : window.LoadToAgentI18n.t("ui.ended_session");
+      $('#terminalConsoleState').dataset.status = presentation.tone;
     } else if (remote) {
       setConnectionState(remote.pane.dead ? t('terminal.tmux.ended_pane') : t('terminal.tmux.connected'), remote.pane.dead ? 'exited' : 'running');
       $('#terminalTargetIcon').textContent = 'tm';
@@ -337,6 +377,7 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
       const wasAtBottom = state.remoteViewportAnchor == null
         ? Boolean(buffer && buffer.viewportY >= buffer.baseY)
         : state.remoteViewportAtBottom;
+      state.remoteCaptureApplying = true;
       entry.terminal.reset();
       await new Promise(resolve => entry.terminal.write(result.output.replace(/\n/g, '\r\n'), resolve));
       const selected = currentTmux();
@@ -346,19 +387,26 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
         setTimeout(captureRemote, 0);
         return;
       }
-      requestAnimationFrame(() => {
-        const latest = currentTmux();
-        if (captureGeneration !== state.captureGeneration || !latest || `${latest.distro.name}:${latest.pane.nativeId}` !== captureKey) return;
-        if (firstCapture) {
-          entry.terminal.scrollToTop();
-          state.remoteViewportAnchor = 0;
-          state.remoteViewportAtBottom = false;
-        } else if (state.remoteViewportAnchor == null ? wasAtBottom : state.remoteViewportAtBottom) entry.terminal.scrollToBottom();
-        else entry.terminal.scrollToLine(state.remoteViewportAnchor == null ? previousViewport : state.remoteViewportAnchor);
-        state.captureRevision += 1;
-        entry.host.dataset.captureRevision = String(state.captureRevision);
-      });
+      await new Promise(resolve => requestAnimationFrame(() => {
+        try {
+          const latest = currentTmux();
+          if (captureGeneration !== state.captureGeneration || !latest || `${latest.distro.name}:${latest.pane.nativeId}` !== captureKey) return;
+          if (firstCapture) entry.terminal.scrollToTop();
+          else if (state.remoteViewportAnchor == null ? wasAtBottom : state.remoteViewportAtBottom) entry.terminal.scrollToBottom();
+          else entry.terminal.scrollToLine(state.remoteViewportAnchor == null ? previousViewport : state.remoteViewportAnchor);
+          const restoredBuffer = entry.terminal.buffer.active;
+          state.remoteViewportAnchor = Number(restoredBuffer.viewportY) || 0;
+          state.remoteViewportAtBottom = !firstCapture && state.remoteViewportAnchor >= Number(restoredBuffer.baseY || 0);
+          state.captureRevision += 1;
+          entry.host.dataset.captureRevision = String(state.captureRevision);
+        } catch (error) {
+          window.LoadToAgentRendererUtils.reportRecoverableError('tmux-capture-render', error);
+        } finally {
+          resolve();
+        }
+      }));
     } finally {
+      state.remoteCaptureApplying = false;
       state.captureInFlight = false;
     }
   }

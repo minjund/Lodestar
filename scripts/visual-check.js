@@ -450,6 +450,56 @@ app.whenReady().then(() => {
       const treeImage = await win.webContents.capturePage();
       const treeOutput = path.join(outputDir, 'loadtoagent-agent-tree.png');
       fs.writeFileSync(treeOutput, treeImage.toPNG());
+      const managementMetrics = await win.webContents.executeJavaScript(`(() => {
+        const app = window.LoadToAgentApp;
+        const sessions = app.state.snapshot?.sessions || [];
+        const base = sessions.find(item => !item.parentId) || sessions[0];
+        if (!base) return { cards: 0 };
+        const now = new Date().toISOString();
+        const make = (id, status, kind, level, title) => ({
+          ...base, id, externalId: id + '-external', parentId: null, childIds: [], title, status,
+          updatedAt: now, statusDetail: title, runId: id + '-run', runtimePresence: [],
+          attention: { required: true, kind, summary: title + '에 대한 사용자 조치가 필요합니다.', requestedAt: now, source: 'observed-status', confidence: 'high' },
+          progress: { stage: status, percent: status === 'failed' ? 64 : 42, completedSteps: 3, failedSteps: status === 'failed' ? 1 : 0, totalSteps: 6, currentStep: '검증 결과 확인', blocker: title, lastActivityAt: now, checkpoints: [] },
+          health: { level, score: level === 'critical' ? 35 : 68, lastActivityAt: now, signals: [{ code: status === 'failed' ? 'run-failed' : status === 'paused' ? 'run-paused' : 'waiting-too-long', severity: level === 'critical' ? 'critical' : 'warning', detail: title }] },
+          evidence: { confidence: 'high', status: 'observed', hierarchy: 'observed', completion: 'unverified', sources: ['runtime-event'] },
+          outcome: { status: status === 'failed' ? 'failed' : 'in-progress', summary: title, verified: false, artifacts: [], checks: [] },
+          controlCapabilities: { managed: true, respond: kind === 'decision', approve: kind === 'decision', deny: kind === 'decision', sendInstruction: kind === 'decision', stop: status === 'paused', pause: false, resume: status === 'paused', retry: status === 'failed', reassign: true },
+        });
+        const fixtures = [
+          make('visual-management-decision', 'waiting', 'decision', 'attention', '배포 환경 선택'),
+          make('visual-management-failed', 'failed', 'error', 'critical', '회귀 테스트 실패'),
+          make('visual-management-paused', 'paused', 'paused', 'warning', '사용자가 일시정지한 실행'),
+        ];
+        for (const fixture of fixtures) {
+          const index = sessions.findIndex(item => item.id === fixture.id);
+          if (index >= 0) sessions[index] = fixture;
+          else sessions.unshift(fixture);
+        }
+        app.state.view = 'waiting';
+        app.state.search = '';
+        app.state.workspace = 'all';
+        app.state.providerFilters.clear();
+        app.renderSessions('view');
+        const section = document.querySelector('#attentionInbox');
+        return {
+          cards: section?.querySelectorAll('.attention-card').length || 0,
+          progress: section?.querySelectorAll('[role="progressbar"]').length || 0,
+          health: section?.querySelectorAll('.management-health').length || 0,
+          controls: section?.querySelectorAll('[data-managed-run-action], [data-reassign-session]').length || 0,
+          quickActions: section?.querySelectorAll('[data-attention-quick]').length || 0,
+          visible: Boolean(section && !section.classList.contains('hidden')),
+          noHorizontalOverflow: Boolean(section && section.scrollWidth <= section.clientWidth + 2),
+        };
+      })()`);
+      await new Promise(resolve => setTimeout(resolve, 250));
+      const managementImage = await win.webContents.capturePage();
+      const managementOutput = path.join(outputDir, 'loadtoagent-management-inbox.png');
+      fs.writeFileSync(managementOutput, managementImage.toPNG());
+      if (!managementMetrics.visible || managementMetrics.cards < 3 || managementMetrics.progress < 3 || managementMetrics.health < 3 || managementMetrics.controls < 5 || managementMetrics.quickActions < 2 || !managementMetrics.noHorizontalOverflow) {
+        throw new Error(`관리 확인함 시각 구성이 올바르지 않습니다: ${JSON.stringify(managementMetrics)}`);
+      }
+      await win.webContents.executeJavaScript(`(() => { window.LoadToAgentApp.state.view = 'all'; window.LoadToAgentApp.renderSessions('view'); document.querySelector('.main-stage')?.scrollTo(0, 0); })()`);
       const densityMetrics = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
         window.LoadToAgentApp.state.graphFocusId = null;
@@ -474,7 +524,7 @@ app.whenReady().then(() => {
           subagentTabRemoved: !document.querySelector('[data-view="subagents"]'),
         };
       })()`);
-      if (!densityMetrics.subagentTabRemoved || densityMetrics.runtimeSegments !== 1 || densityMetrics.tmuxRuntimeCards !== 0 || densityMetrics.tmuxFirst || densityMetrics.lanes < 4 || densityMetrics.visibleFlows > densityMetrics.lanes * 6 || densityMetrics.moreButtons < 1 || densityMetrics.expandedFlows <= densityMetrics.visibleFlows || !densityMetrics.noHorizontalOverflow) {
+      if (!densityMetrics.subagentTabRemoved || densityMetrics.runtimeSegments !== 2 || densityMetrics.tmuxRuntimeCards !== 0 || !densityMetrics.tmuxFirst || densityMetrics.lanes < 4 || densityMetrics.visibleFlows > densityMetrics.lanes * 6 || densityMetrics.moreButtons < 1 || densityMetrics.expandedFlows <= densityMetrics.visibleFlows || !densityMetrics.noHorizontalOverflow) {
         throw new Error(`대규모 에이전트 지도 밀도 조절이 올바르지 않습니다: ${JSON.stringify(densityMetrics)}`);
       }
       if (densityFocusId) {
@@ -785,6 +835,8 @@ app.whenReady().then(() => {
         window.LoadToAgentApp.state.expandedCompletedSubagents.add(${JSON.stringify(childFocusId)});
         window.LoadToAgentApp.renderSessions();
         window.LoadToAgentApp.drawAgentWorkflowConnections();
+        const focusedSession = window.LoadToAgentApp.state.snapshot.sessions.find(item => item.id === ${JSON.stringify(childFocusId)});
+        const commandPanel = document.querySelector('.agent-workflow-selected-stack > .agent-command-panel');
         const upstream = document.querySelector('.upstream-column .agent-workflow-node')?.getBoundingClientRect();
         const selected = document.querySelector('.agent-workflow-selected')?.getBoundingClientRect();
         return {
@@ -794,11 +846,17 @@ app.whenReady().then(() => {
           downstreamNodes: document.querySelectorAll('.downstream-column .agent-workflow-node').length,
           emptyShown: Boolean(document.querySelector('.downstream-column .agent-workflow-empty')),
           connectionPaths: document.querySelectorAll('.agent-workflow-edge').length,
-          resumeReady: document.querySelector('.agent-command-panel')?.classList.contains('resume-ready') || false,
-          commandEnabled: document.querySelector('[data-agent-command-draft]')?.disabled === false,
-          resumeMode: document.querySelector('.agent-command-panel')?.classList.contains('control-resume') || false,
+          resumeReady: commandPanel?.classList.contains('resume-ready') || false,
+          commandEnabled: commandPanel?.querySelector('[data-agent-command-draft]')?.disabled === false,
+          resumeMode: commandPanel?.classList.contains('control-resume') || false,
           bridgeCopyVisible: Boolean(document.querySelector('[data-agent-bridge-copy]')),
           communicationEvents: Number(document.querySelector('[data-collaboration-communications]')?.dataset.collaborationCommunications || 0),
+          provider: focusedSession?.provider || '',
+          externalId: focusedSession?.externalId || '',
+          resumeSupport: window.LoadToAgentTerminal.resumeSupport(focusedSession),
+          commandPanel: commandPanel?.className || '',
+          commandStatus: commandPanel?.querySelector('header small')?.textContent || '',
+          targets: window.LoadToAgentTerminal.agentTargets(focusedSession).map(item => ({ id: item.id, kind: item.kind })),
         };
       })()`);
       const childFocusImage = await captureStableState(win, `(() => {
@@ -818,7 +876,7 @@ app.whenReady().then(() => {
         const inspect = id => {
           window.LoadToAgentApp.state.graphFocusId = id;
           window.LoadToAgentApp.renderSessions();
-          const panel = document.querySelector('.agent-command-panel');
+          const panel = document.querySelector('.agent-workflow-selected-stack > .agent-command-panel');
           return {
             classes: panel?.className || '',
             status: panel?.querySelector('header small')?.textContent || '',
@@ -1010,7 +1068,7 @@ app.whenReady().then(() => {
       const drawerOutput = path.join(outputDir, 'loadtoagent-session-detail.png');
       fs.writeFileSync(drawerOutput, drawerImage.toPNG());
       await win.webContents.executeJavaScript(`Promise.all([${JSON.stringify(commandTerminalId)}, ${JSON.stringify(alternateCommandTerminalId)}].map(id => window.loadtoagent.terminalClose(id).catch(() => null)))`);
-      process.stdout.write(`${output}\n${compactOutput}\n${settingsOutput}\n${terminalOutput}\n${sessionTerminalOutput}\n${terminalCompactOutput}\n${tmuxOutput}\n${tmuxControlOutput}\n${tmuxFocusOutput}\n${tmuxDetailOutput}\n${structuredOutput}\n${treeOutput}\n${focusOutput}\n${communicationOutput}\n${childFocusOutput}\n${subagentStateOutput}\n${subagentConversationOutput}\n${workflowCompactOutput}\n${drawerOutput}\n${JSON.stringify({ bridge: bridgeInfo, beginner: beginnerMetrics, compact: compactMetrics, settings: settingsMetrics, terminal: terminalMetrics, sessionTerminal: sessionTerminalMetrics, terminalCompact: terminalCompactMetrics, terminalContinuity: continuityMetrics, terminalCommand: commandUiMetrics, controlStates: controlStateMetrics, tmuxControl: tmuxControlMetrics, dashboard: metrics, density: densityMetrics, motion: { ...motionMetrics, ...motionClosedMetrics }, workflowChild: childMetrics, workflowReturn: returnMetrics, subagentConversation: subagentConversationMetrics, workflowCompact: workflowCompactMetrics, tmux: tmuxMetrics, tmuxDetail: tmuxDetailMetrics, structuredDetail: structuredMetrics })}\n`);
+      process.stdout.write(`${output}\n${compactOutput}\n${settingsOutput}\n${terminalOutput}\n${sessionTerminalOutput}\n${terminalCompactOutput}\n${tmuxOutput}\n${tmuxControlOutput}\n${tmuxFocusOutput}\n${tmuxDetailOutput}\n${structuredOutput}\n${treeOutput}\n${managementOutput}\n${focusOutput}\n${communicationOutput}\n${childFocusOutput}\n${subagentStateOutput}\n${subagentConversationOutput}\n${workflowCompactOutput}\n${drawerOutput}\n${JSON.stringify({ bridge: bridgeInfo, beginner: beginnerMetrics, compact: compactMetrics, settings: settingsMetrics, terminal: terminalMetrics, sessionTerminal: sessionTerminalMetrics, terminalCompact: terminalCompactMetrics, terminalContinuity: continuityMetrics, terminalCommand: commandUiMetrics, controlStates: controlStateMetrics, tmuxControl: tmuxControlMetrics, dashboard: metrics, density: densityMetrics, management: managementMetrics, motion: { ...motionMetrics, ...motionClosedMetrics }, workflowChild: childMetrics, workflowReturn: returnMetrics, subagentConversation: subagentConversationMetrics, workflowCompact: workflowCompactMetrics, tmux: tmuxMetrics, tmuxDetail: tmuxDetailMetrics, structuredDetail: structuredMetrics })}\n`);
     } catch (error) {
       process.stderr.write(`${error.stack || error.message}\n`);
       exitCode = 1;

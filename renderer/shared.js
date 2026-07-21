@@ -19,6 +19,23 @@ window.LoadToAgentRendererUtils = Object.freeze({
   providerLabel(provider) {
     return ({ claude: 'Claude', codex: 'GPT · Codex', gemini: 'Gemini', grok: 'Grok' })[provider] || 'AI';
   },
+  preserveScrollPositions(targets) {
+    const positions = (Array.isArray(targets) ? targets : [targets]).map(target => {
+      const element = typeof target === 'string' ? document.querySelector(target) : target;
+      return element ? { element, left: element.scrollLeft, top: element.scrollTop } : null;
+    }).filter(Boolean);
+    return () => {
+      positions.forEach(({ element, left, top }) => {
+        if (!element.isConnected) return;
+        element.scrollLeft = left;
+        element.scrollTop = top;
+      });
+    };
+  },
+  isScrolledToEnd(element, tolerance = 2) {
+    if (!element) return true;
+    return element.scrollHeight - element.scrollTop - element.clientHeight <= tolerance;
+  },
   reportRecoverableError(operation, error) {
     const message = error && error.message ? error.message : String(error || 'unknown error');
     console.warn(`[LoadToAgent:${operation}] ${message}`);

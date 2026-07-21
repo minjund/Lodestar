@@ -87,10 +87,15 @@ The `10-minute start guide` on Home lets you practice the same four steps. Progr
 |---|---|
 | Agent map | Live work grouped by Claude, Codex, Gemini, and Grok |
 | Relationship view | The request origin, selected agent, and every directly delegated subagent |
+| Execution units | Foreground shells, background shells, and background jobs started by an AI, including command, workspace, execution ID, and live status |
+| Operations and attention inbox | Prioritized failures, stalls, context risk, approvals, decisions, and input requests with immediate actions |
 | Session detail | Conversation, tool activity, lifecycle events, model, workspace, and status |
+| Management summary | Checkpoints, observation confidence, completion summary, artifacts, verification, and run controls |
 | Token view | Input, output, cached, reasoning, total, and reported context-window usage |
 | Session terminal | The selected AI's prior conversation beside its existing PTY or tmux pane, with input continuing in that exact session |
 | tmux workspace | Session → window → pane → AI process topology on macOS or Windows through WSL |
+
+Schedules and loops, Session terminal, and tmux workspace live under **Advanced tools** so the everyday monitoring flow stays focused.
 
 LoadToAgent distinguishes between a terminal it can control, a session that needs a bridge connection, a read-only session that must continue in its original app, and an ended session. It never types into an arbitrary external window.
 
@@ -112,6 +117,8 @@ loadtoagent run claude -- --model claude-sonnet-4-6
 ```
 
 The external terminal and LoadToAgent dashboard control the same LoadToAgent-owned PTY. Opening a terminal from an AI card reuses the exact connected terminal instead of creating a new shell, keeps its PTY output intact across UI navigation, and shows that session's prior conversation in a live side rail. Sessions started arbitrarily elsewhere remain visible but read-only unless the original app exposes a supported handoff.
+
+A terminal opened by LoadToAgent remains in the session-terminal list, with its output intact, whether it is running, idle, naturally exited, or failed to start. When any terminal is active, closing the window with `X` hides LoadToAgent in the system tray. An explicit `Quit app` closes the dashboard while a separate authenticated local terminal host keeps live PTYs running; the next launch reconnects to the same session ID, process, and output. A live terminal ends only when you choose `Close session`, the terminal exits naturally, or the operating-system session/terminal host itself stops.
 
 ## Local-first by design
 

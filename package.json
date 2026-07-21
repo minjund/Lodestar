@@ -1,6 +1,6 @@
 {
   "name": "loadtoagent",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "A local desktop dashboard for Claude, Codex, Gemini, and Grok sessions.",
   "main": "main.js",
   "author": "wincube AX",
@@ -44,13 +44,16 @@
     "start": "electron .",
     "test": "node scripts/regression-test.js",
     "test:terminal": "electron scripts/terminal-integration-test.js",
+    "test:terminal-restart": "node scripts/terminal-restart-persistence-check.js",
     "test:bridge": "electron scripts/bridge-integration-test.js",
     "test:tmux": "node scripts/tmux-integration-test.js",
     "test:visual": "electron scripts/visual-check.js",
     "test:responsive": "electron scripts/responsive-check.js",
     "test:interaction": "electron scripts/interaction-check.js",
+    "test:scroll": "electron scripts/scroll-retention-check.js",
     "audit:ui": "electron scripts/browser-audit-host.js",
     "test:runtime-overview": "electron scripts/runtime-overview-visual.js",
+    "test:readability": "electron scripts/readability-visual-check.js",
     "test:update:mac": "node scripts/mac-update-integration-test.js",
     "demo:readme": "electron scripts/readme-demo.js",
     "dist": "electron-builder",
@@ -126,7 +129,8 @@
       "artifactName": "LoadToAgent-${version}-${arch}.${ext}"
     },
     "portable": {
-      "artifactName": "LoadToAgent-${version}-portable.exe"
+      "artifactName": "LoadToAgent-${version}-portable.exe",
+      "unpackDirName": false
     },
     "nsis": {
       "artifactName": "LoadToAgent-Setup-${version}.exe",

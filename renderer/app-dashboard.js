@@ -32,38 +32,95 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
   }
 
   function isProjectlessSession(session) {
-    if (!session || !session.cwd) return true;
+    const cwd = session && (session.originCwd || session.cwd);
+    if (!cwd) return true;
     if (typeof session.projectless === "boolean") return session.projectless;
-    const normalized = String(session.cwd).replace(/\\/g, "/").replace(/\/+$/, "");
+    const normalized = String(cwd).replace(/\\/g, "/").replace(/\/+$/, "");
     return session.provider === "codex" && session.clientKind === "codex-desktop" && /(?:^|\/)Documents\/Codex\/\d{4}-\d{2}-\d{2}\/new-chat$/i.test(normalized);
   }
 
+  function sessionOriginPath(session) {
+    return String(session && (session.originCwd || session.cwd) || "").trim();
+  }
+
+  function normalizedProjectPath(value) {
+    return String(value || "").trim().replace(/\\/g, "/").replace(/\/+$/, "").toLocaleLowerCase();
+  }
+
+  function projectContainsPath(projectPath, candidatePath) {
+    const project = normalizedProjectPath(projectPath);
+    const candidate = normalizedProjectPath(candidatePath);
+    return Boolean(project && candidate && (candidate === project || candidate.startsWith(`${project}/`)));
+  }
+
+  function projectName(projectPath) {
+    const normalized = String(projectPath || "").replace(/\\/g, "/").replace(/\/+$/, "");
+    return normalized.split("/").filter(Boolean).pop() || t("workspace.unknown");
+  }
+
+  function observedProjects() {
+    const projects = new Map();
+    const saved = state.workspaces.map((item) => ({ ...item, key: normalizedProjectPath(item.path) }));
+    saved.forEach((item) => projects.set(item.key, { path: item.path, name: item.name || projectName(item.path), saved: true, count: 0 }));
+    visibleSessions().filter((session) => !session.parentId && !isProjectlessSession(session)).forEach((session) => {
+      const originPath = sessionOriginPath(session);
+      if (!originPath) return;
+      const owner = saved
+        .filter((item) => projectContainsPath(item.path, originPath))
+        .sort((a, b) => b.key.length - a.key.length)[0];
+      const path = owner ? owner.path : originPath;
+      const key = normalizedProjectPath(path);
+      const project = projects.get(key) || { path, name: projectName(path), saved: false, count: 0 };
+      project.count += 1;
+      project.lastActivityAt = !project.lastActivityAt || Date.parse(session.updatedAt || 0) > Date.parse(project.lastActivityAt || 0)
+        ? session.updatedAt
+        : project.lastActivityAt;
+      projects.set(key, project);
+    });
+    const items = [...projects.values()];
+    const duplicateNames = new Map();
+    items.forEach((item) => duplicateNames.set(item.name.toLocaleLowerCase(), (duplicateNames.get(item.name.toLocaleLowerCase()) || 0) + 1));
+    items.forEach((item) => {
+      if (duplicateNames.get(item.name.toLocaleLowerCase()) < 2) return;
+      const parts = String(item.path).replace(/\\/g, "/").replace(/\/+$/, "").split("/").filter(Boolean);
+      item.name = parts.slice(-2).join("/") || item.name;
+    });
+    return items.sort((a, b) => Number(b.count || 0) - Number(a.count || 0)
+      || Number(b.saved) - Number(a.saved)
+      || String(a.name).localeCompare(String(b.name), uiLocale()));
+  }
+
   function sessionWorkspaceLabel(session) {
-    return isProjectlessSession(session) ? t("ui.no_project") : (session && session.workspace) || t("workspace.unknown");
+    return isProjectlessSession(session)
+      ? t("ui.no_project")
+      : (session && session.workspace) || projectName(sessionOriginPath(session));
   }
 
   function matchesWorkspaceFilter(session) {
     if (state.workspace === "all") return true;
     if (state.workspace === PROJECTLESS_WORKSPACE) return isProjectlessSession(session);
-    return (
-      !isProjectlessSession(session) &&
-      String((session && session.cwd) || "")
-        .toLowerCase()
-        .startsWith(state.workspace.toLowerCase())
-    );
+    return !isProjectlessSession(session) && projectContainsPath(state.workspace, sessionOriginPath(session));
   }
 
   function renderWorkspaces() {
-    const list = $("#workspaceList");
-    const projectlessCount = visibleSessions().filter((session) => !session.parentId && isProjectlessSession(session)).length;
+    const lists = [$("#workspaceList"), $("#mobileWorkspaceList")].filter(Boolean);
+    const rootSessions = visibleSessions().filter((session) => !session.parentId);
+    const projects = observedProjects();
+    const projectlessCount = rootSessions.filter(isProjectlessSession).length;
     const savedWorkspaceExists = state.workspace === "all"
       || (state.workspace === PROJECTLESS_WORKSPACE && projectlessCount > 0)
-      || state.workspaces.some((workspace) => workspace.path === state.workspace);
+      || projects.some((project) => normalizedProjectPath(project.path) === normalizedProjectPath(state.workspace));
     if (!savedWorkspaceExists) state.workspace = "all";
-    list.innerHTML =
+    const projectButton = (item) => `<button type="button" class="workspace-item observed-project ${state.workspace === item.path ? "selected" : ""}"
+      data-workspace="${esc(item.path)}" title="${esc(item.path)}"
+      aria-label="${esc(t("project.filter_named", { name: item.name, count: item.count }))}"
+      aria-pressed="${state.workspace === item.path ? "true" : "false"}">
+      <strong>${esc(item.name)}</strong><small>${Number(item.count || 0)}</small>
+      </button>`;
+    const html =
       `<button type="button" class="workspace-item ${state.workspace === "all" ? "selected" : ""}"
         data-workspace="all" aria-pressed="${state.workspace === "all" ? "true" : "false"}">
-      <strong>${window.LoadToAgentI18n.t("ui.all_workspaces")}</strong>
+      <strong>${window.LoadToAgentI18n.t("project.all")}</strong><small>${rootSessions.length}</small>
       </button>` +
       (projectlessCount
         ? `<button type="button" class="workspace-item projectless ${state.workspace === PROJECTLESS_WORKSPACE ? "selected" : ""}"
@@ -74,38 +131,39 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
         <small>${projectlessCount}</small>
         </button>`
         : "") +
-      state.workspaces
-        .map(
-          (item) => `<div class="workspace-row">
-        <button type="button" class="workspace-item ${state.workspace === item.path ? "selected" : ""}"
-          data-workspace="${esc(item.path)}" title="${esc(item.path)}"
-          aria-pressed="${state.workspace === item.path ? "true" : "false"}">
-        <strong>${esc(item.name)}</strong>
-        </button>
+      projects.map((item) => item.saved ? `<div class="workspace-row">
+        ${projectButton(item)}
         <button type="button" class="workspace-remove" data-remove-workspace="${esc(item.path)}"
           aria-label="${esc(t("workspace.remove_named", { name: item.name }))}"
           title="${esc(window.LoadToAgentI18n.t("ui.remove_from_list"))}">×</button>
-        </div>`,
-        )
-        .join("") +
-      (!state.workspaces.length ? `<div class="workspace-empty">${window.LoadToAgentI18n.t("ui.use_the_button_to_add_frequently_used_workspaces")}</div>` : "");
+        </div>` : projectButton(item)).join("") +
+      (!projects.length && !projectlessCount ? `<div class="workspace-empty">${window.LoadToAgentI18n.t("project.empty")}</div>` : "");
+    lists.forEach((list) => { list.innerHTML = html; });
+    const selectedProject = projects.find((project) => normalizedProjectPath(project.path) === normalizedProjectPath(state.workspace));
+    const mobileSummary = $("#mobileWorkspaceSummary");
+    if (mobileSummary) mobileSummary.textContent = state.workspace === "all"
+      ? t("project.all")
+      : state.workspace === PROJECTLESS_WORKSPACE
+        ? t("ui.no_project")
+        : selectedProject?.name || projectName(state.workspace);
   }
 
   function renderGlobalStats() {
     const sessions = visibleSessions();
     const totals = {
       active: sessions.filter((session) => session.status === "running" || session.status === "starting").length,
-      waiting: sessions.filter((session) => session.status === "waiting").length,
+      waiting: sessions.filter((session) => session.attention?.required).length,
       usage: { total: sessions.reduce((sum, session) => sum + Number(session.usage && session.usage.total || 0), 0) },
     };
     const rootCount = sessions.filter((session) => !session.parentId).length;
-    const helperCount = sessions.filter((session) => session.parentId).length;
+    const criticalCount = sessions.filter((session) => session.health?.level === "critical").length;
+    const riskCount = sessions.filter((session) => session.health?.level === "warning" || Number(session.context?.percent || 0) >= 75).length;
     const items = [
       [window.LoadToAgentI18n.t("ui.all_tasks"), rootCount, window.LoadToAgentI18n.t("ui.items"), ""],
       [window.LoadToAgentI18n.t("ui.ai_working_now"), totals.active || 0, window.LoadToAgentI18n.t("ui.items"), "live"],
-      [window.LoadToAgentI18n.t("ui.waiting_for_review"), totals.waiting || 0, window.LoadToAgentI18n.t("ui.items"), "alert"],
-      [window.LoadToAgentI18n.t("ui.helper_ai_history"), helperCount, window.LoadToAgentI18n.t("ui.items"), ""],
-      [window.LoadToAgentI18n.t("ui.tokens_used"), compact(totals.usage && totals.usage.total), window.LoadToAgentI18n.t("ui.items"), ""],
+      [window.LoadToAgentI18n.t("management.action_required"), totals.waiting || 0, window.LoadToAgentI18n.t("ui.items"), "alert"],
+      [window.LoadToAgentI18n.t("management.health.critical"), criticalCount, window.LoadToAgentI18n.t("ui.items"), "critical"],
+      [window.LoadToAgentI18n.t("management.risk_total"), riskCount, window.LoadToAgentI18n.t("ui.items"), "warning"],
     ];
     $("#globalStats").innerHTML = items
       .map(
@@ -126,6 +184,7 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
     $("#navRuntimeCount").textContent = scheduledCount + loopCount;
     const tmuxSessionCount = Number(state.snapshot?.tmux?.summary?.sessions || 0);
     $("#navTmuxCount").textContent = tmuxSessionCount;
+    $("#advancedToolsCount").textContent = scheduledCount + loopCount + Number($("#navTerminalCount").textContent || 0) + tmuxSessionCount;
     const navCounts = {
       all: rootCount,
       active: activeRootCount,
@@ -353,13 +412,13 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
     const allSessions = [...visibleSessions()];
     let sessions = state.view === "waiting" ? allSessions : allSessions.filter((session) => !session.parentId);
     if (state.view === "active") sessions = sessions.filter((session) => session.status === "running" || session.status === "starting");
-    if (state.view === "waiting") sessions = sessions.filter((session) => session.status === "waiting");
+    if (state.view === "waiting") sessions = sessions.filter((session) => session.attention?.required || ["critical", "warning", "unknown"].includes(session.health?.level) || !session.health);
     if (state.providerFilters.size) sessions = sessions.filter((session) => state.providerFilters.has(session.provider));
     sessions = sessions.filter(matchesWorkspaceFilter);
     const query = state.search.replace(/\s+/g, " ").trim().toLowerCase();
     if (query) {
       sessions = sessions.filter((session) =>
-        [session.title, session.model, session.cwd, session.agentName, ...(session.messages || []).slice(-12).map((item) => item.text)]
+        [session.title, session.model, session.originCwd, session.cwd, session.workspace, session.agentName, ...(session.messages || []).slice(-12).map((item) => item.text)]
           .join(" ")
           .toLowerCase()
           .includes(query),
@@ -383,7 +442,7 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
     const query = state.search.replace(/\s+/g, " ").trim().toLowerCase();
     if (query)
       sessions = sessions.filter((session) =>
-        [session.title, session.model, session.cwd, session.agentName, session.agentRole, ...(session.messages || []).map((item) => item.text)]
+        [session.title, session.model, session.originCwd, session.cwd, session.workspace, session.agentName, session.agentRole, ...(session.messages || []).map((item) => item.text)]
           .join(" ")
           .toLowerCase()
           .includes(query),
@@ -411,6 +470,8 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
   return {
     renderProviderRail,
     isProjectlessSession,
+    sessionOriginPath,
+    observedProjects,
     sessionWorkspaceLabel,
     matchesWorkspaceFilter,
     renderWorkspaces,

@@ -4,7 +4,7 @@ window.LoadToAgentAppFactories = window.LoadToAgentAppFactories || {};
 
 window.LoadToAgentAppFactories.createFilterEventBindings = function createFilterEventBindings(context = {}) {
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
-  const { $, state, setProviderVisible = () => {}, visibleSnapshot = () => state.snapshot, closeDrawer = () => {}, openDrawer = () => {}, renderSessions, render, renderWorkspaces, renderProviderOverview, renderProviderFilter, toggleProviderFilter, announceProviderFilter, filteredSessions, performUiAction, toast, announce, normalizedSearch = (value) => String(value || "").trim(), saveDashboardPreferences = () => {} } = context;
+  const { $, state, setProviderVisible = () => {}, visibleSnapshot = () => state.snapshot, closeDrawer = () => {}, openDrawer = () => {}, renderSessions, render, renderWorkspaces, renderProviderOverview, renderProviderFilter, toggleProviderFilter, announceProviderFilter, filteredSessions, performUiAction, toast, announce, normalizedSearch = (value) => String(value || "").trim(), saveDashboardPreferences = () => {}, restoreDialogTrigger = () => {}, setDialogOpenState = () => {} } = context;
 
   function bindFilterAndWorkspaceEvents() {
     const syncFilterResetButton = () => {
@@ -35,12 +35,14 @@ window.LoadToAgentAppFactories.createFilterEventBindings = function createFilter
       cards[Math.min(previousCount, cards.length - 1)]?.focus({ preventScroll: true });
       announce(window.LoadToAgentI18n.t("filter.more_loaded", { count: Math.max(0, cards.length - previousCount) }));
     });
-    $("#workspaceList").addEventListener("click", async (event) => {
+    const workspaceLists = [$("#workspaceList"), $("#mobileWorkspaceList")].filter(Boolean);
+    const handleWorkspaceClick = async (event) => {
+      const activeList = event.currentTarget;
       const remove = event.target.closest("[data-remove-workspace]");
       if (remove) {
         event.stopPropagation();
         const path = remove.dataset.removeWorkspace;
-        const workspaceItems = Array.from(event.currentTarget.querySelectorAll("[data-workspace]"));
+        const workspaceItems = Array.from(activeList.querySelectorAll("[data-workspace]"));
         const workspaceIndex = Math.max(0, workspaceItems.indexOf(remove.closest(".workspace-row")?.querySelector("[data-workspace]")));
         const workspaces = await performUiAction(() => window.loadtoagent.removeWorkspace(remove.dataset.removeWorkspace), t("workspace.remove_failed"), remove);
         if (!workspaces) return;
@@ -50,7 +52,7 @@ window.LoadToAgentAppFactories.createFilterEventBindings = function createFilter
         syncFilterResetButton();
         saveDashboardPreferences();
         requestAnimationFrame(() => {
-          const nextItems = Array.from($("#workspaceList").querySelectorAll("[data-workspace]"));
+          const nextItems = Array.from(activeList.querySelectorAll("[data-workspace]"));
           nextItems[Math.min(workspaceIndex, nextItems.length - 1)]?.focus();
         });
         announce(window.LoadToAgentI18n.t("quality.workspace_removed", { name: path.split(/[\\/]/).filter(Boolean).pop() || path }));
@@ -58,16 +60,33 @@ window.LoadToAgentAppFactories.createFilterEventBindings = function createFilter
       }
       const item = event.target.closest("[data-workspace]");
       if (item) {
+        const label = item.querySelector("strong")?.textContent.trim() || t("project.all");
         state.workspace = item.dataset.workspace;
         state.visibleLimit = 30;
         renderWorkspaces();
         renderSessions("filter");
         syncFilterResetButton();
         saveDashboardPreferences();
+        announce(t("filter.workspace_results", { project: label, count: filteredSessions().length }));
+        if (activeList.id === "mobileWorkspaceList") {
+          const menu = $("#mobileToolsMenu");
+          setDialogOpenState(menu, false);
+          menu?.classList.add("hidden");
+          $("#mobileMoreBtn")?.setAttribute("aria-expanded", "false");
+          const focusResults = () => ($("#liveSessionGrid")?.querySelector("[data-graph-focus], [data-open-session]")
+            || $("#sessionGrid")?.querySelector("[data-session-id]")
+            || $("#mainContent"))?.focus({ preventScroll: true });
+          restoreDialogTrigger();
+          focusResults();
+          requestAnimationFrame(focusResults);
+        }
       }
-    });
-    $("#workspaceList").addEventListener("keydown", (event) => {
-      moveFocus(event, event.currentTarget, "[data-workspace]", ["ArrowUp"], ["ArrowDown"]);
+    };
+    workspaceLists.forEach((list) => {
+      list.addEventListener("click", handleWorkspaceClick);
+      list.addEventListener("keydown", (event) => {
+        moveFocus(event, event.currentTarget, "[data-workspace]", ["ArrowUp"], ["ArrowDown"]);
+      });
     });
     let searchTimer = null;
     $("#searchInput").addEventListener("input", (event) => {
@@ -185,20 +204,24 @@ window.LoadToAgentAppFactories.createFilterEventBindings = function createFilter
       }
       toast(t(input.checked ? "settings.providers.shown_toast" : "settings.providers.hidden_toast"));
     });
-    $("#addWorkspaceBtn").addEventListener("click", async () => {
+    const addWorkspaceButtons = [$("#addWorkspaceBtn"), $("#mobileAddWorkspaceBtn")].filter(Boolean);
+    const addWorkspace = async (event) => {
+      const trigger = event.currentTarget;
       const previousPaths = new Set(state.workspaces.map((workspace) => workspace.path));
-      const workspaces = await performUiAction(() => window.loadtoagent.addWorkspaces(), t("workspace.add_failed"), $("#addWorkspaceBtn"));
+      const workspaces = await performUiAction(() => window.loadtoagent.addWorkspaces(), t("workspace.add_failed"), trigger);
       if (!workspaces) return;
       state.workspaces = workspaces;
       renderWorkspaces();
       syncFilterResetButton();
       const added = state.workspaces.find((workspace) => !previousPaths.has(workspace.path));
       requestAnimationFrame(() => {
-        if (added) $("#workspaceList")?.querySelector(`[data-workspace="${CSS.escape(added.path)}"]`)?.focus();
-        else $("#addWorkspaceBtn")?.focus();
+        const targetList = trigger.id === "mobileAddWorkspaceBtn" ? $("#mobileWorkspaceList") : $("#workspaceList");
+        if (added) targetList?.querySelector(`[data-workspace="${CSS.escape(added.path)}"]`)?.focus();
+        else trigger.focus();
       });
       announce(window.LoadToAgentI18n.t("quality.workspace_added", { count: state.workspaces.length }));
-    });
+    };
+    addWorkspaceButtons.forEach((button) => button.addEventListener("click", addWorkspace));
     $("#probeBtn").addEventListener("click", async () => {
       const nextAvailability = await performUiAction(() => window.loadtoagent.probeProviders(), t("run.cli_check_failed"), $("#probeBtn"));
       if (!nextAvailability) return;

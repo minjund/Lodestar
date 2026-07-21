@@ -80,9 +80,14 @@ async function screenshot(send, name) {
       state.view = 'all'; state.provider = 'all'; state.providerFilters.clear(); state.workspace = 'all'; state.search = ''; state.graphFocusId = null;
       renderSessions('view'); document.querySelector('.main-stage')?.scrollTo(0, 0); return true;
     })()`);
-    await waitFor(send, `document.querySelectorAll('.runtime-segment').length === 1 && document.querySelectorAll('.live-tmux-card').length === 0`, '실제 진행 중 화면에 실행 세션 외 자원이 섞였습니다.');
-    const runtimeSplit = await evaluate(send, `(() => ({ segments: document.querySelectorAll('.runtime-segment').length, firstIsTmux: document.querySelector('.runtime-segment:first-child')?.classList.contains('tmux-runtime') || false, tmuxCards: document.querySelectorAll('.live-tmux-card').length, tmuxNames: [...document.querySelectorAll('.live-tmux-card-head b')].map(node => node.textContent.trim()), standardLanes: document.querySelectorAll('.standard-runtime .agent-flow-lane').length, overflow: document.querySelector('#liveSessionGrid').scrollWidth > document.querySelector('#liveSessionGrid').clientWidth + 2 }))()`);
-    if (runtimeSplit.segments !== 1 || runtimeSplit.firstIsTmux || runtimeSplit.tmuxCards !== 0 || runtimeSplit.standardLanes < 1 || runtimeSplit.overflow) throw new Error(`실제 진행 중 실행 세션 전용 UI가 맞지 않습니다: ${JSON.stringify(runtimeSplit)}`);
+    await waitFor(send, `document.querySelectorAll('.runtime-segment').length >= 1 && document.querySelectorAll('.live-tmux-card').length === 0`, '실제 진행 중 화면의 실행 방식 구역을 만들지 못했습니다.');
+    const runtimeSplit = await evaluate(send, `(() => {
+      const sessions = (state.snapshot && state.snapshot.sessions) || [];
+      const linkedIds = new Set(((state.snapshot && state.snapshot.tmux && state.snapshot.tmux.distros) || []).flatMap(distro => (distro.sessions || []).flatMap(session => (session.windows || []).flatMap(item => (item.panes || []).filter(pane => pane && !pane.dead).map(pane => String(pane.agent && pane.agent.linkedSessionId || '')).filter(Boolean)))));
+      const tmuxLive = sessions.some(session => ['running', 'starting'].includes(session.status) && ((session.runtimePresence || []).some(item => item.kind === 'tmux') || linkedIds.has(session.id)));
+      return { segments: document.querySelectorAll('.runtime-segment').length, expectedSegments: tmuxLive ? 2 : 1, firstIsTmux: document.querySelector('.runtime-segment:first-child')?.classList.contains('tmux-runtime') || false, tmuxLive, tmuxCards: document.querySelectorAll('.live-tmux-card').length, standardLanes: document.querySelectorAll('.standard-runtime .agent-flow-lane').length, overflow: document.querySelector('#liveSessionGrid').scrollWidth > document.querySelector('#liveSessionGrid').clientWidth + 2 };
+    })()`);
+    if (runtimeSplit.segments !== runtimeSplit.expectedSegments || runtimeSplit.firstIsTmux !== runtimeSplit.tmuxLive || runtimeSplit.tmuxCards !== 0 || runtimeSplit.overflow) throw new Error(`실제 진행 중 실행 방식 분리 UI가 맞지 않습니다: ${JSON.stringify(runtimeSplit)}`);
     await pause(700);
     await evaluate(send, `(() => { for (const animation of document.getAnimations()) { try { animation.finish(); } catch {} } return true; })()`);
     const runtimeSplitImage = await screenshot(send, 'loadtoagent-actual-runtime-split.png');

@@ -8,6 +8,7 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
     sendCommand, currentTargetId, sendSignal, currentSession, guarded, renderAll, showSelection,
     refreshSessions, renderHistoryPanel, fitEntry, attachTmux, currentTmux, manageTmux,
     closeTmuxModal, errorMessage, notice, reorderSession, moveSessionByOffset,
+    setTerminalFontSize, toggleTerminalFocusMode,
   } = context;
 
   const runBusy = async (button, action) => {
@@ -27,6 +28,24 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
     }
   };
 
+  const writeTerminalOutput = (entry, data) => {
+    if (!entry || !data) return;
+    const buffer = entry.terminal.buffer.active;
+    if (entry.outputWritePending === 0) {
+      entry.outputViewportAnchor = Number(buffer.viewportY) || 0;
+      entry.outputShouldFollow = entry.outputViewportAnchor >= Number(buffer.baseY || 0);
+      entry.outputUserScrollRevision = entry.userScrollRevision;
+    }
+    entry.outputWritePending += 1;
+    entry.terminal.write(data, () => {
+      entry.outputWritePending = Math.max(0, entry.outputWritePending - 1);
+      if (entry.outputWritePending > 0) return;
+      if (!entry.outputShouldFollow && entry.outputUserScrollRevision === entry.userScrollRevision) {
+        entry.terminal.scrollToLine(entry.outputViewportAnchor);
+      }
+    });
+  };
+
   bindTerminalSessionEvents();
   bindTmuxEvents();
   bindTerminalWindowAndPreloadEvents();
@@ -37,6 +56,35 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
     $('#newTmuxSessionBtn').addEventListener('click', openTmuxModal);
     $('#refreshTmuxTerminalBtn').addEventListener('click', event => runBusy(event.currentTarget, refreshSnapshot));
     const sessionList = $('#terminalSessionList');
+    const historyList = $('#terminalHistoryList');
+    const cancelHistoryFollow = () => {
+      state.historyUserRevision += 1;
+      if (state.historyFollowFrame) cancelAnimationFrame(state.historyFollowFrame);
+      state.historyFollowFrame = 0;
+    };
+    const flushPendingHistory = () => {
+      if (!state.historyRenderPending || state.historyFlushFrame) return;
+      state.historyFlushFrame = requestAnimationFrame(() => {
+        state.historyFlushFrame = 0;
+        if (!state.historyPointerActive) renderHistoryPanel();
+      });
+    };
+    historyList.addEventListener('pointerdown', () => {
+      state.historyPointerActive = true;
+      cancelHistoryFollow();
+    }, true);
+    historyList.addEventListener('wheel', cancelHistoryFollow, { capture: true, passive: true });
+    historyList.addEventListener('click', () => {
+      cancelHistoryFollow();
+      flushPendingHistory();
+    }, true);
+    const finishHistoryPointer = () => {
+      state.historyPointerActive = false;
+      flushPendingHistory();
+    };
+    window.addEventListener('pointerup', finishHistoryPointer, true);
+    window.addEventListener('pointercancel', finishHistoryPointer, true);
+    document.addEventListener('selectionchange', flushPendingHistory);
     const clearDropMarkers = () => {
       sessionList.querySelectorAll('.dragging, .drop-before, .drop-after').forEach(item => {
         item.classList.remove('dragging', 'drop-before', 'drop-after');
@@ -218,6 +266,9 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
       input.focus({ preventScroll: true });
       window.LoadToAgentA11y?.announce(t('quality.terminal_draft_cleared'));
     });
+    $('#terminalFontDecreaseBtn').addEventListener('click', () => setTerminalFontSize(state.terminalFontSize - 1));
+    $('#terminalFontIncreaseBtn').addEventListener('click', () => setTerminalFontSize(state.terminalFontSize + 1));
+    $('#terminalFocusBtn').addEventListener('click', toggleTerminalFocusMode);
     document.querySelectorAll('[data-terminal-signal]').forEach(button => button.addEventListener('click', () => sendSignal(button.dataset.terminalSignal)));
     $('#terminalRestartBtn').addEventListener('click', async event => {
       const session = currentSession();
@@ -360,7 +411,7 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
     });
     window.loadtoagent.onTerminalData(payload => {
       const entry = state.terminals.get(payload && payload.id);
-      if (entry && payload.data) entry.terminal.write(payload.data);
+      writeTerminalOutput(entry, payload && payload.data);
     });
     window.loadtoagent.onTerminalState(payload => refreshSessions(payload));
     window.loadtoagent.onTerminalError(payload => notice(payload && payload.message || t('terminal.error.input_failed'), 'error'));

@@ -109,6 +109,32 @@
   flex: 0 0 auto;
 }
 
+.card-subtitle .origin-project {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+}
+
+.card-subtitle .origin-project small {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 1px solid rgba(89,216,255,.18);
+  border-radius: 5px;
+  background: rgba(89,216,255,.06);
+  color: #76c8df;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: .02em;
+}
+
+.card-subtitle .origin-project b {
+  overflow: hidden;
+  color: #b8c6d4;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
 .card-usage {
   display: grid;
   grid-template-columns: 1.1fr .9fr;

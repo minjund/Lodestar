@@ -68,10 +68,13 @@ button[aria-busy="true"] {
 }
 
 .workspace-item strong {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 550;
+  font-size: 13px;
+  font-weight: 620;
 }
 
 .provider-mini-mark {
@@ -103,8 +106,9 @@ button[aria-busy="true"] {
   content: "";
   width: 6px;
   height: 6px;
+  flex: 0 0 7px;
   border-radius: 2px;
-  border: 1px solid #526075;
+  border: 1px solid #718296;
 }
 
 .workspace-item button {
@@ -121,10 +125,10 @@ button[aria-busy="true"] {
 }
 
 .workspace-empty {
-  padding: 9px;
-  color: #536074;
-  font-size: 10px;
-  line-height: 1.5;
+  padding: 10px;
+  color: #93a3b2;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .workspace-item.projectless:before {
@@ -139,10 +143,29 @@ button[aria-busy="true"] {
   padding: 2px 6px;
   border-radius: 999px;
   background: #1a2530;
-  color: #91a0ad;
-  font-size: 9px;
+  color: #afbdc8;
+  font-size: 12px;
   font-weight: 700;
   text-align: center;
+}
+
+.workspace-item.observed-project small,
+.workspace-item[data-workspace="all"] small {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #1a2530;
+  color: #afbdc8;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.workspace-item.observed-project.selected small,
+.workspace-item[data-workspace="all"].selected small {
+  background: rgba(89,216,255,.14);
+  color: #81ddf8;
 }
 
 .workspace-item.projectless.selected small {

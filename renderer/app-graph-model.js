@@ -104,13 +104,30 @@ window.LoadToAgentAppFactories.createGraphModel = function createGraphModel(cont
     return seen.size;
   }
 
-  function runtimeAgentSummary(model) {
+  function runtimeAgentSummary(model, tmuxEntries = []) {
     const liveNodes = model.nodes.filter(isLiveSession);
+    const liveById = new Map(liveNodes.map((session) => [session.id, session]));
+    const tmuxSessionIds = new Set(
+      tmuxEntries
+        .filter((entry) => entry && entry.pane && !entry.pane.dead)
+        .map((entry) => String(entry.agent && entry.agent.linkedSessionId || ""))
+        .filter((id) => id && liveById.has(id)),
+    );
+    for (const session of liveNodes) {
+      if (agentExecutionMode(session).kind === "tmux") tmuxSessionIds.add(session.id);
+    }
+    const tmuxCount = liveNodes.filter((session) => tmuxSessionIds.has(session.id)).length;
+    const runningExecutions = liveNodes.flatMap((session) => (session.executions || []).filter((activity) => activity.status === "running"));
     return {
       activeCount: liveNodes.length,
+      standardCount: liveNodes.length - tmuxCount,
+      tmuxCount,
       rootCount: liveNodes.filter((session) => !session.parentId).length,
       activeHelperCount: liveNodes.filter((session) => session.parentId).length,
       helperRecordCount: model.nodes.filter((session) => session.parentId).length,
+      runningExecutionCount: runningExecutions.length,
+      shellExecutionCount: runningExecutions.filter((activity) => activity.kind === "shell").length,
+      backgroundExecutionCount: runningExecutions.filter((activity) => activity.mode === "background" || activity.kind === "background").length,
     };
   }
 

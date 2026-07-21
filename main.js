@@ -10,9 +10,9 @@ const { execFileSync } = require('child_process');
 const { AgentRunner, probeProviders } = require('./src/agentRunner');
 const { providerList, blankUsage } = require('./src/providerRegistry');
 const { TerminalManager } = require('./src/terminalManager');
+const { TerminalHostClient, launchTerminalHost } = require('./src/terminalHost');
 const { TmuxController } = require('./src/tmuxController');
 const { normalizeWslList } = require('./src/tmuxMonitor');
-const { BridgeServer } = require('./src/bridgeServer');
 const { UpdateManager } = require('./src/updateManager');
 const { launchDownloadedUpdate } = require('./src/updateInstaller');
 const { readWorkspaces, removeWorkspace, writeWorkspaces } = require('./src/workspaceStore');
@@ -36,7 +36,6 @@ let mainWindow = null;
 let monitorWorker = null;
 let runner = null;
 let terminalManager = null;
-let bridgeServer = null;
 let bridgeLauncher = null;
 let backgroundTray = null;
 let updateManager = null;
@@ -52,30 +51,30 @@ let detailRequestId = 0;
 const pendingDetails = new Map();
 const MAIN_COPY = {
   ko: {
-    trayTooltip: 'LoadToAgent · 백그라운드 AI 세션 {count}개',
+    trayTooltip: 'LoadToAgent · 백그라운드 터미널 {count}개',
     trayOpen: 'LoadToAgent 열기',
-    traySessions: '백그라운드 AI 세션 {count}개 유지 중',
-    trayQuit: '프로그램 끝내기 · AI 세션도 종료',
+    traySessions: '백그라운드 터미널 {count}개 유지 중',
+    trayQuit: '프로그램 끝내기 · 터미널 세션 유지',
     addWorkspaces: 'AI 작업 폴더 선택',
     pickWorkspace: '작업 폴더 선택',
     attentionTitle: '내 확인이 필요합니다',
     attentionBody: '{provider} · {title}',
   },
   en: {
-    trayTooltip: 'LoadToAgent · {count} background AI sessions',
+    trayTooltip: 'LoadToAgent · {count} background terminals',
     trayOpen: 'Open LoadToAgent',
-    traySessions: '{count} background AI sessions active',
-    trayQuit: 'Quit app · End AI sessions too',
+    traySessions: '{count} background terminals active',
+    trayQuit: 'Quit app · Keep terminal sessions',
     addWorkspaces: 'Choose AI workspaces',
     pickWorkspace: 'Choose workspace',
     attentionTitle: 'Your review is needed',
     attentionBody: '{provider} · {title}',
   },
   'zh-CN': {
-    trayTooltip: 'LoadToAgent · {count} 个后台 AI 会话',
+    trayTooltip: 'LoadToAgent · {count} 个后台终端',
     trayOpen: '打开 LoadToAgent',
-    traySessions: '正在保持 {count} 个后台 AI 会话',
-    trayQuit: '退出应用 · 同时结束 AI 会话',
+    traySessions: '正在保持 {count} 个后台终端',
+    trayQuit: '退出应用 · 保留终端会话',
     addWorkspaces: '选择 AI 工作文件夹',
     pickWorkspace: '选择工作文件夹',
     attentionTitle: '需要你的确认',
@@ -213,7 +212,7 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (event, url) => { if (url !== allowedUrl) event.preventDefault(); });
   mainWindow.once('ready-to-show', () => mainWindow && mainWindow.show());
   mainWindow.on('close', event => {
-    if (isQuitting || !backgroundAgentSessions().length) return;
+    if (isQuitting || !backgroundTerminalSessions().length) return;
     event.preventDefault();
     mainWindow.hide();
     ensureBackgroundTray();
@@ -221,9 +220,9 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-function backgroundAgentSessions() {
+function backgroundTerminalSessions() {
   if (!terminalManager) return [];
-  return terminalManager.list().filter(session => session.type === 'agent' && (session.status === 'running' || session.status === 'starting'));
+  return terminalManager.list().filter(session => session.status === 'running' || session.status === 'starting');
 }
 
 function visibleTerminalSessions(sessions) {
@@ -239,7 +238,7 @@ function showMainWindow() {
 
 function updateBackgroundTrayMenu() {
   if (!backgroundTray) return;
-  const count = backgroundAgentSessions().length;
+  const count = backgroundTerminalSessions().length;
   backgroundTray.setToolTip(mainText('trayTooltip', { count }));
   backgroundTray.setContextMenu(Menu.buildFromTemplate([
     { label: mainText('trayOpen'), click: showMainWindow },
@@ -375,11 +374,27 @@ async function installDownloadedUpdate() {
   return { ...updateManager.getState(), installMode: outcome.mode };
 }
 
-function setupRuntime() {
+async function setupRuntime() {
   loadProviderVisibility();
   const runsDir = userFile('agent-runs');
   runner = new AgentRunner({ runsDir });
-  terminalManager = new TerminalManager();
+  const terminalStoreFile = userFile('terminal-sessions.json');
+  const terminalHostFile = userFile('terminal-host.json');
+  terminalManager = demoCapture
+    ? new TerminalManager({
+      storeFile: terminalStoreFile,
+      onPersistenceError: (operation, error) => reportRecoverableError(`terminal-sessions:${operation}`, error),
+    })
+    : new TerminalHostClient({
+      discoveryFile: terminalHostFile,
+      spawnHost: () => launchTerminalHost({
+        executable: process.execPath,
+        script: path.join(__dirname, 'src', 'terminalHostDaemon.js'),
+        storeFile: terminalStoreFile,
+        discoveryFile: terminalHostFile,
+        bridgeHome,
+      }),
+    });
   updateManager = new UpdateManager({
     currentVersion: app.getVersion(),
     platform: process.platform,
@@ -410,8 +425,10 @@ function setupRuntime() {
     updateBackgroundTrayMenu();
     if (monitorWorker) monitorWorker.postMessage({ type: 'bridge-presence', bridges: bridgePresence() });
   });
-  bridgeServer = new BridgeServer({ terminalManager, home: bridgeHome, platform: process.platform });
-  bridgeServer.start().catch(error => sendTerminal('terminals:error', { id: '', message: `외부 터미널 브리지를 열지 못했습니다: ${error.message}` }));
+  terminalManager.on('disconnect', () => {
+    sendTerminal('terminals:error', { id: '', message: '터미널 호스트 연결이 끊어졌습니다. 프로그램을 다시 시작하면 실행 중인 세션에 다시 연결합니다.' });
+  });
+  await terminalManager.connect();
   availability = probeProviders();
   monitorWorker = new Worker(path.join(__dirname, 'src', 'monitorWorker.js'), {
     workerData: { runsDir, home: os.homedir(), intervalMs: 1200, availability },
@@ -441,10 +458,11 @@ function bridgePresence() {
   if (!terminalManager) return [];
   const environment = process.platform === 'win32' ? 'windows' : (process.platform === 'darwin' ? 'macos' : 'linux');
   return terminalManager.list()
-    .filter(session => session.type === 'agent' && session.status === 'running')
+    .filter(session => session.type === 'agent' && (session.status === 'running' || session.status === 'starting'))
     .map(session => ({
       id: session.bridgeId || session.id,
       bridgeId: session.bridgeId || '',
+      linkedSessionId: session.bridgeId || '',
       terminalId: session.id,
       provider: session.provider,
       pid: session.pid,
@@ -506,7 +524,7 @@ function registerIpcHandlers() {
     rendererReady: markRendererReady,
     backgroundState: () => ({
       visible: Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()),
-      backgroundSessions: backgroundAgentSessions().length,
+      backgroundSessions: backgroundTerminalSessions().length,
       trayReady: Boolean(backgroundTray),
     }),
     show: () => { showMainWindow(); return { ok: true }; },
@@ -590,11 +608,14 @@ function registerIpcHandlers() {
 
 registerIpcHandlers();
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   hydratePlatformPath();
-  setupRuntime();
+  await setupRuntime();
   createWindow();
   app.on('activate', showMainWindow);
+}).catch(error => {
+  dialog.showErrorBox('LoadToAgent 시작 실패', error.stack || error.message || String(error));
+  app.quit();
 });
 
 app.on('window-all-closed', () => {
@@ -604,8 +625,8 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   isQuitting = true;
   if (attentionNotifier) attentionNotifier.dispose();
-  if (bridgeServer) bridgeServer.dispose();
-  if (terminalManager) terminalManager.dispose();
+  if (terminalManager instanceof TerminalHostClient) terminalManager.dispose({ shutdownIfIdle: true });
+  else if (terminalManager) terminalManager.dispose({ preserveSessions: true });
   if (monitorWorker) {
     monitorWorker.postMessage({ type: 'stop' });
     monitorWorker.terminate();

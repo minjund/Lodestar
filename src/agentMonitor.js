@@ -14,6 +14,7 @@ const { createCodexParser } = require('./agentMonitor/codexParser');
 const { createClaudeParser } = require('./agentMonitor/claudeParser');
 const { createGenericParser } = require('./agentMonitor/genericParser');
 const { createHierarchyAttacher } = require('./agentMonitor/hierarchy');
+const { assistantRequestsUserResponse, isUserInputTool } = require('./agentMonitor/responseIntent');
 const {
   MAX_FILES_PER_PROVIDER,
   readJson,
@@ -178,10 +179,12 @@ function baseSession(provider, externalId, file, stat) {
     title: '제목을 불러오는 중',
     model: '',
     cwd: '',
+    originCwd: '',
     branch: '',
     source: 'local-history',
     sourceLabel: '로컬 세션',
     clientKind: '',
+    utilityKind: '',
     status: 'idle',
     statusDetail: '',
     statusObserved: false,
@@ -198,6 +201,7 @@ function baseSession(provider, externalId, file, stat) {
     context: { used: 0, window: 0, percent: 0, source: 'unknown' },
     messages: [],
     lifecycle: [],
+    executions: [],
     childIds: [],
     collaboration: {
       capacity: { totalThreads: 0, subagents: 0, source: 'unknown' },
@@ -235,6 +239,8 @@ const parseClaude = createClaudeParser({
   sumUsage,
   timestamp,
   trimSession,
+  assistantRequestsUserResponse,
+  isUserInputTool,
 });
 
 function codexUsage(raw = {}) {
@@ -259,6 +265,7 @@ function codexVisibleUserText(value) {
   if (objective) return compactText(objective[1], 6000);
   const desktopRequest = raw.match(/##\s*My request for Codex:\s*([\s\S]*?)(?:\n{2,}<image\b|$)/i);
   if (desktopRequest) return compactText(desktopRequest[1], 6000);
+  if (/^<(?:subagent_notification|task_notification|task-notification|agent_notification|collaboration_notification)(?:\s|>)/i.test(raw)) return '';
   if (/^<(?:permissions instructions|app-context|environment_context|skills_instructions|plugins_instructions|apps_instructions|multi_agent_mode|collaboration_mode)>/i.test(raw)) return '';
   if (/^<skill(?:\s|>)/i.test(raw)) return '';
   if (/^#\s*Codex desktop context/i.test(raw)) return '';
@@ -303,6 +310,7 @@ const parseCodex = createCodexParser({
   textOps: {
     agentEnvelope, codexContentText, codexVisibleUserText,
     compactText, encryptedCollaborationText, jsonObject,
+    assistantRequestsUserResponse, isUserInputTool,
   },
   collaborationOps: {
     collaborationCapacity, collaborationTaskName,
@@ -329,6 +337,8 @@ const parseGeneric = createGenericParser({
   sumUsage,
   timestamp,
   trimSession,
+  assistantRequestsUserResponse,
+  isUserInputTool,
 });
 
 function contextInfo(used, windowInfo) {
@@ -364,6 +374,7 @@ function parseManagedSession(runDir) {
     sourceLabel: 'LoadToAgent 실행',
     statusObserved: true,
   };
+  session.originCwd = session.originCwd || meta.cwd || session.cwd || '';
   session.usage = finalizeUsage(session.usage);
   session.turnUsage = finalizeUsage(session.turnUsage);
   const window = modelContextWindow(session.provider, session.model, session.context && session.context.window);
@@ -379,8 +390,9 @@ function workspaceLabel(cwd) {
 }
 
 function isProjectlessSession(session) {
-  if (!session || !session.cwd) return true;
-  const normalized = String(session.cwd).replace(/\\/g, '/').replace(/\/+$/, '');
+  const cwd = session && (session.originCwd || session.cwd);
+  if (!cwd) return true;
+  const normalized = String(cwd).replace(/\\/g, '/').replace(/\/+$/, '');
   return session.provider === 'codex'
     && session.clientKind === 'codex-desktop'
     && /(?:^|\/)Documents\/Codex\/\d{4}-\d{2}-\d{2}\/new-chat$/i.test(normalized);
@@ -529,6 +541,10 @@ class AgentMonitor extends EventEmitter {
             const value = this.parseFile(info, parser);
             if (!value) continue;
             const copy = structuredClone(value);
+            // Provider health checks and detached memory extraction turns are
+            // implementation details, not user work. Keep them out of the
+            // dashboard and runtime-link candidate pool entirely.
+            if (copy.utilityKind) continue;
             copy.environment = { kind: history.kind, distro: history.distro, label: history.label, home: history.home };
             if (history.kind === 'wsl') copy.sourceLabel = history.label;
             sessions.push(copy);
@@ -549,8 +565,9 @@ class AgentMonitor extends EventEmitter {
       for (const session of managed) byId.set(session.id, session);
       const merged = [...byId.values()]
         .map(session => {
+          const originCwd = session.originCwd || session.cwd || '';
           const projectless = isProjectlessSession(session);
-          return { ...session, projectless, workspace: projectless ? '프로젝트 없음' : workspaceLabel(session.cwd) };
+          return { ...session, originCwd, projectless, workspace: projectless ? '프로젝트 없음' : workspaceLabel(originCwd) };
         })
         .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
       attachHierarchy(merged);

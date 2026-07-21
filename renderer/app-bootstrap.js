@@ -19,8 +19,9 @@
     "createGraphLayout",
     "createGraphOrchestration",
     "createTmuxRenderer",
-    "createSessionRenderer",
     "createAgentActions",
+    "createManagement",
+    "createSessionRenderer",
     "createDrawerData",
     "createDrawerContent",
     "createDrawer",
@@ -70,6 +71,7 @@
     if (window.loadtoagent.onAttentionRequested) window.loadtoagent.onAttentionRequested(handleAttentionRequested);
     bindEvents();
     render();
+    app.initialized = true;
     $("#lastSync").textContent = timeOnly(state.snapshot && state.snapshot.generatedAt);
     window.loadtoagent.onSnapshot((snapshot) => {
       state.rawSnapshot = snapshot;

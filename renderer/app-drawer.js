@@ -6,9 +6,10 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
   const {
     $, $$, esc, state, motionPreference, motionState, STATUS, markGuideStep, rememberDialogTrigger, restoreDialogTrigger, setDialogOpenState,
-    providerInfo, isLiveSession, subagentWorkState, subagentWorkLabel, isProjectlessSession, sessionWorkspaceLabel,
+    providerInfo, isLiveSession, subagentWorkState, subagentWorkLabel, isProjectlessSession, sessionOriginPath, sessionWorkspaceLabel,
     agentResumeSupport, originAppInfo, selectedSession, snapshotSession, loadSessionDetail, loadSubagentParentDetail,
-    chatHtml, lifecycleHtml, tokensHtml, subagentCoordinationEvents, subagentConversationHtml,
+    chatHtml, lifecycleHtml, tokensHtml, outcomeHtml, subagentCoordinationEvents, subagentConversationHtml,
+    rememberDisclosureStates = () => {}, restoreDisclosureStates = () => {},
   } = context;
 
   function openDrawer(id) {
@@ -16,7 +17,7 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     markGuideStep("detail");
     state.selectedId = id;
     state.drawerMode = "session";
-    state.drawerTab = "chat";
+    state.drawerTab = "summary";
     state.drawerForceLatest = true;
     clearTimeout(motionState.drawerTimer);
     $("#drawerBackdrop").classList.remove("hidden");
@@ -25,7 +26,7 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     setDialogOpenState($("#detailDrawer"), true);
     renderDrawer();
     loadSessionDetail(id, true);
-    setTimeout(() => $("#closeDrawerBtn").focus(), 0);
+    setTimeout(() => $("#closeDrawerBtn").focus({ preventScroll: true }), 0);
   }
 
   function openSubagentConversation(id) {
@@ -45,7 +46,7 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     renderDrawer();
     loadSessionDetail(id);
     loadSubagentParentDetail(child);
-    setTimeout(() => $("#closeDrawerBtn").focus(), 0);
+    setTimeout(() => $("#closeDrawerBtn").focus({ preventScroll: true }), 0);
   }
 
   function closeDrawer(restoreFocus = true) {
@@ -104,8 +105,9 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     const copyTask = taskId
       ? `<button type="button" class="meta-chip meta-copy" data-copy-text="${esc(taskId)}" aria-label="${esc(t("quality.copy_task_id"))}">${esc(t("quality.task_id"))} <b>${esc(taskId.slice(0, 12))}</b><span aria-hidden="true">⧉</span></button>`
       : "";
-    const copyWorkspace = !isProjectlessSession(session) && session.cwd
-      ? `<button type="button" class="meta-chip meta-copy" data-copy-text="${esc(session.cwd)}" aria-label="${esc(t("quality.copy_workspace"))}">${esc(t("drawer.workspace"))} <b>${esc(sessionWorkspaceLabel(session))}</b><span aria-hidden="true">⧉</span></button>`
+    const originPath = sessionOriginPath(session);
+    const copyWorkspace = !isProjectlessSession(session) && originPath
+      ? `<button type="button" class="meta-chip meta-copy origin-project-meta" data-copy-text="${esc(originPath)}" aria-label="${esc(t("quality.copy_workspace"))}">${esc(t("project.origin"))} <b>${esc(sessionWorkspaceLabel(session))}</b><span aria-hidden="true">⧉</span></button>`
       : "";
     $("#drawerMeta").innerHTML = subagentMode
       ? `<span class="meta-chip work-state ${subagentWorkState(session)}">
@@ -119,7 +121,7 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
         </span>${copyTask}${copyWorkspace}${resume}`
       : `<span class="meta-chip">${esc(t("drawer.model"))} <b>${esc(session.model || t("drawer.unknown"))}</b>
         </span>
-        ${copyWorkspace || `<span class="meta-chip">${esc(t("drawer.workspace"))} <b>${esc(sessionWorkspaceLabel(session))}</b></span>`}
+        ${copyWorkspace || `<span class="meta-chip origin-project-meta">${esc(t("project.origin"))} <b>${esc(sessionWorkspaceLabel(session))}</b></span>`}
         ${copyTask}${
           session.parentId
             ? `<span class="meta-chip">⑂ <b>${esc(t("drawer.helper_ai"))}</b>
@@ -143,8 +145,9 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     const activeTab = $(`.drawer-tab[data-tab="${state.drawerTab}"]`);
     if (activeTab) $("#drawerContent").setAttribute("aria-labelledby", activeTab.id);
     const content = $("#drawerContent");
+    rememberDisclosureStates(content);
     const previousTop = content.scrollTop;
-    const wasNearBottom = content.scrollHeight - content.scrollTop - content.clientHeight < 90;
+    const wasAtBottom = window.LoadToAgentRendererUtils.isScrolledToEnd(content);
     const renderKey = `${state.drawerMode}:${state.selectedId}:${state.drawerTab}:${detailLoading ? "loading" : "ready"}`;
     const previousRenderKey = motionState.drawerRenderKey;
     const shouldAnimateContent = previousRenderKey !== renderKey;
@@ -162,11 +165,14 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
         </div>`
         : subagentMode
           ? subagentConversationHtml(session)
-          : state.drawerTab === "chat"
+          : state.drawerTab === "summary"
+            ? outcomeHtml(session)
+            : state.drawerTab === "chat"
             ? chatHtml(session)
             : state.drawerTab === "lifecycle"
               ? lifecycleHtml(session)
               : tokensHtml(session);
+    restoreDisclosureStates(content);
     content.classList.toggle("motion-content-in", shouldAnimateContent && !motionPreference.matches);
     clearTimeout(motionState.drawerContentTimer);
     if (shouldAnimateContent)
@@ -183,7 +189,7 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
             content.scrollTop = Math.max(0, content.scrollTop + latest.getBoundingClientRect().top - contentTop - stickyHeight - 12);
           } else content.scrollTop = content.scrollHeight;
         } else if (tabChanged) content.scrollTop = 0;
-        else if (state.drawerTab === "chat" && wasNearBottom) content.scrollTop = content.scrollHeight;
+        else if (state.drawerTab === "chat" && wasAtBottom) content.scrollTop = content.scrollHeight;
         else content.scrollTop = Math.min(previousTop, Math.max(0, content.scrollHeight - content.clientHeight));
         state.drawerForceLatest = false;
       });
