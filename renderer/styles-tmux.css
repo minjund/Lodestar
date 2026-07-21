@@ -134,7 +134,7 @@
 .tmux-empty small {
   margin-top: 6px;
   color: #596878;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-distro-group {
@@ -171,7 +171,7 @@
   border-radius: 9px;
   background: #12342d;
   color: #69e6ba;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -191,7 +191,7 @@
   border-radius: 8px;
   background: #10221f;
   color: #76cdb1;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-distro-line {
@@ -422,13 +422,13 @@
 }
 
 .tmux-subagents-toggle b {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-subagents-toggle small {
   margin-top: 3px;
   color: #718395;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .tmux-subagents-toggle>i {
@@ -470,7 +470,7 @@
 .tmux-subagent-row>.provider-mark {
   width: 27px;
   height: 27px;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .tmux-subagent-copy,
@@ -494,7 +494,7 @@
 
 .tmux-subagent-copy b {
   color: #dce6ee;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .tmux-subagent-copy i {
@@ -502,13 +502,13 @@
   border-radius: 999px;
   background: #17262a;
   color: #77dcb9;
-  font-size: 8px;
+  font-size: 12px;
   font-style: normal;
 }
 
 .tmux-subagent-copy small {
   color: #647588;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .tmux-subagent-copy strong,
@@ -519,12 +519,12 @@
 
 .tmux-subagent-copy strong {
   color: #b9c7d3;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .tmux-subagent-copy em {
   color: #718294;
-  font-size: 9px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -535,7 +535,7 @@
   border-radius: 7px;
   background: #10211f;
   color: #72deb8;
-  font-size: 9px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -551,7 +551,7 @@
   border-radius: 7px;
   background: transparent;
   color: #a9b8c6;
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -613,35 +613,35 @@
 .tmux-stats span {
   display: block;
   color: #718093;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-stats small {
   display: inline;
   margin-left: 5px;
   color: #697789;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-distro-node small {
   display: block;
   color: #59776f;
   letter-spacing: .13em;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-session-node small {
   display: block;
   color: #647588;
   letter-spacing: .12em;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-window-node small {
   display: block;
   color: #647588;
   letter-spacing: .12em;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-distro-node em {
@@ -649,21 +649,21 @@
   margin-top: 2px;
   color: #758698;
   font-style: normal;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-session-node span {
   display: block;
   margin-top: 8px;
   color: #7b899a;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-window-node span {
   display: block;
   margin-top: 7px;
   color: #708093;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-pane-head b {
@@ -672,7 +672,7 @@
 
 .tmux-pane-head span {
   color: #657588;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-pane-head i {
@@ -682,7 +682,7 @@
   background: #19232d;
   color: #8392a3;
   font-style: normal;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-pane-cwd {
@@ -692,13 +692,13 @@
   color: #6e7e91;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-agent-block small {
   display: block;
   color: var(--provider);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-agent-block em {
@@ -709,13 +709,13 @@
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-agent-metrics small {
   display: block;
   color: #647487;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tmux-shell-note {
@@ -725,7 +725,7 @@
   border: 1px dashed #25333f;
   border-radius: 9px;
   color: #66778a;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-tmux-group>header {
@@ -735,12 +735,12 @@
   gap: 7px;
   padding: 7px 8px;
   color: #718395;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-tmux-group>header b {
   color: #86daba;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-tmux-session strong {
@@ -750,12 +750,12 @@
   color: #aab8c5;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-tmux-session small {
   color: #566a70;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-tmux-pane b {
@@ -773,7 +773,7 @@
   white-space: nowrap;
   margin-top: 4px;
   color: #68798b;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-tmux-pane>i {
@@ -784,7 +784,7 @@
   color: #68788a;
   font-style: normal;
   text-align: center;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .terminal-tmux-tools label {
@@ -792,7 +792,7 @@
   align-items: center;
   gap: 6px;
   color: #68798b;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-tmux-tools select {
@@ -802,7 +802,7 @@
   border-radius: 8px;
   background: #101821;
   color: #b3c0ca;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .nav-group-label.tmux-only {
@@ -874,7 +874,7 @@
   border-top: 1px solid #1c2731;
   background: rgba(5,9,13,.5);
   color: #6f7f91;
-  font-size: 10px;
+  font-size: 12px;
   height: auto;
   min-height: 42px;
   padding: 5px 14px;
@@ -977,7 +977,7 @@
   border-radius: 9px;
   background: #153d31;
   color: #82e8c2;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 750;
   cursor: pointer;
 }
@@ -1042,7 +1042,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: #5ccfa8;
-  font-size: 8px;
+  font-size: 12px;
   letter-spacing: .1em;
 }
 
@@ -1061,7 +1061,7 @@
   border-radius: 7px;
   background: #12352d;
   color: #69dcb6;
-  font-size: 8px;
+  font-size: 12px;
   font-style: normal;
   white-space: nowrap;
 }
@@ -1103,19 +1103,19 @@
   border-radius: 5px;
   background: color-mix(in srgb,var(--provider) 12%,#17222b);
   color: var(--provider);
-  font-size: 7px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 800;
 }
 
 .live-tmux-agent b {
   color: #b8c7ce;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .live-tmux-agent small {
   color: #647687;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .live-tmux-location {
@@ -1125,7 +1125,7 @@
   margin-top: 10px;
   overflow: hidden;
   color: #798b99;
-  font-size: 9px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -1149,7 +1149,7 @@
   overflow: hidden;
   color: #5b6d7e;
   font-family: "Cascadia Code",Consolas,monospace;
-  font-size: 8px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1167,7 +1167,7 @@
 
 .live-tmux-card footer>span:first-child {
   color: #638074;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .live-tmux-card footer>span:last-child {
@@ -1182,7 +1182,7 @@
   border-radius: 7px;
   background: transparent;
   color: #77d9b5;
-  font-size: 8px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -1222,7 +1222,7 @@
   border-radius: 10px;
   background: #101c1d;
   color: #a8cabe;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
   cursor: pointer;
   transition: transform var(--motion-fast) var(--motion-ease),background-color var(--motion-fast) ease,border-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-medium) ease,opacity var(--motion-fast) ease;
@@ -1237,7 +1237,7 @@
   color: #aebbc8;
   font-weight: 650;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   transition: transform var(--motion-fast) var(--motion-ease),background-color var(--motion-fast) ease,border-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-medium) ease,opacity var(--motion-fast) ease;
 }
 

@@ -8,7 +8,7 @@
   display: block;
   margin-bottom: 6px;
   color: #7e899b;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .permission-toggle {
@@ -41,14 +41,14 @@
 
 .permission-toggle div strong {
   display: block;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .permission-toggle div small {
   display: block;
   margin-top: 4px;
   color: #606c7e;
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -63,12 +63,12 @@
   border-radius: 9px;
   background: rgba(76,227,154,.055);
   color: #8190a2;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .runtime-strip b {
   color: #75e5aa;
-  font-size: 10px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -169,7 +169,7 @@
 .runtime-segment>header small {
   display: block;
   color: #718395;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .08em;
 }
@@ -185,7 +185,7 @@
   display: block;
   margin-top: 3px;
   color: #67788a;
-  font-size: 10px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -211,7 +211,7 @@
   background: #111c26;
   color: #91a2b3;
   font-family: "Cascadia Code",Consolas,monospace;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -237,7 +237,7 @@
 .runtime-segment-empty span {
   margin-top: 6px;
   color: #617183;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .tmux-runtime .runtime-segment-icon {
@@ -294,7 +294,7 @@
   border-radius: 9px;
   background: color-mix(in srgb,var(--drawer-provider) 14%,#17212a);
   color: var(--drawer-provider);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 850;
   letter-spacing: .08em;
 }
@@ -319,7 +319,7 @@
   white-space: nowrap;
   margin-top: 4px;
   color: #738394;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .chat-roadmap>summary>i {
@@ -353,7 +353,7 @@
   min-width: 0;
   overflow: hidden;
   color: #aebbc5;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -372,7 +372,7 @@
   border-radius: 6px;
   background: #17232b;
   color: #6fcfae;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -405,7 +405,7 @@
 .run-shortcut-hint {
   margin-right: auto;
   color: #627484;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .run-shortcut-hint kbd {
@@ -456,7 +456,7 @@
   letter-spacing: .14em;
   text-transform: uppercase;
   color: #8998aa;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .icon-button {
@@ -487,7 +487,7 @@
 .provider-rail-item small {
   margin-left: auto;
   color: #93a1b1;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .runtime-disclosure {
@@ -523,12 +523,12 @@
   display: block;
   margin-top: 4px;
   color: #91a39f;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .runtime-disclosure>summary em {
   color: #7de0ba;
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 750;
 }
@@ -638,11 +638,11 @@
   padding-top: 9px;
   border-top: 1px solid var(--line-soft);
   color: #909eaf;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .chat-bubble-head b {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .meta-chip {
@@ -655,13 +655,13 @@
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #0b0f17;
-  font-size: 8px;
+  font-size: 12px;
   min-height: 32px;
   color: #98a6b6;
 }
 
 .chat-bubble-head span {
-  font-size: 10px;
+  font-size: 12px;
   color: #8997a8;
 }
 
@@ -673,7 +673,7 @@
   border-radius: 9px;
   background: #2c2314;
   color: #f0ce8b;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
   cursor: pointer;
 }
@@ -685,7 +685,7 @@
   border-radius: 10px;
   background: #211a10;
   color: #e7c681;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.55;
 }
 

@@ -633,7 +633,7 @@
   }
 
   const {
-    createXtermHost, fitEntry, ensureSessionTerminal, ensureRemoteTerminal, hideScreens, renderSessions, renderTmuxResources, renderTarget, showSelection, selectSession, selectTmux, selectTmuxById, renderAll, refreshSessions, createTerminal, captureRemote, startCapture, stopCapture, sendCommand, sendSignal, openTmuxModal, closeTmuxModal, refreshSnapshot, attachTmux, manageTmux,
+    createXtermHost, fitEntry, ensureSessionTerminal, ensureRemoteTerminal, hideScreens, linkedAgentSession, isAiTerminalSession, renderSessions, renderTmuxResources, renderTarget, showSelection, selectSession, selectTmux, selectTmuxById, renderAll, refreshSessions, createTerminal, captureRemote, startCapture, stopCapture, sendCommand, sendSignal, openTmuxModal, closeTmuxModal, refreshSnapshot, attachTmux, manageTmux,
   } = window.LoadToAgentTerminalWorkbench({
     $, state, notice, setConnectionState, currentSession, currentTmux, saveCurrentDraft, restoreCurrentDraft,
     renderHistoryPanel, terminalTypeMark, terminalTypeLabel, xtermOptions, preferredWorkspace, firstDistro, guarded,
@@ -678,6 +678,7 @@
       moveSessionByOffset,
       setTerminalFontSize,
       toggleTerminalFocusMode,
+      isAiTerminalSession,
     });
   }
 
@@ -773,6 +774,13 @@
       state.wslDistros = Array.isArray(environments) ? environments : [];
       state.initialized = true;
       configurePlatform();
+      if (!state.resizeObserver && 'ResizeObserver' in window) {
+        state.resizeObserver = new ResizeObserver(() => {
+          const entry = currentSession() ? state.terminals.get(state.selectedId) : state.remoteTerminal;
+          fitEntry(entry, state.selectedId || '');
+        });
+        state.resizeObserver.observe($('#terminalViewport'));
+      }
       syncTerminalViewControls();
       renderAll();
     })().catch(error => {

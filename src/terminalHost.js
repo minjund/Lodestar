@@ -43,9 +43,15 @@ class TerminalHostServer {
     this.server = null;
     this.clients = new Set();
     this.shutdownTimer = null;
+    this.idleShutdownMs = Number.isFinite(Number(options.idleShutdownMs))
+      ? Math.max(0, Number(options.idleShutdownMs))
+      : 1_500;
     this.onShutdown = typeof options.onShutdown === 'function' ? options.onShutdown : () => {};
     this.onManagerData = payload => this.broadcast({ type: 'event', event: 'data', payload });
-    this.onManagerState = payload => this.broadcast({ type: 'event', event: 'state', payload });
+    this.onManagerState = payload => {
+      this.broadcast({ type: 'event', event: 'state', payload });
+      this.scheduleShutdownIfIdle();
+    };
   }
 
   info() {
@@ -79,6 +85,7 @@ class TerminalHostServer {
           safeWriteJson(this.discoveryFile, this.info());
           this.manager.on('data', this.onManagerData);
           this.manager.on('state', this.onManagerState);
+          this.scheduleShutdownIfIdle();
           resolve(this.info());
         } catch (error) {
           fail(error);
@@ -88,6 +95,7 @@ class TerminalHostServer {
   }
 
   accept(socket) {
+    this.cancelIdleShutdown();
     socket.setNoDelay(true);
     const client = {
       socket,
@@ -139,22 +147,12 @@ class TerminalHostServer {
       client.authenticated = true;
       clearTimeout(client.authTimer);
       client.authTimer = null;
-      if (this.shutdownTimer) {
-        clearTimeout(this.shutdownTimer);
-        this.shutdownTimer = null;
-      }
+      this.cancelIdleShutdown();
       sendFrame(client.socket, { type: 'ready', sessions: this.manager.list() });
       return;
     }
     if (message.type === 'control' && message.operation === 'shutdown-if-idle') {
-      if (activeSessions(this.manager).length === 0 && !this.shutdownTimer) {
-        this.shutdownTimer = setTimeout(() => {
-          this.shutdownTimer = null;
-          const connectedClients = [...this.clients].filter(entry => entry.authenticated && !entry.socket.destroyed);
-          if (activeSessions(this.manager).length === 0 && connectedClients.length === 0) this.onShutdown();
-        }, 1_500);
-        if (typeof this.shutdownTimer.unref === 'function') this.shutdownTimer.unref();
-      }
+      this.scheduleShutdownIfIdle();
       return;
     }
     if (message.type !== 'request' || !HOST_OPERATIONS.has(message.operation)) {
@@ -175,6 +173,28 @@ class TerminalHostServer {
   detach(client) {
     if (client.authTimer) clearTimeout(client.authTimer);
     this.clients.delete(client);
+    this.scheduleShutdownIfIdle();
+  }
+
+  cancelIdleShutdown() {
+    if (!this.shutdownTimer) return;
+    clearTimeout(this.shutdownTimer);
+    this.shutdownTimer = null;
+  }
+
+  scheduleShutdownIfIdle() {
+    const connectedClients = [...this.clients].filter(entry => entry.authenticated && !entry.socket.destroyed);
+    if (activeSessions(this.manager).length > 0 || connectedClients.length > 0) {
+      this.cancelIdleShutdown();
+      return;
+    }
+    if (this.shutdownTimer) return;
+    this.shutdownTimer = setTimeout(() => {
+      this.shutdownTimer = null;
+      const activeClients = [...this.clients].filter(entry => entry.authenticated && !entry.socket.destroyed);
+      if (activeSessions(this.manager).length === 0 && activeClients.length === 0) this.onShutdown();
+    }, this.idleShutdownMs);
+    if (typeof this.shutdownTimer.unref === 'function') this.shutdownTimer.unref();
   }
 
   dispose() {
@@ -217,6 +237,24 @@ function launchTerminalHost(options = {}) {
   return child.pid;
 }
 
+function resolveTerminalHostExecutable(options = {}) {
+  const platform = options.platform || process.platform;
+  const executable = path.resolve(options.executable || process.execPath);
+  if (platform !== 'darwin' || !options.isPackaged) return executable;
+  const productName = path.basename(executable);
+  const helper = path.resolve(
+    path.dirname(executable),
+    '..',
+    'Frameworks',
+    `${productName} Helper.app`,
+    'Contents',
+    'MacOS',
+    `${productName} Helper`,
+  );
+  const fileSystem = options.fileSystem || fs;
+  return fileSystem.existsSync(helper) ? helper : executable;
+}
+
 class TerminalHostClient extends EventEmitter {
   constructor(options = {}) {
     super();
@@ -231,16 +269,31 @@ class TerminalHostClient extends EventEmitter {
     this.sequence = 0;
     this.pending = new Map();
     this.handshake = null;
+    this.connectPromise = null;
+    this.connectGeneration = 0;
   }
 
-  async connect() {
+  connect() {
+    if (this.connected && this.socket && !this.socket.destroyed) return Promise.resolve(this);
+    if (this.connectPromise) return this.connectPromise;
     this.disposed = false;
+    const generation = ++this.connectGeneration;
+    const connecting = this.connectLoop(generation);
+    const tracked = connecting.finally(() => {
+      if (this.connectPromise === tracked) this.connectPromise = null;
+    });
+    this.connectPromise = tracked;
+    return this.connectPromise;
+  }
+
+  async connectLoop(generation) {
     const deadline = Date.now() + this.connectTimeoutMs;
     let launched = false;
     let lastError = null;
-    while (Date.now() < deadline) {
+    while (!this.disposed && generation === this.connectGeneration && Date.now() < deadline) {
       try {
         await this.connectExisting();
+        if (this.disposed || generation !== this.connectGeneration) throw new Error('터미널 호스트 재연결이 취소되었습니다.');
         return this;
       } catch (error) {
         lastError = error;
@@ -253,6 +306,7 @@ class TerminalHostClient extends EventEmitter {
       }
       await new Promise(resolve => setTimeout(resolve, 120));
     }
+    if (this.disposed || generation !== this.connectGeneration) throw new Error('터미널 호스트 재연결이 취소되었습니다.');
     throw new Error(`터미널 호스트에 연결하지 못했습니다: ${lastError?.message || '시간 초과'}`);
   }
 
@@ -272,15 +326,19 @@ class TerminalHostClient extends EventEmitter {
       };
       socket.setNoDelay(true);
       socket.on('connect', () => sendFrame(socket, { type: 'authenticate', token: discovery.token }));
-      socket.on('data', chunk => this.consume(chunk));
-      socket.on('error', error => {
-        if (this.handshake) this.handshake.reject(error);
-      });
-      socket.on('close', () => this.handleDisconnect());
+      socket.on('data', chunk => this.consume(chunk, socket));
+      socket.on('error', error => this.handleSocketError(socket, error));
+      socket.on('close', () => this.handleDisconnect(socket));
     });
   }
 
-  consume(chunk) {
+  handleSocketError(socket, error) {
+    if (socket && socket !== this.socket) return;
+    if (this.handshake) this.handshake.reject(error);
+  }
+
+  consume(chunk, socket = this.socket) {
+    if (socket && socket !== this.socket) return;
     this.buffer += chunk.toString('utf8');
     if (this.buffer.length > MAX_FRAME_CHARS) {
       this.socket?.destroy(new Error('터미널 호스트 응답이 너무 큽니다.'));
@@ -313,7 +371,8 @@ class TerminalHostClient extends EventEmitter {
     }
   }
 
-  handleDisconnect() {
+  handleDisconnect(socket = this.socket) {
+    if (socket && socket !== this.socket) return;
     const wasConnected = this.connected;
     this.connected = false;
     if (this.handshake) this.handshake.reject(new Error('터미널 호스트 연결이 닫혔습니다.'));
@@ -323,19 +382,30 @@ class TerminalHostClient extends EventEmitter {
     }
     this.pending.clear();
     this.socket = null;
-    if (wasConnected && !this.disposed) this.emit('disconnect');
+    if (wasConnected && !this.disposed) {
+      this.emit('disconnect');
+      this.connect()
+        .then(() => this.emit('reconnect', { sessions: this.list() }))
+        .catch(error => {
+          if (!this.disposed) this.emit('reconnect-error', error);
+        });
+    }
   }
 
   resetSocket() {
-    if (this.socket) this.socket.destroy();
+    const socket = this.socket;
     this.socket = null;
     this.connected = false;
     this.buffer = '';
+    if (socket) socket.destroy();
   }
 
-  request(operation, ...args) {
+  async request(operation, ...args) {
     if (!this.connected || !this.socket || this.socket.destroyed) {
-      return Promise.reject(new Error('터미널 호스트에 연결되어 있지 않습니다.'));
+      await this.connect();
+    }
+    if (!this.connected || !this.socket || this.socket.destroyed) {
+      throw new Error('터미널 호스트에 연결되어 있지 않습니다.');
     }
     const requestId = String(++this.sequence);
     return new Promise((resolve, reject) => {
@@ -360,6 +430,7 @@ class TerminalHostClient extends EventEmitter {
 
   dispose({ shutdownIfIdle = false } = {}) {
     this.disposed = true;
+    this.connectGeneration += 1;
     if (this.socket && !this.socket.destroyed) {
       if (shutdownIfIdle) sendFrame(this.socket, { type: 'control', operation: 'shutdown-if-idle' });
       this.socket.end();
@@ -378,4 +449,5 @@ module.exports = {
   TERMINAL_HOST_PROTOCOL,
   readHostDiscovery,
   launchTerminalHost,
+  resolveTerminalHostExecutable,
 };

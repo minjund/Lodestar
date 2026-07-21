@@ -18,6 +18,12 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
     isRuntimeLoopSession = () => false,
   } = context;
 
+  function displaySessions() {
+    return visibleSessions().filter((session) => (
+      typeof context.isRecentSession !== "function" || context.isRecentSession(session)
+    ));
+  }
+
   function renderProviderRail() {
     $("#providerRail").innerHTML = visibleProviders()
       .map((provider) => {
@@ -62,7 +68,7 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
     const projects = new Map();
     const saved = state.workspaces.map((item) => ({ ...item, key: normalizedProjectPath(item.path) }));
     saved.forEach((item) => projects.set(item.key, { path: item.path, name: item.name || projectName(item.path), saved: true, count: 0 }));
-    visibleSessions().filter((session) => !session.parentId && !isProjectlessSession(session)).forEach((session) => {
+    displaySessions().filter((session) => !session.parentId && !isProjectlessSession(session)).forEach((session) => {
       const originPath = sessionOriginPath(session);
       if (!originPath) return;
       const owner = saved
@@ -104,7 +110,7 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
 
   function renderWorkspaces() {
     const lists = [$("#workspaceList"), $("#mobileWorkspaceList")].filter(Boolean);
-    const rootSessions = visibleSessions().filter((session) => !session.parentId);
+    const rootSessions = displaySessions().filter((session) => !session.parentId);
     const projects = observedProjects();
     const projectlessCount = rootSessions.filter(isProjectlessSession).length;
     const savedWorkspaceExists = state.workspace === "all"
@@ -149,15 +155,15 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
   }
 
   function renderGlobalStats() {
-    const sessions = visibleSessions();
+    const sessions = displaySessions();
     const totals = {
       active: sessions.filter((session) => session.status === "running" || session.status === "starting").length,
-      waiting: sessions.filter((session) => session.attention?.required).length,
+      waiting: sessions.filter((session) => context.matchesManagementFilter?.(session, "attention")).length,
       usage: { total: sessions.reduce((sum, session) => sum + Number(session.usage && session.usage.total || 0), 0) },
     };
     const rootCount = sessions.filter((session) => !session.parentId).length;
-    const criticalCount = sessions.filter((session) => session.health?.level === "critical").length;
-    const riskCount = sessions.filter((session) => session.health?.level === "warning" || Number(session.context?.percent || 0) >= 75).length;
+    const criticalCount = sessions.filter((session) => context.matchesManagementFilter?.(session, "critical")).length;
+    const riskCount = sessions.filter((session) => context.matchesManagementFilter?.(session, "warning")).length;
     const items = [
       [window.LoadToAgentI18n.t("ui.all_tasks"), rootCount, window.LoadToAgentI18n.t("ui.items"), ""],
       [window.LoadToAgentI18n.t("ui.ai_working_now"), totals.active || 0, window.LoadToAgentI18n.t("ui.items"), "live"],
@@ -177,7 +183,7 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
     $("#navAllCount").textContent = rootCount;
     const activeRootCount = sessions.filter((session) => !session.parentId && ["running", "starting"].includes(session.status)).length;
     $("#navActiveCount").textContent = activeRootCount;
-    const reviewCount = sessions.filter((session) => context.managementBucket?.(session) !== "healthy").length;
+    const reviewCount = sessions.filter((session) => context.needsManagementReview?.(session)).length;
     $("#navWaitingCount").textContent = reviewCount;
     const scheduledCount = (state.snapshot?.automations || [])
       .filter((item) => isProviderVisible(item.provider || "codex")).length;
@@ -201,7 +207,7 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
       }[button.dataset.view];
       const label = t(key);
       const count = navCounts[button.dataset.view];
-      const unitKey = { all: "tasks", active: "tasks", waiting: "tasks", runtime: "runs", terminal: "sessions", tmux: "groups" }[button.dataset.view];
+      const unitKey = { all: "tasks", active: "tasks", waiting: "items", runtime: "runs", terminal: "sessions", tmux: "sessions" }[button.dataset.view];
       const unit = unitKey ? t(`quality.unit.${unitKey}`) : "";
       const accessibleLabel = Number.isFinite(count) ? t("quality.nav_count_detailed", { label, count, unit }) : label;
       button.setAttribute("aria-label", accessibleLabel);
@@ -341,7 +347,7 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
   function renderProviderOverview() {
     pruneProviderFilters();
     const summaries = (state.snapshot && state.snapshot.summary && state.snapshot.summary.providers) || state.providers;
-    const sessions = visibleSessions();
+    const sessions = displaySessions();
     const visibleSummaries = summaries.filter((provider) => isProviderVisible(provider.id));
     const overviewTabStopId = state.providerFilters.size ? [...state.providerFilters][0] : visibleSummaries[0]?.id;
     $("#providerOverview").innerHTML = visibleSummaries
@@ -418,10 +424,10 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
   }
 
   function filteredSessions() {
-    const allSessions = [...visibleSessions()];
+    const allSessions = displaySessions();
     let sessions = state.view === "waiting" ? allSessions : allSessions.filter((session) => !session.parentId);
     if (state.view === "active") sessions = sessions.filter((session) => session.status === "running" || session.status === "starting");
-    if (state.view === "waiting") sessions = sessions.filter((session) => session.attention?.required || ["critical", "warning", "unknown"].includes(session.health?.level) || !session.health);
+    if (state.view === "waiting") sessions = sessions.filter((session) => context.needsManagementReview?.(session));
     if (state.providerFilters.size) sessions = sessions.filter((session) => state.providerFilters.has(session.provider));
     sessions = sessions.filter(matchesWorkspaceFilter);
     const query = state.search.replace(/\s+/g, " ").trim().toLowerCase();
@@ -445,7 +451,7 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
   }
 
   function graphFilteredSessions() {
-    let sessions = [...visibleSessions()];
+    let sessions = displaySessions();
     if (state.providerFilters.size) sessions = sessions.filter((session) => state.providerFilters.has(session.provider));
     sessions = sessions.filter(matchesWorkspaceFilter);
     const query = state.search.replace(/\s+/g, " ").trim().toLowerCase();

@@ -208,6 +208,8 @@ function publicSession(session, includeReplay = false) {
     provider: session.options.provider,
     bridgeId: session.options.bridgeId,
     background: session.options.type === 'agent',
+    recoveredAfterHostRestart: Boolean(session.recoveredAfterHostRestart),
+    recoverySkippedReason: session.recoverySkippedReason || '',
     pid: session.pid,
     status: session.status,
     createdAt: session.createdAt,
@@ -259,6 +261,14 @@ function persistedSession(session) {
     signal: session.signal,
     replay: session.replay,
   };
+}
+
+function hasSafeAgentResume(options = {}) {
+  if (options.type !== 'agent') return true;
+  const args = Array.isArray(options.args) ? options.args.map(value => String(value || '')) : [];
+  if (options.provider === 'codex') return args[0] === 'resume' && Boolean(args[1]);
+  const resumeIndex = args.indexOf('--resume');
+  return resumeIndex >= 0 && Boolean(args[resumeIndex + 1]);
 }
 
 class TerminalManager extends EventEmitter {
@@ -316,6 +326,9 @@ class TerminalManager extends EventEmitter {
           replay: String(value.replay || '').slice(-MAX_REPLAY_CHARS),
           process: null,
           generation: 0,
+          recoveryPending: value.status === 'running' || value.status === 'starting',
+          recoveredAfterHostRestart: false,
+          recoverySkippedReason: '',
         });
       }
     } catch (error) {
@@ -358,6 +371,35 @@ class TerminalManager extends EventEmitter {
     return this.ptyModule;
   }
 
+  recoverPersistedSessions() {
+    const recovered = [];
+    for (const session of this.sessions.values()) {
+      if (!session.recoveryPending) continue;
+      session.recoveryPending = false;
+      if (!hasSafeAgentResume(session.options)) {
+        session.status = 'exited';
+        session.pid = null;
+        session.recoveredAfterHostRestart = false;
+        session.recoverySkippedReason = 'unsafe-agent-restart';
+        const skippedMessage = '\r\n[LoadToAgent] 이 터미널은 재개할 기존 AI 세션 ID가 없어, 새 AI 대화를 만들 수 있어 자동 재개하지 않았습니다.\r\n';
+        session.replay = `${session.replay}${skippedMessage}`.slice(-MAX_REPLAY_CHARS);
+        continue;
+      }
+      session.recoveredAfterHostRestart = true;
+      session.recoverySkippedReason = '';
+      const message = '\r\n[LoadToAgent] 터미널 호스트 중단 뒤 새 프로세스로 복구했습니다. 이전 셸의 메모리 상태는 이어지지 않습니다.\r\n';
+      session.replay = `${session.replay}${message}`.slice(-MAX_REPLAY_CHARS);
+      try {
+        this.spawn(session);
+      } catch (_recoveryFailed) {
+        session.recoveredAfterHostRestart = false;
+      }
+      recovered.push(publicSession(session, true));
+    }
+    this.persistNow();
+    return recovered;
+  }
+
   create(rawOptions = {}) {
     if (this.sessions.size >= MAX_SESSIONS) throw new Error(`동시에 열 수 있는 터미널은 최대 ${MAX_SESSIONS}개입니다.`);
     const options = normalizeLaunchOptions(rawOptions, this.platform);
@@ -381,6 +423,9 @@ class TerminalManager extends EventEmitter {
       replay: '',
       process: null,
       generation: 0,
+      recoveryPending: false,
+      recoveredAfterHostRestart: false,
+      recoverySkippedReason: '',
     };
     this.sessions.set(id, session);
     try {
@@ -435,15 +480,18 @@ class TerminalManager extends EventEmitter {
         processHandle.__loadtoagentExited = true;
         if (session.generation !== generation) return;
         session.process = null;
+        session.pid = null;
         session.status = 'exited';
         session.exitCode = Number.isFinite(event.exitCode) ? event.exitCode : null;
         session.signal = Number.isFinite(event.signal) ? event.signal : null;
         session.updatedAt = new Date().toISOString();
+        this.persistNow();
         this.emitState('updated', session);
       });
       this.emitState('updated', session);
     } catch (error) {
       session.process = null;
+      session.pid = null;
       session.status = 'failed';
       session.updatedAt = new Date().toISOString();
       const failureMessage = `\r\n[LoadToAgent] 터미널을 시작하지 못했습니다: ${error.message}\r\n`;
@@ -516,10 +564,12 @@ class TerminalManager extends EventEmitter {
     const session = this.required(id);
     if (session.process) {
       const handle = session.process;
+      const pid = session.pid;
       session.process = null;
       session.generation += 1;
-      this.killTree(handle, session.pid);
+      this.killTree(handle, pid);
     }
+    session.pid = null;
     session.status = 'exited';
     session.updatedAt = new Date().toISOString();
     this.emitState('updated', session);
@@ -529,12 +579,16 @@ class TerminalManager extends EventEmitter {
 
   restart(id) {
     const session = this.required(id);
+    session.recoveredAfterHostRestart = false;
+    session.recoverySkippedReason = '';
     if (session.process) {
       const handle = session.process;
+      const pid = session.pid;
       session.process = null;
       session.generation += 1;
-      this.killTree(handle, session.pid);
+      this.killTree(handle, pid);
     }
+    session.pid = null;
     session.replay = '';
     this.spawn(session);
     return publicSession(session, true);
@@ -544,10 +598,12 @@ class TerminalManager extends EventEmitter {
     const session = this.required(id);
     if (session.process) {
       const handle = session.process;
+      const pid = session.pid;
       session.process = null;
       session.generation += 1;
-      this.killTree(handle, session.pid);
+      this.killTree(handle, pid);
     }
+    session.pid = null;
     session.status = 'exited';
     session.updatedAt = new Date().toISOString();
     this.sessions.delete(session.id);
@@ -560,13 +616,14 @@ class TerminalManager extends EventEmitter {
     if (preserveSessions) {
       const now = new Date().toISOString();
       for (const session of this.sessions.values()) {
+        const shouldRecover = session.status === 'running' || session.status === 'starting';
         if (session.process) {
           const handle = session.process;
           session.process = null;
           session.generation += 1;
           this.killTree(handle, session.pid);
         }
-        if (session.status === 'running' || session.status === 'starting') session.status = 'exited';
+        if (shouldRecover) session.status = 'running';
         session.pid = null;
         session.updatedAt = now;
       }

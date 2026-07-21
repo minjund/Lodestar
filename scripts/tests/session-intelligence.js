@@ -38,6 +38,34 @@ function registerSessionIntelligenceTests(context) {
       statusObserved: true, statusDetail: '테스트 실패를 확인했고 자동으로 수정하는 중',
     }, [], now);
     assert.equal(recovering.attention.required, false);
+
+    const cleanWaiting = enrichSession({
+      ...waiting, id: 'clean-waiting', parentId: null, context: { percent: 10 }, lifecycle: [],
+      updatedAt: '2026-07-21T04:20:00.000Z', statusDetail: '권한 승인이 필요합니다.',
+      messages: [{ role: 'assistant', text: '이 작업을 계속 진행하도록 승인해 주세요.', timestamp: '2026-07-21T04:20:00.000Z' }],
+    }, [], now);
+    assert.equal(cleanWaiting.attention.kind, 'approval');
+    assert.equal(cleanWaiting.health.level, 'healthy', '응답 요청은 실제 상태 위험 신호와 분리해야 합니다.');
+    assert.equal(cleanWaiting.health.signals.length, 0);
+  });
+
+  test('로그의 테스트 실행 상태를 통과·실패·실행 중·미확인으로 구분한다', () => {
+    const session = {
+      id: 'check-statuses', provider: 'codex', status: 'completed', statusObserved: true,
+      completionObserved: true, updatedAt: '2026-07-21T04:00:00.000Z', title: '테스트 상태 확인',
+      messages: [],
+      lifecycle: [
+        { label: '결제 test', status: 'error' },
+        { label: 'API spec', status: 'pending' },
+        { label: 'UI test', status: 'started' },
+        { label: '성능 테스트', status: 'completed' },
+        { label: 'unknown test', status: 'queued' },
+        { label: 'inspect output', status: 'completed' },
+      ],
+    };
+    const result = enrichSession(session, [session], Date.parse('2026-07-21T04:01:00.000Z'));
+    assert.deepEqual(result.outcome.checks.map(check => check.status), ['failed', 'running', 'running', 'passed', 'unknown']);
+    assert.equal(result.outcome.checks.some(check => check.label === 'inspect output'), false, 'inspect 같은 일반 문구를 테스트 실행으로 오인하면 안 됩니다.');
   });
 
   test('완료 세션은 산출물·검증 이벤트·제어 가능 범위를 보존한다', () => {
@@ -54,6 +82,7 @@ function registerSessionIntelligenceTests(context) {
     assert.equal(result.outcome.artifacts.some(item => item.kind === 'file' && item.value.includes('src/payment.js')), true);
     assert.equal(result.outcome.artifacts.some(item => item.kind === 'test'), true);
     assert.equal(result.outcome.artifacts.some(item => item.kind === 'commit'), true);
+    assert.equal(result.outcome.artifacts.find(item => item.kind === 'commit').verified, false, '로그에 언급된 커밋 해시는 저장소 검증 없이 확인된 것으로 표시하면 안 됩니다.');
     assert.equal(result.outcome.checks[0].status, 'passed');
     assert.equal(result.controlCapabilities.stop, false);
   });

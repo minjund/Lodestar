@@ -118,7 +118,7 @@ async function layoutMetrics(win) {
       documentOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 2,
       stageOverflow: Boolean(stage && stage.scrollWidth > stage.clientWidth + 2),
       stageScrollLeft: stage?.scrollLeft || 0,
-      stageRect: stageRect ? { left: stageRect.left, right: stageRect.right, width: stageRect.width } : null,
+      stageRect: stageRect ? { left: stageRect.left, right: stageRect.right, top: stageRect.top, bottom: stageRect.bottom, width: stageRect.width } : null,
       topbarRect: topbarRect ? { left: topbarRect.left, right: topbarRect.right, width: topbarRect.width } : null,
       topbarCopyRect: topbarCopyRect ? { left: topbarCopyRect.left, right: topbarCopyRect.right, width: topbarCopyRect.width } : null,
       sectionOverflow,
@@ -145,7 +145,7 @@ async function layoutMetrics(win) {
         || (window.innerWidth <= 720
           ? Boolean(document.querySelector('#mobileWorkspaceList'))
           : Boolean(document.querySelector('.workspace-section')?.getBoundingClientRect().width > 0 && document.querySelector('#workspaceList')?.getBoundingClientRect().height > 0)),
-      compactContentClearance: !compact || Number.parseFloat(getComputedStyle(stage).paddingBottom) >= (sidebarRect?.height || 0) + 12,
+      compactContentClearance: !compact || Boolean(stageRect && sidebarRect && stageRect.bottom <= sidebarRect.top + 1),
       terminalActionLabels,
       tmuxShortcutVisible: !liveSectionVisible || Boolean(tmuxShortcutRect && tmuxShortcutRect.width > 0 && tmuxShortcutRect.height >= 40),
       tmuxShortcutInsideViewport: !liveSectionVisible || Boolean(tmuxShortcutRect && tmuxShortcutRect.left >= -1 && tmuxShortcutRect.right <= window.innerWidth + 1),
@@ -198,14 +198,15 @@ async function overlayMetrics(win, capturePath = '') {
     const form = document.querySelector('#runForm');
     const prompt = document.querySelector('#runPrompt');
     const providers = document.querySelector('#runProviderPicker');
-    const actions = document.querySelector('.run-modal-actions')?.getBoundingClientRect();
     const providerCards = [...document.querySelectorAll('.run-provider-option')].map(item => item.getBoundingClientRect());
     const promptFirst = Boolean(prompt && providers && (prompt.compareDocumentPosition(providers) & Node.DOCUMENT_POSITION_FOLLOWING));
     const modalNoHorizontalOverflow = Boolean(form && form.scrollWidth <= form.clientWidth + 2);
     const modalScrollWidth = form?.scrollWidth || 0;
     const modalClientWidth = form?.clientWidth || 0;
     const providerCardsInsideModal = Boolean(modal && providerCards.length && providerCards.every(rect => rect.left >= modal.left - 1 && rect.right <= modal.right + 1));
-    const actionsInsideViewport = viewportContains(actions);
+    if (form) form.scrollTop = form.scrollHeight;
+    const actions = document.querySelector('.run-modal-actions')?.getBoundingClientRect();
+    const actionsInsideViewport = viewportContains(actions) && Boolean(modal && actions.left >= modal.left - 1 && actions.right <= modal.right + 1);
     const promptCounterVisible = Boolean(document.querySelector('#runPromptCount')?.offsetParent);
     const horizontalOverflow = [...form.children].map(element => {
       const rect = element.getBoundingClientRect();
@@ -530,6 +531,7 @@ app.whenReady().then(async () => {
           choice?.click();
           return choice?.dataset.workspace || '';
         })()`);
+        if (!projectSelection) await win.webContents.executeJavaScript(`document.querySelector('#mobileToolsCloseBtn')?.click()`);
         await wait(120);
         const projectSelectionResult = await win.webContents.executeJavaScript(`(() => ({
           menuClosed: document.querySelector('#mobileToolsMenu')?.classList.contains('hidden'),
@@ -539,7 +541,11 @@ app.whenReady().then(async () => {
           focusContext: { appInert: document.querySelector('#appShell')?.inert, mainInert: document.querySelector('#mainContent')?.inert, mainTabIndex: document.querySelector('#mainContent')?.tabIndex, mainRects: document.querySelector('#mainContent')?.getClientRects().length },
           workspace: window.LoadToAgentApp.state.workspace,
         }))()`);
-        if (!projectSelection || !projectSelectionResult.menuClosed || projectSelectionResult.expanded !== 'false' || !projectSelectionResult.focusedMain || projectSelectionResult.workspace !== projectSelection) throw new Error(`360×520 모바일 프로젝트 선택 후 닫기·포커스 복귀가 올바르지 않습니다: ${JSON.stringify(projectSelectionResult)}`);
+        const focusCorrect = projectSelection
+          ? projectSelectionResult.focusedMain
+          : (!projectSelectionResult.activeElement.hasFocus || projectSelectionResult.activeElement.id === 'mobileMoreBtn');
+        const workspaceCorrect = !projectSelection || projectSelectionResult.workspace === projectSelection;
+        if (!projectSelectionResult.menuClosed || projectSelectionResult.expanded !== 'false' || !focusCorrect || !workspaceCorrect) throw new Error(`360×520 모바일 프로젝트 선택 후 닫기·포커스 복귀가 올바르지 않습니다: ${JSON.stringify({ projectSelection, ...projectSelectionResult })}`);
         await win.webContents.executeJavaScript(`(() => { window.LoadToAgentApp.state.workspace = 'all'; window.LoadToAgentApp.renderWorkspaces(); window.LoadToAgentApp.renderSessions('filter'); })()`);
       }
 

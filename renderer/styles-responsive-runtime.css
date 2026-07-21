@@ -149,8 +149,8 @@
   }
 
   #terminalSection .terminal-workbench {
-    height: clamp(620px,calc(100vh - 270px),760px);
-    min-height: 620px;
+    height: clamp(500px,calc(100vh - 270px),760px);
+    min-height: 500px;
   }
 }
 
@@ -710,15 +710,15 @@
 
   .terminal-controlbar .terminal-key-actions button {
     padding-inline: 7px;
-    font-size: 9px;
+    font-size: 12px;
   }
 
   .terminal-console-head small {
-    font-size: 8px;
+    font-size: 12px;
   }
 
   .terminal-console-state {
-    font-size: 8px;
+    font-size: 12px;
   }
 
   .terminal-command-form {

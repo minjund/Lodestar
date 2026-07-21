@@ -171,7 +171,7 @@ body[data-current-view="all"] #sessionSection { order: 8; }
 .nav-item b small,
 .advanced-tools-nav > summary b small {
   color: #9eb0bd;
-  font-size: 11.5px !important;
+  font-size: 12px !important;
   font-weight: 700;
 }
 
@@ -858,5 +858,183 @@ body :is(input, textarea)::placeholder {
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
+  }
+}
+
+/* 9.8 interaction pass: the last-loaded rules below are deliberate floors. */
+body :is(
+  small,
+  label,
+  time,
+  dt,
+  dd,
+  .meta-chip,
+  .context-scale,
+  .release-notes button,
+  .terminal-tmux-pane,
+  .run-provider-docs small,
+  .run-step-head small,
+  .run-composer .field-label,
+  .run-composer .run-folder-field > span,
+  .detail-drawer [class*="-meta"],
+  .runtime-overview [class*="-label"],
+  .runtime-overview [class*="-status"]
+) {
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+}
+
+body button:not(.icon-button) {
+  min-width: 44px;
+  min-height: 44px !important;
+  font-size: 12px !important;
+  line-height: 1.35;
+}
+
+body button:not(.icon-button) :is(b, strong, span, small) {
+  font-size: 12px !important;
+  line-height: 1.45;
+}
+
+body .icon-button {
+  min-width: 44px;
+  min-height: 44px !important;
+  font-size: 17px !important;
+}
+
+body :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea, summary, [role="button"]) {
+  min-height: 44px !important;
+}
+
+body :is(
+  .provider-filter,
+  .workspace-list,
+  .management-control-buttons,
+  .terminal-create-actions,
+  .terminal-workspace-actions,
+  .terminal-key-actions,
+  .terminal-tmux-tools,
+  .terminal-reorder-actions,
+  .tmux-section-actions,
+  .tmux-pane-actions,
+  .run-modal-actions,
+  .modal-actions,
+  .app-error-actions,
+  .runtime-loop-tabs,
+  .detail-meta-actions,
+  .mobile-bottom-nav
+) {
+  gap: 8px !important;
+}
+
+/* Keep adjacent controls visually and physically distinct at every breakpoint. */
+body :is(
+  .view-nav,
+  .advanced-tools-list,
+  .workspace-row,
+  .operations-priority,
+  .management-filter-group,
+  .management-quick-actions,
+  .run-prompt-examples,
+  .path-field
+) {
+  gap: 8px !important;
+}
+
+.sidebar .section-title {
+  height: auto;
+  min-height: 44px;
+  margin-bottom: 8px;
+  padding-block: 2px;
+}
+
+.sidebar .workspace-list {
+  gap: 8px !important;
+}
+
+.run-modal.terminal-modal :is(.field-label, label, small),
+.run-modal.terminal-modal .path-field button {
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+}
+
+.run-modal.terminal-modal :is(input, select, textarea, button) {
+  min-height: 44px !important;
+}
+
+body :is(
+  [class*="-count"],
+  [class*="-time"],
+  [class*="-stat"],
+  [class*="-metric"],
+  [class*="-usage"],
+  time,
+  output,
+  .nav-item b,
+  .provider-overview-card strong,
+  .runtime-overview-counts,
+  .terminal-font-controls
+) {
+  font-variant-numeric: tabular-nums;
+}
+
+body :is(h1, h2, h3) {
+  text-wrap: balance;
+}
+
+body :is(p, .section-explain, .terminal-resource-tip, .settings-head span) {
+  text-wrap: pretty;
+}
+
+body .primary-button {
+  background-color: #b8d2e1;
+}
+
+body .primary-button:disabled {
+  opacity: 1;
+  border-color: #40515e;
+  background: #26343e;
+  color: #d3dde4;
+}
+
+.settings-section :is(.update-state-copy > span, .release-notes > div span, .settings-meta-grid span) {
+  color: #aebdb9;
+}
+
+.terminal-workbench :is(.terminal-command-label span, .terminal-console-tools label span, .terminal-tmux-tools label span) {
+  color: #b9c6d0;
+}
+
+.run-modal-actions {
+  position: static;
+}
+
+.run-shortcut-hint,
+.run-shortcut-hint span {
+  color: #aebdca;
+}
+
+.drawer-title span {
+  color: #9eafbf;
+}
+
+@media (max-width: 520px) {
+  body button:not(.icon-button),
+  body :is(input:not([type="checkbox"]):not([type="radio"]), select, summary, [role="button"]) {
+    min-height: 44px !important;
+  }
+
+  .mobile-bottom-nav {
+    gap: 8px !important;
+  }
+}
+
+@media (max-width: 720px) {
+  /* The bottom navigation owns its own row instead of covering scrollable content. */
+  .main-stage,
+  body[data-current-view="terminal"] .main-stage {
+    height: calc(100vh - 66px - env(safe-area-inset-bottom));
+    height: calc(100dvh - 66px - env(safe-area-inset-bottom));
+    padding-bottom: 24px;
   }
 }

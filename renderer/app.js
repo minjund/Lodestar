@@ -156,7 +156,7 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     get: (_target, property) => keys[property] ? t(keys[property]) : undefined,
   });
   const STATUS = localizedLookup({
-    starting: "ui.preparing", running: "ui.working", paused: "management.status.paused", waiting: "app.nav.needs_review", idle: "ui.idle",
+    starting: "ui.preparing", running: "ui.working", paused: "management.status.paused", waiting: "ui.waiting_for_review", idle: "ui.idle",
     completed: "ui.completed", failed: "ui.problem", cancelled: "ui.stopped",
   });
   const VIEW_TITLES = localizedLookup({

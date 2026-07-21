@@ -19,25 +19,17 @@ function registerTerminalIpc({ ipcMain, requireTrustedSender, trustedSender, man
     if (options && options.type === 'agent' && !isProviderVisible(options.provider)) throw new Error('설정에서 숨긴 AI는 실행할 수 없습니다.');
     return requireManager(manager).create(options || {});
   });
-  ipcMain.on('terminals:write', (event, id, data) => {
-    if (!trustedSender(event) || !manager()) return;
-    try {
-      Promise.resolve(manager().write(id, data)).catch(error => sendError({ id: String(id || ''), message: error.message }));
-    } catch (error) {
-      sendError({ id: String(id || ''), message: error.message });
-    }
+  ipcMain.handle('terminals:write', (event, id, data) => {
+    requireTrustedSender(event);
+    return requireManager(manager).write(id, data);
   });
   ipcMain.handle('terminals:command', (event, id, command) => {
     requireTrustedSender(event);
     return requireManager(manager).command(id, command);
   });
-  ipcMain.on('terminals:resize', (event, id, cols, rows) => {
-    if (!trustedSender(event) || !manager()) return;
-    try {
-      Promise.resolve(manager().resize(id, cols, rows)).catch(error => sendError({ id: String(id || ''), message: error.message }));
-    } catch (error) {
-      sendError({ id: String(id || ''), message: error.message });
-    }
+  ipcMain.handle('terminals:resize', (event, id, cols, rows) => {
+    requireTrustedSender(event);
+    return requireManager(manager).resize(id, cols, rows);
   });
   for (const operation of ['signal', 'restart', 'close']) {
     ipcMain.handle(`terminals:${operation}`, (event, ...args) => {

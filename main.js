@@ -10,7 +10,7 @@ const { execFileSync } = require('child_process');
 const { AgentRunner, probeProviders } = require('./src/agentRunner');
 const { providerList, blankUsage } = require('./src/providerRegistry');
 const { TerminalManager } = require('./src/terminalManager');
-const { TerminalHostClient, launchTerminalHost } = require('./src/terminalHost');
+const { TerminalHostClient, launchTerminalHost, resolveTerminalHostExecutable } = require('./src/terminalHost');
 const { TmuxController } = require('./src/tmuxController');
 const { normalizeWslList } = require('./src/tmuxMonitor');
 const { UpdateManager } = require('./src/updateManager');
@@ -59,6 +59,9 @@ const MAIN_COPY = {
     pickWorkspace: '작업 폴더 선택',
     attentionTitle: '내 확인이 필요합니다',
     attentionBody: '{provider} · {title}',
+    terminalHostReconnecting: '터미널 연결을 자동으로 복구하는 중입니다.',
+    terminalHostReconnected: '터미널 연결을 복구했습니다.',
+    terminalHostReconnectFailed: '터미널 연결을 복구하지 못했습니다: {reason}',
   },
   en: {
     trayTooltip: 'LoadToAgent · {count} background terminals',
@@ -69,6 +72,9 @@ const MAIN_COPY = {
     pickWorkspace: 'Choose workspace',
     attentionTitle: 'Your review is needed',
     attentionBody: '{provider} · {title}',
+    terminalHostReconnecting: 'Restoring the terminal connection automatically.',
+    terminalHostReconnected: 'Terminal connection restored.',
+    terminalHostReconnectFailed: 'Could not restore the terminal connection: {reason}',
   },
   'zh-CN': {
     trayTooltip: 'LoadToAgent · {count} 个后台终端',
@@ -79,6 +85,9 @@ const MAIN_COPY = {
     pickWorkspace: '选择工作文件夹',
     attentionTitle: '需要你的确认',
     attentionBody: '{provider} · {title}',
+    terminalHostReconnecting: '正在自动恢复终端连接。',
+    terminalHostReconnected: '终端连接已恢复。',
+    terminalHostReconnectFailed: '无法恢复终端连接：{reason}',
   },
 };
 let lastSnapshot = {
@@ -388,7 +397,7 @@ async function setupRuntime() {
     : new TerminalHostClient({
       discoveryFile: terminalHostFile,
       spawnHost: () => launchTerminalHost({
-        executable: process.execPath,
+        executable: resolveTerminalHostExecutable({ isPackaged: app.isPackaged }),
         script: path.join(__dirname, 'src', 'terminalHostDaemon.js'),
         storeFile: terminalStoreFile,
         discoveryFile: terminalHostFile,
@@ -426,7 +435,20 @@ async function setupRuntime() {
     if (monitorWorker) monitorWorker.postMessage({ type: 'bridge-presence', bridges: bridgePresence() });
   });
   terminalManager.on('disconnect', () => {
-    sendTerminal('terminals:error', { id: '', message: '터미널 호스트 연결이 끊어졌습니다. 프로그램을 다시 시작하면 실행 중인 세션에 다시 연결합니다.' });
+    sendTerminal('terminals:connection', { state: 'reconnecting', message: mainText('terminalHostReconnecting') });
+  });
+  terminalManager.on('reconnect', payload => {
+    const sessions = visibleTerminalSessions(payload?.sessions || terminalManager.list());
+    sendTerminal('terminals:state', { change: 'reconnected', session: null, sessions });
+    sendTerminal('terminals:connection', { state: 'connected', message: mainText('terminalHostReconnected') });
+    updateBackgroundTrayMenu();
+    if (monitorWorker) monitorWorker.postMessage({ type: 'bridge-presence', bridges: bridgePresence() });
+  });
+  terminalManager.on('reconnect-error', error => {
+    sendTerminal('terminals:connection', {
+      state: 'failed',
+      message: mainText('terminalHostReconnectFailed', { reason: error?.message || String(error) }),
+    });
   });
   await terminalManager.connect();
   availability = probeProviders();

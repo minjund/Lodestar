@@ -6,7 +6,10 @@ const FAILURE_PATTERN = /(?:error|failed|failure|fatal|exception|오류|실패)/
 const PERMISSION_PATTERN = /(?:permission|approve|approval|권한|승인)/i;
 const DECISION_PATTERN = /(?:choose|select|decision|선택|결정|골라)/i;
 const INPUT_PATTERN = /(?:input|reply|answer|confirm|provide|입력|답변|확인|알려|제공)/i;
-const TEST_PATTERN = /(?:test|spec|검증|테스트)/i;
+const TEST_PATTERN = /(?:^|[^A-Za-z0-9])(?:tests?|testing|specs?|pytest|vitest|jest|mocha)(?=$|[^A-Za-z0-9])|검증|테스트/i;
+const FAILED_CHECK_STATUSES = new Set(['failed', 'failure', 'error', 'errored']);
+const RUNNING_CHECK_STATUSES = new Set(['running', 'pending', 'started', 'starting', 'in-progress', 'in_progress']);
+const PASSED_CHECK_STATUSES = new Set(['passed', 'completed', 'complete', 'done', 'success', 'succeeded']);
 
 function text(value, limit = 1200) {
   const output = String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
@@ -31,6 +34,14 @@ function latestMeaningfulText(session) {
   const preferred = messages.find(row => row && row.role === 'assistant' && text(row.text));
   const fallback = messages.find(row => row && text(row.text));
   return text((preferred || fallback || {}).text || session.statusDetail || session.result || '', 360);
+}
+
+function checkStatus(value) {
+  const status = String(value || '').trim().toLowerCase();
+  if (FAILED_CHECK_STATUSES.has(status)) return 'failed';
+  if (RUNNING_CHECK_STATUSES.has(status)) return 'running';
+  if (PASSED_CHECK_STATUSES.has(status)) return 'passed';
+  return 'unknown';
 }
 
 function controlCapabilities(session) {
@@ -129,7 +140,10 @@ function extractArtifacts(session) {
   const filePattern = /(?:[A-Za-z]:\\|\/)?(?:[\w.@-]+[\\/])+[\w.@()+-]+\.[A-Za-z0-9]{1,12}/g;
   for (const match of body.match(filePattern) || []) add(TEST_PATTERN.test(match) ? 'test' : 'file', match, false);
   if (/(?:commit|커밋)/i.test(body)) {
-    for (const match of body.match(/\b[0-9a-f]{7,40}\b/gi) || []) add('commit', match, true);
+    // A hash mentioned in a log is only a candidate reference. Confirming that
+    // the commit exists belongs to repository verification, which this view
+    // intentionally does not perform.
+    for (const match of body.match(/\b[0-9a-f]{7,40}\b/gi) || []) add('commit', match, false);
   }
   return artifacts;
 }
@@ -141,7 +155,7 @@ function outcomeFor(session, evidence) {
     .slice(-12)
     .map(row => ({
       label: text(row.label || row.detail || 'Test', 180),
-      status: row.status === 'failed' ? 'failed' : row.status === 'running' ? 'running' : 'passed',
+      status: checkStatus(row.status),
       timestamp: row.completedAt || row.timestamp || null,
     }));
   const latestAssistant = [...(session.messages || [])].reverse().find(row => row && row.role === 'assistant' && text(row.text));
@@ -209,7 +223,7 @@ function healthFor(session, sessions, attention, progress, evidence, nowValue) {
   const rank = { info: 1, warning: 2, critical: 3 };
   const max = signals.reduce((value, signal) => Math.max(value, rank[signal.severity] || 0), 0);
   return {
-    level: max >= 3 ? 'critical' : max === 2 ? 'warning' : attention.required ? 'attention' : max === 1 ? 'unknown' : 'healthy',
+    level: max >= 3 ? 'critical' : max === 2 ? 'warning' : max === 1 ? 'unknown' : 'healthy',
     score: Math.max(0, 100 - signals.reduce((sum, signal) => sum + (signal.severity === 'critical' ? 35 : signal.severity === 'warning' ? 18 : 5), 0)),
     signals,
     lastActivityAt: progress.lastActivityAt,

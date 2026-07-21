@@ -19,7 +19,10 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
     const fit = new window.FitAddon.FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host);
-    const entry = { terminal, fit, host, readOnly, userScrollRevision: 0, outputWritePending: 0 };
+    const entry = {
+      terminal, fit, host, readOnly, userScrollRevision: 0, outputWritePending: 0,
+      writeQueue: Promise.resolve(), pendingResize: null, resizePromise: null,
+    };
     const syncScrollState = viewportY => {
       const normalizedViewport = Number(viewportY) || 0;
       const baseY = Number(terminal.buffer.active.baseY) || 0;
@@ -43,27 +46,33 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
         if (['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown'].includes(event.key)) rememberUserScroll();
       }, true);
       terminal.onData(data => {
-        if (state.selectedId === key) Promise.resolve(window.loadtoagent.terminalWrite(key, data)).catch(error => notice(errorMessage(error), 'error'));
+        if (state.selectedId !== key) return;
+        entry.writeQueue = entry.writeQueue
+          .then(() => window.loadtoagent.terminalWrite(key, data))
+          .catch(error => notice(errorMessage(error), 'error'));
       });
       terminal.onResize(size => {
-        Promise.resolve(window.loadtoagent.terminalResize(key, size.cols, size.rows)).catch(error => {
+        entry.pendingResize = { cols: size.cols, rows: size.rows };
+        if (entry.resizePromise) return;
+        entry.resizePromise = (async () => {
+          while (entry.pendingResize) {
+            const pending = entry.pendingResize;
+            entry.pendingResize = null;
+            await window.loadtoagent.terminalResize(key, pending.cols, pending.rows);
+          }
+        })().catch(error => {
           window.LoadToAgentRendererUtils.reportRecoverableError('terminal-resize', error);
-        });
+        }).finally(() => { entry.resizePromise = null; });
       });
     }
     return entry;
   }
 
-  function fitEntry(entry, sessionId = '') {
+  function fitEntry(entry, _sessionId = '') {
     if (!entry || entry.host.classList.contains('hidden')) return;
     requestAnimationFrame(() => {
       try {
         entry.fit.fit();
-        if (sessionId) {
-          Promise.resolve(window.loadtoagent.terminalResize(sessionId, entry.terminal.cols, entry.terminal.rows)).catch(error => {
-            window.LoadToAgentRendererUtils.reportRecoverableError('terminal-fit-resize', error);
-          });
-        }
       } catch (error) {
         window.LoadToAgentRendererUtils.reportRecoverableError('terminal-fit', error);
       }
@@ -95,15 +104,25 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
   function linkedAgentSession(session) {
     if (!session) return null;
     if (state.boundTargetId === session.id && state.boundAgent) return state.boundAgent;
+    const agents = Array.isArray(state.snapshot?.sessions) ? state.snapshot.sessions : [];
     const bridgeId = String(session.bridgeId || '');
-    return bridgeId && Array.isArray(state.snapshot?.sessions)
-      ? state.snapshot.sessions.find(item => item.id === bridgeId) || null
-      : null;
+    const bridged = bridgeId ? agents.find(item => item.id === bridgeId) : null;
+    if (bridged) return bridged;
+    const terminalPid = Number(session.pid || 0);
+    return agents.find(agent => (Array.isArray(agent.runtimePresence) ? agent.runtimePresence : []).some(item => (
+      item.terminalId === session.id
+      || (terminalPid > 0 && Number(item.pid || 0) === terminalPid)
+      || (terminalPid > 0 && Number(item.parentPid || 0) === terminalPid)
+    ))) || null;
+  }
+
+  function isAiTerminalSession(session) {
+    return Boolean(session && (session.type === 'agent' || linkedAgentSession(session)));
   }
 
   function terminalPresentation(session) {
     const agent = linkedAgentSession(session);
-    if (agent?.attention?.required || agent?.status === 'waiting') return { tone: 'attention', label: t('app.nav.needs_review') };
+    if (agent?.attention?.required || agent?.status === 'waiting') return { tone: 'attention', label: t('ui.waiting_for_review') };
     if (agent?.status === 'failed' || session?.status === 'failed') return { tone: 'failed', label: t('terminal.status.failed') };
     if (agent?.status === 'completed') return { tone: 'completed', label: t('ui.completed') };
     if (agent && ['running', 'starting'].includes(agent.status)) return { tone: 'running', label: t('ui.working') };
@@ -136,7 +155,10 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
       state.selectedId,
       general.map(session => {
         const presentation = terminalPresentation(session);
-        return [session.id, session.title, session.type, session.status, session.cwd, session.background, presentation.tone, presentation.label];
+        return [
+          session.id, session.title, session.type, session.status, session.pid, session.cwd, session.background,
+          session.recoveredAfterHostRestart, session.recoverySkippedReason, presentation.tone, presentation.label,
+        ];
       }),
     ]);
     if (renderKey === state.sessionRenderKey) return;
@@ -157,7 +179,7 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
           aria-describedby="terminalReorderHelp"
           title="${esc(session.cwd || window.LoadToAgentI18n.t('terminal.reorder_hint'))}">
           <span class="terminal-session-icon">${esc(terminalTypeMark(session))}</span>
-          <span><b>${esc(session.title)}</b><small>${esc(terminalTypeLabel(session))}${session.background ? ` · ${t('terminal.background_kept')}` : ''}</small><em>${esc(session.cwd || session.distro || `PID ${session.pid || '--'}`)}</em><span class="sr-only">${index + 1}/${general.length}</span></span>
+          <span><b>${esc(session.title)}</b><small>${esc(terminalTypeLabel(session))}${session.background ? ` · ${t('terminal.background_kept')}` : ''}${session.recoveredAfterHostRestart ? ` · ${t('terminal.recovered_after_host_restart')}` : ''}</small><em>${esc(session.cwd || session.distro || `PID ${session.pid || '--'}`)}</em><span class="sr-only">${index + 1}/${general.length}</span></span>
           <span class="terminal-session-status" data-status="${esc(presentation.tone)}"><i></i>${esc(presentation.label)}</span>
         </button>
         <span class="terminal-reorder-actions" aria-label="${esc(window.LoadToAgentI18n.t('terminal.reorder_group', { title: session.title }))}">
@@ -192,12 +214,20 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
     const session = currentSession();
     const remote = currentTmux();
     const bound = visibleBoundAgent();
+    const aiTerminal = isAiTerminalSession(session);
     const hasTarget = Boolean(session || remote);
     const canInput = Boolean((remote && !remote.pane.dead) || (session && session.status === 'running'));
     const closeButton = $('#terminalCloseBtn');
     closeButton.disabled = !hasTarget;
-    closeButton.textContent = remote && !session ? t('terminal.clear_selection') : t('ui.end_session');
-    closeButton.classList.toggle('terminal-danger-button', Boolean(session));
+    closeButton.textContent = remote && !session
+      ? t('terminal.clear_selection')
+      : session?.type === 'tmux'
+        ? t('terminal.detach_tmux_input')
+        : aiTerminal ? t('terminal.close_view') : t('ui.end_session');
+    closeButton.classList.toggle('terminal-danger-button', Boolean(session && !aiTerminal && session.type !== 'tmux'));
+    const endSessionButton = $('#terminalEndSessionBtn');
+    endSessionButton.classList.toggle('hidden', !aiTerminal);
+    endSessionButton.disabled = !aiTerminal;
     $('#terminalRestartBtn').classList.toggle('hidden', !session || session.status === 'running' || session.type === 'agent');
     $('#terminalRestartBtn').disabled = !session || session.status === 'running';
     $('#terminalCommandInput').disabled = !canInput;
@@ -215,7 +245,7 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
       const presentation = terminalPresentation(session);
       setConnectionState(presentation.label, presentation.tone);
       $('#terminalTargetIcon').textContent = terminalTypeMark(session);
-      $('#terminalTargetMeta').innerHTML = `<b>${esc(session.title)}</b><span>${bound ? `● ${t('terminal.bound_ai_session')} · ` : ''}${esc(session.type.toUpperCase())} · PID ${session.pid || '--'} · ${esc(session.cwd || session.distro || '')}</span>`;
+      $('#terminalTargetMeta').innerHTML = `<b>${esc(session.title)}</b><span>${bound ? `● ${t('terminal.bound_ai_session')} · ` : ''}${session.recoveredAfterHostRestart ? `${t('terminal.recovered_after_host_restart')} · ` : ''}${esc(session.type.toUpperCase())} · PID ${session.pid || '--'} · ${esc(session.cwd || session.distro || '')}</span>`;
       $('#terminalConsoleCaption').textContent = `${terminalTypeLabel(session)} · PID ${session.pid || '--'}`;
       $('#terminalConsoleState').textContent = presentation.tone === 'attention' || presentation.tone === 'completed'
         ? presentation.label
@@ -334,8 +364,9 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
     const nextSessions = payload && Array.isArray(payload.sessions) ? payload.sessions : await window.loadtoagent.terminalList();
     state.sessions = Array.isArray(nextSessions) ? nextSessions : [];
     const activeIds = new Set(state.sessions.map(session => session.id));
+    const rehydratedIds = new Set(payload?.change === 'reconnected' ? activeIds : []);
     for (const [id, entry] of state.terminals) {
-      if (activeIds.has(id)) continue;
+      if (activeIds.has(id) && !rehydratedIds.has(id)) continue;
       entry.terminal.dispose();
       entry.host.remove();
       state.terminals.delete(id);
@@ -558,5 +589,5 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
     }
   }
 
-  return { createXtermHost, fitEntry, ensureSessionTerminal, ensureRemoteTerminal, hideScreens, renderSessions, renderTmuxResources, renderTarget, showSelection, selectSession, selectTmux, selectTmuxById, renderAll, refreshSessions, createTerminal, captureRemote, startCapture, stopCapture, sendCommand, sendSignal, openTmuxModal, closeTmuxModal, refreshSnapshot, attachTmux, manageTmux };
+  return { createXtermHost, fitEntry, ensureSessionTerminal, ensureRemoteTerminal, hideScreens, linkedAgentSession, isAiTerminalSession, renderSessions, renderTmuxResources, renderTarget, showSelection, selectSession, selectTmux, selectTmuxById, renderAll, refreshSessions, createTerminal, captureRemote, startCapture, stopCapture, sendCommand, sendSignal, openTmuxModal, closeTmuxModal, refreshSnapshot, attachTmux, manageTmux };
 };

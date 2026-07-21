@@ -38,7 +38,7 @@
 
 .run-provider-option small {
   display: block;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .run-provider-option:disabled {
@@ -50,7 +50,7 @@
   display: block;
   margin-bottom: 6px;
   color: #7e899b;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .run-modal label>span small {
@@ -66,7 +66,7 @@
   outline: 0;
   height: 37px;
   padding: 0 10px;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .run-modal textarea {
@@ -78,7 +78,7 @@
   outline: 0;
   padding: 10px;
   resize: vertical;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -158,7 +158,7 @@
   max-width: 520px;
   margin: 7px 0 0;
   color: #77889a;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -197,7 +197,7 @@
   border-radius: 9px;
   background: #18323d;
   color: #82def4;
-  font-size: 10px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 850;
   box-shadow: inset 0 0 0 1px rgba(126,217,238,.14);
@@ -317,7 +317,7 @@
   place-items: center;
   opacity: 0;
   color: var(--provider);
-  font-size: 11px;
+  font-size: 12px;
   transform: scale(.25);
   filter: blur(4px);
   transition-property: opacity,transform,filter;
@@ -344,7 +344,7 @@
   border-radius: 11px;
   background: #080e15;
   box-shadow: inset 0 0 0 1px #263541;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .run-composer .path-field button:hover {
@@ -434,7 +434,7 @@
 
 .run-advanced>summary i {
   color: #718594;
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
   transition-property: transform;
   transition-duration: 180ms;
@@ -454,7 +454,7 @@
   border: 0;
   border-radius: 10px;
   box-shadow: inset 0 0 0 1px #273541;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .run-composer .form-error {
@@ -510,7 +510,7 @@
 .run-provider-help-copy p {
   margin: 5px 0 0;
   color: #c7ae7d;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -549,14 +549,14 @@
 
 .run-provider-docs b {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .run-provider-docs small {
   display: block;
   margin-top: 3px;
   color: #9f8b67;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .run-provider-docs i {
@@ -578,19 +578,19 @@
   margin-top: 4px;
   line-height: 1.45;
   color: #98a6b5;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .run-composer .field-label {
   margin-bottom: 7px;
   color: #98a6b5;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .run-composer .run-folder-field>span {
   margin-bottom: 7px;
   color: #98a6b5;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .run-provider-copy small {
@@ -600,19 +600,19 @@
   white-space: nowrap;
   margin-top: 3px;
   color: #98a6b5;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .run-composer .permission-toggle div small {
   color: #98a6b5;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .run-prompt-count {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
   color: #98a6b5;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .run-prompt-count.warning {
@@ -624,7 +624,7 @@
   display: block;
   margin-top: 3px;
   color: #98a6b5;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .run-provider-copy b {
@@ -659,7 +659,7 @@
   transition-duration: 150ms;
   transition-timing-function: ease-out;
   padding: 0 11px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .run-workspace-suggestions button {
@@ -682,7 +682,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .run-composer .path-field button {
@@ -696,5 +696,5 @@
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
   transition-property: transform,background-color,color;
   transition-duration: 150ms;
-  font-size: 11px;
+  font-size: 12px;
 }

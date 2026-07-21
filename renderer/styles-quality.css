@@ -95,7 +95,7 @@ body.quality-keyboard-mode :focus-visible {
 .quality-modal-head p {
   margin: 0 0 4px;
   color: #5de0b5;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .12em;
   text-transform: uppercase;
@@ -189,7 +189,7 @@ body.quality-keyboard-mode :focus-visible {
   min-height: 18px;
   margin: 10px 3px 0;
   color: #748497;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .shortcut-help-list {
@@ -218,14 +218,14 @@ body.quality-keyboard-mode :focus-visible {
 .shortcut-help-list dd {
   margin: 0;
   color: #9caabb;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .session-result-summary {
   min-height: 22px;
   margin: 8px 2px 0;
   color: #708094;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .empty-state .ghost-button {

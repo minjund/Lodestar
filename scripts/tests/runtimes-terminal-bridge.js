@@ -12,7 +12,7 @@ const { AgentRunner, commandSpec } = require('../../src/agentRunner');
 const { BridgeServer, decodeBase64 } = require('../../src/bridgeServer');
 const { ProcessMonitor, processRows, posixProcessRows, providerFromPosixProcess, selectAgentProcesses, processSessionExternalId, bridgeLinkScore, applyRuntimePresence } = require('../../src/processMonitor');
 const { TerminalManager, normalizeLaunchOptions, launchSpec, resolveWindowsCommand, resolvePosixShell } = require('../../src/terminalManager');
-const { TerminalHostServer, TerminalHostClient } = require('../../src/terminalHost');
+const { TerminalHostServer, TerminalHostClient, resolveTerminalHostExecutable } = require('../../src/terminalHost');
 const { TmuxController, safeName, safeTarget } = require('../../src/tmuxController');
 const { TmuxMonitor, normalizeWslList, parseTmuxProbe, buildDistroTopology, linkAgentSessions, providerFromProcess } = require('../../src/tmuxMonitor');
 
@@ -330,6 +330,15 @@ function registerGenericAgentTests(context) {
 
 function registerTerminalLifecycleTests(context) {
   const { test, temp, root } = context;
+  test('macOS 패키지는 터미널 호스트를 숨김 Helper 실행 파일로 연다', () => {
+    const executable = '/Applications/LoadToAgent.app/Contents/MacOS/LoadToAgent';
+    const helper = '/Applications/LoadToAgent.app/Contents/Frameworks/LoadToAgent Helper.app/Contents/MacOS/LoadToAgent Helper';
+    const fileSystem = { existsSync: file => file === helper };
+    assert.equal(resolveTerminalHostExecutable({ platform: 'darwin', isPackaged: true, executable, fileSystem }), helper);
+    assert.equal(resolveTerminalHostExecutable({ platform: 'darwin', isPackaged: false, executable, fileSystem }), executable);
+    assert.equal(resolveTerminalHostExecutable({ platform: 'win32', isPackaged: true, executable, fileSystem }), executable);
+  });
+
   test('PTY 터미널을 만들고 입력·명령·리사이즈·신호·재시작·종료를 제어한다', () => {
     const processes = [];
     const storeFile = path.join(temp, 'terminal-sessions-lifecycle.json');
@@ -365,6 +374,7 @@ function registerTerminalLifecycleTests(context) {
     processes[0].exitCallback({ exitCode: 0, signal: 0 });
     assert.equal(manager.list().length, 1);
     assert.equal(manager.get(session.id).status, 'exited');
+    assert.equal(manager.get(session.id).pid, null);
     manager.dispose({ preserveSessions: true });
     manager = new TerminalManager(managerOptions);
     assert.equal(manager.list().length, 1);
@@ -465,6 +475,202 @@ function registerTerminalLifecycleTests(context) {
     secondClient.dispose();
     server.dispose();
     manager.dispose();
+  });
+
+  test('터미널 호스트가 죽어도 저장된 실행 세션을 같은 ID와 설정으로 다시 시작한다', () => {
+    const processes = [];
+    class FakePty {
+      constructor(pid) { this.pid = pid; }
+      onData(callback) { this.dataCallback = callback; }
+      onExit(callback) { this.exitCallback = callback; }
+      write() {}
+      resize() {}
+      kill() {}
+    }
+    const storeFile = path.join(temp, 'terminal-host-crash-recovery.json');
+    const options = {
+      storeFile,
+      killTree: () => {},
+      ptyModule: { spawn: () => {
+        const processHandle = new FakePty(15_000 + processes.length);
+        processes.push(processHandle);
+        return processHandle;
+      } },
+    };
+    const beforeCrash = new TerminalManager(options);
+    const created = beforeCrash.create({ type: 'agent', provider: 'codex', args: ['resume', 'session-123'], cwd: root, bridgeId: 'codex:session-123' });
+    const freshAgent = beforeCrash.create({ type: 'agent', provider: 'codex', args: [], cwd: root, bridgeId: 'external-bridge' });
+    beforeCrash.persistNow();
+
+    const afterCrash = new TerminalManager(options);
+    assert.equal(afterCrash.get(created.id).status, 'exited');
+    const recovered = afterCrash.recoverPersistedSessions();
+
+    assert.equal(recovered.length, 1);
+    assert.equal(recovered[0].id, created.id);
+    assert.equal(recovered[0].status, 'running');
+    assert.equal(recovered[0].pid, 15_002);
+    assert.equal(recovered[0].bridgeId, 'codex:session-123');
+    assert.match(afterCrash.get(created.id, true).replay, /호스트 중단 뒤 새 프로세스로 복구/);
+    assert.equal(afterCrash.get(freshAgent.id).status, 'exited');
+    assert.match(afterCrash.get(freshAgent.id, true).replay, /새 AI 대화를 만들 수 있어 자동 재개하지 않았습니다/);
+    afterCrash.dispose();
+  });
+
+  test('자연 종료 상태는 즉시 저장해 직후 호스트가 죽어도 끝난 셸을 되살리지 않는다', () => {
+    const processes = [];
+    class FakePty {
+      constructor(pid) { this.pid = pid; }
+      onData(callback) { this.dataCallback = callback; }
+      onExit(callback) { this.exitCallback = callback; }
+      write() {}
+      resize() {}
+      kill() {}
+    }
+    const storeFile = path.join(temp, 'terminal-host-natural-exit.json');
+    const options = {
+      storeFile,
+      killTree: () => {},
+      ptyModule: { spawn: () => {
+        const processHandle = new FakePty(16_000 + processes.length);
+        processes.push(processHandle);
+        return processHandle;
+      } },
+    };
+    const manager = new TerminalManager(options);
+    const session = manager.create({ type: 'shell', cwd: root });
+    processes[0].exitCallback({ exitCode: 0, signal: 0 });
+
+    const afterHostCrash = new TerminalManager(options);
+    assert.equal(afterHostCrash.get(session.id).status, 'exited');
+    assert.deepStrictEqual(afterHostCrash.recoverPersistedSessions(), []);
+    afterHostCrash.dispose();
+    manager.dispose();
+  });
+
+  test('터미널 호스트 단절 뒤 다음 요청이 새 호스트에 자동 재연결된다', async () => {
+    class FakePty {
+      constructor(pid) { this.pid = pid; this.killed = false; }
+      onData(callback) { this.dataCallback = callback; }
+      onExit(callback) { this.exitCallback = callback; }
+      write() {}
+      resize() {}
+      kill() { this.killed = true; }
+    }
+    let nextPid = 14_000;
+    const manager = new TerminalManager({
+      storeFile: path.join(temp, 'terminal-host-reconnect-sessions.json'),
+      killTree: handle => handle.kill(),
+      ptyModule: { spawn: () => new FakePty(nextPid++) },
+    });
+    const discovery = path.join(temp, 'terminal-host-reconnect-discovery.json');
+    const endpoint = suffix => process.platform === 'win32'
+      ? `\\\\.\\pipe\\loadtoagent-host-reconnect-${process.pid}-${suffix}`
+      : path.join(os.tmpdir(), `lta-host-reconnect-${process.pid}-${suffix}.sock`);
+    const firstServer = new TerminalHostServer({ manager, endpoint: endpoint('first'), discoveryFile: discovery, token: 'first-token' });
+    await firstServer.start();
+    let replacementServer = null;
+    let spawnCalls = 0;
+    const client = new TerminalHostClient({
+      discoveryFile: discovery,
+      connectTimeoutMs: 2_000,
+      spawnHost: async () => {
+        spawnCalls += 1;
+        replacementServer = new TerminalHostServer({ manager, endpoint: endpoint('second'), discoveryFile: discovery, token: 'second-token' });
+        await replacementServer.start();
+      },
+    });
+    await client.connect();
+    firstServer.dispose();
+    await new Promise(resolve => setTimeout(resolve, 30));
+
+    const created = await client.create({ type: 'powershell', cwd: root, title: '자동 재연결 검증' });
+    assert.equal(spawnCalls, 1);
+    assert.equal(created.status, 'running');
+    assert.equal(client.list()[0].id, created.id);
+
+    await client.close(created.id);
+    client.dispose();
+    replacementServer?.dispose();
+    manager.dispose();
+  });
+
+  test('이전 소켓의 늦은 close 이벤트가 새 터미널 호스트 연결을 끊지 않는다', () => {
+    const client = new TerminalHostClient({ discoveryFile: path.join(temp, 'unused-host.json') });
+    const staleSocket = { destroyed: true };
+    const activeSocket = { destroyed: false };
+    client.socket = activeSocket;
+    client.connected = true;
+    client.sessions = [{ id: 'terminal:active', status: 'running' }];
+    let activeHandshakeRejected = false;
+    client.handshake = { reject: () => { activeHandshakeRejected = true; } };
+
+    client.handleSocketError(staleSocket, new Error('stale socket error'));
+    client.consume(Buffer.from('{"type":"ready"'), staleSocket);
+    client.handleDisconnect(staleSocket);
+
+    assert.equal(client.socket, activeSocket);
+    assert.equal(client.connected, true);
+    assert.equal(activeHandshakeRejected, false);
+    assert.equal(client.buffer, '');
+    assert.equal(client.list()[0].id, 'terminal:active');
+  });
+
+  test('마지막 클라이언트가 떠난 빈 터미널 호스트는 유예 뒤 스스로 종료한다', async () => {
+    class EmptyManager extends EventEmitter {
+      list() { return []; }
+      on() { return super.on(...arguments); }
+      removeListener() { return super.removeListener(...arguments); }
+    }
+    const manager = new EmptyManager();
+    const discovery = path.join(temp, 'terminal-host-idle-discovery.json');
+    const endpoint = process.platform === 'win32'
+      ? `\\\\.\\pipe\\loadtoagent-host-idle-${process.pid}`
+      : path.join(os.tmpdir(), `lta-host-idle-${process.pid}.sock`);
+    let shutdowns = 0;
+    const server = new TerminalHostServer({
+      manager,
+      endpoint,
+      discoveryFile: discovery,
+      token: 'idle-token',
+      idleShutdownMs: 20,
+      onShutdown: () => { shutdowns += 1; },
+    });
+    await server.start();
+    const client = new TerminalHostClient({ discoveryFile: discovery });
+    await client.connect();
+    client.dispose();
+    await new Promise(resolve => setTimeout(resolve, 80));
+
+    assert.equal(shutdowns, 1);
+    server.dispose();
+  });
+
+  test('클라이언트가 붙기 전에 앱이 끝나도 빈 터미널 호스트는 고아 프로세스로 남지 않는다', async () => {
+    class EmptyManager extends EventEmitter {
+      list() { return []; }
+      on() { return super.on(...arguments); }
+      removeListener() { return super.removeListener(...arguments); }
+    }
+    const suffix = `${process.pid}-${Date.now()}`;
+    const discovery = path.join(temp, `terminal-host-orphan-${suffix}.json`);
+    const endpoint = process.platform === 'win32'
+      ? `\\\\.\\pipe\\loadtoagent-host-orphan-${suffix}`
+      : path.join(os.tmpdir(), `lta-host-orphan-${suffix}.sock`);
+    let shutdowns = 0;
+    const server = new TerminalHostServer({
+      manager: new EmptyManager(),
+      endpoint,
+      discoveryFile: discovery,
+      token: 'orphan-token',
+      idleShutdownMs: 20,
+      onShutdown: () => { shutdowns += 1; },
+    });
+    await server.start();
+    await new Promise(resolve => setTimeout(resolve, 80));
+
+    assert.equal(shutdowns, 1);
+    server.dispose();
   });
 
 }

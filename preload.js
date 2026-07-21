@@ -35,9 +35,9 @@ contextBridge.exposeInMainWorld('loadtoagent', {
   wslDistros: () => ipcRenderer.invoke('wsl:list-distros'),
   terminalGet: id => ipcRenderer.invoke('terminals:get', id),
   terminalCreate: options => ipcRenderer.invoke('terminals:create', options),
-  terminalWrite: (id, data) => ipcRenderer.send('terminals:write', id, data),
+  terminalWrite: (id, data) => ipcRenderer.invoke('terminals:write', id, data),
   terminalCommand: (id, command) => ipcRenderer.invoke('terminals:command', id, command),
-  terminalResize: (id, cols, rows) => ipcRenderer.send('terminals:resize', id, cols, rows),
+  terminalResize: (id, cols, rows) => ipcRenderer.invoke('terminals:resize', id, cols, rows),
   terminalSignal: (id, signal) => ipcRenderer.invoke('terminals:signal', id, signal),
   terminalRestart: id => ipcRenderer.invoke('terminals:restart', id),
   terminalClose: id => ipcRenderer.invoke('terminals:close', id),
@@ -67,6 +67,11 @@ contextBridge.exposeInMainWorld('loadtoagent', {
     const handler = (_event, payload) => callback(payload);
     ipcRenderer.on('terminals:error', handler);
     return () => ipcRenderer.removeListener('terminals:error', handler);
+  },
+  onTerminalConnection: callback => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('terminals:connection', handler);
+    return () => ipcRenderer.removeListener('terminals:connection', handler);
   },
   onSnapshot: callback => {
     const handler = (_event, snapshot) => callback(snapshot);

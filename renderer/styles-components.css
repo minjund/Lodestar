@@ -86,7 +86,7 @@ button[aria-busy="true"] {
   background: color-mix(in srgb,var(--provider) 12%,#121720);
   border: 1px solid color-mix(in srgb,var(--provider) 30%,#202938);
   color: var(--provider);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -247,7 +247,7 @@ button[aria-busy="true"] {
   border-radius: 7px;
   background: color-mix(in srgb,var(--provider) 10%,#131822);
   color: var(--provider);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .activity-copy {
@@ -259,7 +259,7 @@ button[aria-busy="true"] {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 580;
   color: #bec8d5;
 }
@@ -271,7 +271,7 @@ button[aria-busy="true"] {
   text-overflow: ellipsis;
   margin-top: 3px;
   color: #5f6a7b;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .activity-wave {
@@ -319,12 +319,12 @@ button[aria-busy="true"] {
   justify-content: space-between;
   gap: 8px;
   color: #657186;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .metric-label b {
   color: #b9c4d0;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .context-track {
@@ -405,7 +405,7 @@ button[aria-busy="true"] {
   max-width: 470px;
   margin: 8px 0 17px;
   color: #657185;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.6;
 }
 
@@ -454,7 +454,7 @@ button[aria-busy="true"] {
   border-radius: 9px;
   background: #141a24;
   color: #8592a5;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 750;
 }
 
@@ -542,7 +542,7 @@ button[aria-busy="true"] {
   border-radius: 9px;
   background: #1d1810;
   color: #d6b578;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .chat-activities {
@@ -556,7 +556,7 @@ button[aria-busy="true"] {
 .chat-activities>summary {
   padding: 11px 13px;
   color: #91a0b1;
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -579,11 +579,11 @@ button[aria-busy="true"] {
   gap: 10px;
   margin-bottom: 7px;
   color: #8997a8;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .chat-activities .chat-content {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .stop-run:disabled {
@@ -627,7 +627,7 @@ button[aria-busy="true"] {
   border-radius: 50%;
   background: #111721;
   color: #788599;
-  font-size: 7px;
+  font-size: 12px;
 }
 
 .lifecycle-event.running .life-node {
@@ -655,7 +655,7 @@ button[aria-busy="true"] {
   justify-content: space-between;
   margin-top: 7px;
   color: #566174;
-  font-size: 7px;
+  font-size: 12px;
 }
 
 .form-grid {
@@ -680,7 +680,7 @@ button[aria-busy="true"] {
   border-radius: 0 9px 9px 0;
   background: #151c27;
   color: #8995a7;
-  font-size: 9px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -712,14 +712,14 @@ button[aria-busy="true"] {
   border-radius: 9px;
   background: rgba(255,107,127,.07);
   color: #ff8c9b;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .sync-state b {
   color: #79eeb0;
   letter-spacing: .14em;
   display: block;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .sync-state small {
@@ -727,7 +727,7 @@ button[aria-busy="true"] {
   color: #687487;
   white-space: nowrap;
   display: block;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .map-hint {
@@ -804,7 +804,7 @@ button[aria-busy="true"] {
   color: #8793a6;
   outline: 0;
   height: 40px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .provider-filter {
@@ -860,7 +860,7 @@ button[aria-busy="true"] {
 
 .provider-filter-mark {
   font-family: "Cascadia Code", Consolas, monospace;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .provider-filter-check {
@@ -872,7 +872,7 @@ button[aria-busy="true"] {
   overflow: hidden;
   background: #53d6aa;
   color: #07130f;
-  font-size: 10px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 900;
   opacity: 0;
@@ -881,7 +881,7 @@ button[aria-busy="true"] {
 }
 
 .provider-filter-chip b {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .provider-filter-chip:hover {
@@ -937,7 +937,7 @@ button[aria-busy="true"] {
 .chat-row.tool pre {
   font-family: "Cascadia Code",Consolas,monospace;
   color: #9da9b8;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .life-copy b {
@@ -951,12 +951,12 @@ button[aria-busy="true"] {
   margin-top: 4px;
   color: #5f6b7d;
   line-height: 1.4;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .lifecycle-event time {
   color: #4f5a6b;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .chat-history-head {
@@ -975,7 +975,7 @@ button[aria-busy="true"] {
 
 .chat-history-head span {
   color: #79879a;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .chat-history-head button {
@@ -985,7 +985,7 @@ button[aria-busy="true"] {
   border-radius: 8px;
   background: #121b27;
   color: #aab7c6;
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -1037,7 +1037,7 @@ button[aria-busy="true"] {
 
 .structured-heading span {
   color: #728196;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .json-object {
@@ -1055,7 +1055,7 @@ button[aria-busy="true"] {
 
 .json-object dt {
   color: #7f90a5;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 650;
   overflow-wrap: anywhere;
 }
@@ -1124,7 +1124,7 @@ button[aria-busy="true"] {
   display: block;
   margin-bottom: 7px;
   color: #718095;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .06em;
 }
@@ -1158,7 +1158,7 @@ button[aria-busy="true"] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .overview-branches button small {
@@ -1168,13 +1168,13 @@ button[aria-busy="true"] {
   white-space: nowrap;
   margin-top: 3px;
   color: #6f7d90;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .overview-branches em {
   flex: 0 0 auto;
   color: #718095;
-  font-size: 10px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -1271,7 +1271,7 @@ button[aria-busy="true"] {
   border-radius: 7px;
   background: #101821;
   color: #8192a3;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 750;
   line-height: 1;
   white-space: nowrap;
@@ -1285,7 +1285,7 @@ button[aria-busy="true"] {
   background: transparent!important;
   color: inherit!important;
   font-family: "Cascadia Code",Consolas,monospace;
-  font-size: 9px!important;
+  font-size: 12px!important;
   font-style: normal!important;
 }
 
@@ -1297,7 +1297,7 @@ button[aria-busy="true"] {
 
 .execution-mode-badge small {
   color: inherit;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .execution-mode-badge.standard {

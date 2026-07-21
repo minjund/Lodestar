@@ -33,7 +33,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
   } = context;
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
   const statusLabel = (status) => ({
-    starting: t("ui.preparing"), running: t("ui.working"), waiting: t("app.nav.needs_review"), idle: t("ui.idle"),
+    starting: t("ui.preparing"), running: t("ui.working"), waiting: t("ui.waiting_for_review"), idle: t("ui.idle"),
     completed: t("ui.completed"), failed: t("ui.problem"), cancelled: t("ui.stopped"),
   })[status] || STATUS[status] || status;
 

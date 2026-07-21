@@ -93,22 +93,23 @@
   border-radius: 10px;
   background: #101a26;
 }
-.operations-review-total strong { color: #f4f8fa; font-size: 21px; line-height: 1; }
+.operations-review-total strong { color: #f4f8fa; font-size: 21px; font-variant-numeric: tabular-nums; line-height: 1; }
 .operations-review-total span { color: #a7b6c2; font-size: 12px; white-space: nowrap; }
 .attention-inbox-head strong { color: var(--text); font-size: 36px; }
 
 .operations-metrics {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border-bottom: 1px solid var(--line-soft);
 }
 
 .operations-metrics > * {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
+  flex-direction: column;
   justify-content: space-between;
-  gap: 12px;
-  min-height: 54px;
+  gap: 6px;
+  min-height: 70px;
   padding: 10px 16px;
   border: 0;
   border-right: 1px solid var(--line-soft);
@@ -121,12 +122,11 @@
 .operations-metrics > *:last-child { border-right: 0; }
 .operations-metrics button { cursor: pointer; }
 .operations-metrics button:hover { background: rgba(89, 216, 255, .055); }
-.operations-metrics b { color: var(--text); font-size: 21px; line-height: 1; }
+.operations-metrics b { color: var(--text); font-size: 21px; font-variant-numeric: tabular-nums; line-height: 1; }
 .operations-metrics > *:nth-child(1) b { color: #ff8792; }
 .operations-metrics > *:nth-child(2) b { color: #efc96f; }
 .operations-metrics > *:nth-child(3) b { color: #8edff4; }
-.operations-metrics > *:nth-child(4) b { color: #b8a8de; }
-.operations-metrics > *:nth-child(5) b { color: #83ddb1; }
+.operations-metrics > *:nth-child(4) b { color: #83ddb1; }
 .operations-priority { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 10px; }
 .operations-priority button { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 11px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: 10px; color: var(--text); background: #0c131d; text-align: left; cursor: pointer; }
 .operations-priority button:hover { border-color: #35516a; }
@@ -149,11 +149,16 @@
 .operations-more button i { font-style: normal; }
 .operations-clear { margin: 0; padding: 13px 18px; color: #8edab7; font-size: 12px; }
 
-.attention-inbox-summary { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 20px; border-bottom: 1px solid var(--line-soft); }
+.attention-inbox-summary { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; padding: 12px 20px; border-bottom: 1px solid var(--line-soft); }
+.management-filter-all,
+.management-filter-group { display: flex; align-items: center; gap: 6px; }
+.management-filter-all { align-self: flex-end; }
+.management-filter-group { position: relative; flex-wrap: wrap; padding: 21px 7px 7px; border: 1px solid rgba(125, 151, 170, .16); border-radius: 13px; background: rgba(12, 20, 30, .44); }
+.management-filter-group > small { position: absolute; top: 5px; left: 11px; color: #8394a2; font-size: 12px; font-weight: 750; letter-spacing: .04em; }
 .attention-inbox-summary button { min-height: 44px; display: inline-flex; gap: 7px; align-items: center; padding: 7px 12px; border: 1px solid var(--line-soft); border-radius: 999px; color: var(--muted); background: #0c141e; font-size: 12px; cursor: pointer; }
 .attention-inbox-summary button:hover { border-color: #3c596b; color: #e2ebf0; }
 .attention-inbox-summary button[aria-pressed="true"] { border-color: #4cabc3; color: #e8f8fb; background: #122935; box-shadow: inset 0 0 0 1px rgba(89,216,255,.12); }
-.attention-inbox-summary button b { color: currentColor; }
+.attention-inbox-summary button b { color: currentColor; font-variant-numeric: tabular-nums; }
 .attention-inbox-summary i { width: 6px; height: 6px; border-radius: 50%; background: #e9b949; }
 .attention-inbox-summary [data-management-inbox-filter="critical"] i { background: #ff6b76; }
 .attention-inbox-summary [data-management-inbox-filter="warning"] i { background: #e9b949; }
@@ -165,7 +170,7 @@
 .attention-card > header { display: grid; grid-template-columns: 38px 1fr auto; gap: 12px; align-items: center; }
 .attention-card > header h3 { margin: 3px 0 0; font-size: 17px; }
 .attention-card > header small { color: var(--management-provider, var(--cyan)); }
-.confidence { padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; font-style: normal; }
+.confidence { padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; font-style: normal; white-space: nowrap; }
 .confidence.high { color: #82ddb0; border-color: rgba(76, 227, 154, .3); }
 .attention-reason { display: grid; grid-template-columns: 110px 1fr auto; gap: 12px; align-items: start; padding: 12px 14px; border-radius: 11px; background: rgba(233, 185, 73, .07); }
 .attention-reason span { color: #e9b949; font-size: 12px; font-weight: 800; }
@@ -207,7 +212,7 @@
 .management-evidence > header b,
 .management-controls > header b { margin-left: auto; color: #cbd6e3; font-size: 12px; }
 .management-progress > header strong,
-.management-health > header strong { min-width: 40px; color: var(--green); text-align: right; }
+.management-health > header strong { min-width: 40px; color: var(--green); font-variant-numeric: tabular-nums; text-align: right; }
 .management-progress-track { height: 5px; margin: 12px 13px 0; border-radius: 999px; background: #182333; overflow: hidden; }
 .management-progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--cyan), var(--green)); }
 .management-progress > p { display: flex; justify-content: space-between; gap: 12px; margin: 0; padding: 10px 13px 12px; }
@@ -333,7 +338,7 @@
 }
 
 @media (max-width: 980px) {
-  .operations-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .operations-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .operations-metrics > * { min-width: 0; padding-inline: 9px; }
   .operations-priority { grid-template-columns: 1fr; }
   .attention-card > header { grid-template-columns: 38px 1fr; }
@@ -347,9 +352,13 @@
   .operations-overview > header,
   .attention-inbox-head { align-items: flex-start; flex-direction: column; padding: 18px; }
   .operations-review-total { align-self: stretch; justify-content: space-between; }
-  .operations-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .operations-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .operations-metrics > * { min-height: 62px; padding: 12px; }
   .attention-card-list { padding: 10px; }
+  .attention-inbox-summary { align-items: stretch; padding: 10px; }
+  .management-filter-all,
+  .management-filter-group { width: 100%; }
+  .management-filter-all button { width: 100%; justify-content: center; }
   .attention-card { padding: 13px; }
   .management-progress > p { align-items: flex-start; flex-direction: column; }
 }

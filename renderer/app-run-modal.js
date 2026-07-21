@@ -83,7 +83,7 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
         const active = path === selected;
         return `<button type="button" data-run-workspace="${esc(path)}" class="${active ? "selected" : ""}" title="${esc(path)}" aria-pressed="${active ? "true" : "false"}">
         <span aria-hidden="true">⌘</span>
-        ${esc(workspace.name || path.split(/[\\/]/).filter(Boolean).pop() || window.LoadToAgentI18n.t("ui.workspaces"))}
+        ${esc(workspace.name || path.split(/[\\/]/).filter(Boolean).pop() || window.LoadToAgentI18n.t("ui.work_folder"))}
         </button>`;
       })
       .join("");

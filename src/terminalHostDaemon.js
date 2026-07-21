@@ -23,6 +23,7 @@ function parseConfig(argv = process.argv.slice(2)) {
 async function run(config = parseConfig()) {
   process.title = 'LoadToAgent Terminal Host';
   const manager = new TerminalManager({ storeFile: config.storeFile });
+  manager.recoverPersistedSessions();
   let stopping = false;
   let host = null;
   let bridge = null;

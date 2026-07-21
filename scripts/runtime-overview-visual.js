@@ -67,7 +67,7 @@ app.whenReady().then(async () => {
         activePhases: section.querySelectorAll('[data-loop-phase].active').length,
         loopTabs: section.querySelectorAll('[data-loop-select]').length,
         inferredLabel: section.querySelector('.runtime-loop-cycle')?.getAttribute('aria-label') || '',
-        scheduledIteration: section.querySelector('.runtime-loop-footer')?.textContent.includes('예약 실행') || false,
+        scheduledIteration: section.querySelector('.runtime-loop-footer')?.textContent.includes('예약에서 시작됨') || false,
         duplicateTitle: section.querySelector('h2')?.textContent.trim() === document.querySelector('#pageTitle')?.textContent.trim(),
         modalHidden: document.querySelector('#runModal').classList.contains('hidden'),
         noSectionOverflow: section.scrollWidth <= section.clientWidth + 2,

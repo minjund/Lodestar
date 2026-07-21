@@ -115,7 +115,7 @@ const endedSession = {
 
 const waitingSession = {
   ...endedSession, id: 'fixture-waiting', externalId: 'fixture-waiting-external', provider: 'gemini',
-  title: '사용자 확인 대기 검증', status: 'waiting', statusDetail: '사용자 선택 대기',
+  title: '사용자 승인 대기 검증', status: 'waiting', statusDetail: '권한 승인 대기',
 };
 
 const failedSession = {
@@ -294,6 +294,7 @@ const attentionListeners = new Set();
 const terminalDataListeners = new Set();
 const terminalStateListeners = new Set();
 const terminalErrorListeners = new Set();
+const terminalConnectionListeners = new Set();
 const updateStateListeners = new Set();
 
 function record(name, args = []) {
@@ -423,6 +424,7 @@ const api = {
   onTerminalData: callback => { terminalDataListeners.add(callback); return () => terminalDataListeners.delete(callback); },
   onTerminalState: callback => { terminalStateListeners.add(callback); return () => terminalStateListeners.delete(callback); },
   onTerminalError: callback => { terminalErrorListeners.add(callback); return () => terminalErrorListeners.delete(callback); },
+  onTerminalConnection: callback => { terminalConnectionListeners.add(callback); return () => terminalConnectionListeners.delete(callback); },
   onSnapshot: callback => { snapshotListeners.add(callback); return () => snapshotListeners.delete(callback); },
   onAttentionRequested: callback => { attentionListeners.add(callback); return () => attentionListeners.delete(callback); },
   onUpdateState: callback => { updateStateListeners.add(callback); return () => updateStateListeners.delete(callback); },
@@ -446,6 +448,12 @@ const testApi = {
   triggerAttention: sessionId => { attentionListeners.forEach(listener => listener({ sessionId })); return attentionListeners.size; },
   emitSnapshot: () => { snapshotListeners.forEach(listener => listener(clone(snapshot))); return snapshotListeners.size; },
   emitTerminalData: (id, data) => { terminalDataListeners.forEach(listener => listener({ id, data })); return terminalDataListeners.size; },
+  emitTerminalReconnect: id => {
+    terminals = terminals.map(session => session.id === id ? { ...session, recoveredAfterHostRestart: true } : session);
+    const payload = { change: 'reconnected', session: null, sessions: clone(terminals) };
+    terminalStateListeners.forEach(listener => listener(payload));
+    return terminalStateListeners.size;
+  },
 };
 
 contextBridge.exposeInMainWorld('loadtoagent', api);

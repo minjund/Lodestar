@@ -71,7 +71,7 @@ async function auditVisibleText(win, view) {
       return parseColor(getComputedStyle(document.documentElement).backgroundColor) || { r: 6, g: 10, b: 16, a: 1 };
     };
     const candidates = [...document.querySelectorAll('body *')].flatMap(element => {
-      if (element.closest('[aria-hidden="true"], .sr-only, .visually-hidden, .xterm-helper-textarea, script, style')) return [];
+      if (element.closest('[aria-hidden="true"], details:not([open]), .sr-only, .visually-hidden, .xterm-helper-textarea, script, style')) return [];
       const text = [...element.childNodes]
         .filter(node => node.nodeType === Node.TEXT_NODE)
         .map(node => node.textContent.replace(/\\s+/g, ' ').trim())
@@ -80,7 +80,7 @@ async function auditVisibleText(win, view) {
       if (text.length < 2) return [];
       const rect = element.getBoundingClientRect();
       const style = getComputedStyle(element);
-      if (rect.width < 2 || rect.height < 2 || rect.bottom < 0 || rect.top > innerHeight || rect.right < 0 || rect.left > innerWidth || style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) < .55) return [];
+      if (rect.width < 2 || rect.height < 2 || style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) < .55) return [];
       const fontSize = Number.parseFloat(style.fontSize);
       const weight = Number.parseInt(style.fontWeight, 10) || 400;
       const foreground = parseColor(style.color);
@@ -89,15 +89,41 @@ async function auditVisibleText(win, view) {
       const ratio = contrast(foreground, background);
       const large = fontSize >= 24 || (fontSize >= 18.66 && weight >= 700);
       const selector = [element.id && '#' + element.id, ...[...element.classList].slice(0, 2).map(name => '.' + name)].filter(Boolean).join('') || element.tagName.toLowerCase();
-      return [{ selector, text: text.slice(0, 80), fontSize, ratio: Number(ratio.toFixed(2)), required: large ? 3 : 4.5 }];
+      const parent = element.parentElement;
+      const parentSelector = parent ? [parent.id && '#' + parent.id, ...[...parent.classList].slice(0, 3).map(name => '.' + name)].filter(Boolean).join('') || parent.tagName.toLowerCase() : '';
+      return [{ selector, parent: parentSelector, text: text.slice(0, 80), fontSize, color: style.color, background: style.backgroundColor, opacity: style.opacity, ratio: Number(ratio.toFixed(2)), required: large ? 3 : 4.5 }];
     });
+    const hitTargets = [...document.querySelectorAll('button, select, textarea, summary, a[href], [role="button"], [tabindex]:not([tabindex="-1"]), input:not([type="checkbox"]):not([type="radio"])')]
+      .flatMap(element => {
+        if (element.closest('[inert], [aria-hidden="true"], details:not([open]), .hidden, .sr-only, .visually-hidden, .xterm-helper-textarea')) return [];
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        if (rect.width < 2 || rect.height < 2 || style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) < .2) return [];
+        const selector = [element.id && '#' + element.id, ...[...element.classList].slice(0, 2).map(name => '.' + name)].filter(Boolean).join('') || element.tagName.toLowerCase();
+        return [{ element, selector, text: String(element.innerText || element.value || element.getAttribute('aria-label') || '').trim().slice(0, 60), left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height }];
+      });
+    const overlaps = [];
+    for (let left = 0; left < hitTargets.length; left += 1) {
+      for (let right = left + 1; right < hitTargets.length; right += 1) {
+        const a = hitTargets[left];
+        const b = hitTargets[right];
+        if (a.element.contains(b.element) || b.element.contains(a.element)) continue;
+        const width = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+        const height = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+        if (width > .75 && height > .75) overlaps.push({ first: a.selector, second: b.selector, width: Number(width.toFixed(1)), height: Number(height.toFixed(1)) });
+        if (overlaps.length >= 20) break;
+      }
+      if (overlaps.length >= 20) break;
+    }
     return {
       view: ${JSON.stringify(view)},
       textNodes: candidates.length,
-      tooSmall: candidates.filter(item => item.fontSize < 11.5).slice(0, 30),
+      tooSmall: candidates.filter(item => item.fontSize < 11.9).slice(0, 30),
       lowContrast: candidates.filter(item => item.ratio + .02 < item.required).slice(0, 30),
       minimumFontSize: candidates.length ? Math.min(...candidates.map(item => item.fontSize)) : 0,
       minimumContrast: candidates.length ? Math.min(...candidates.map(item => item.ratio)) : 0,
+      tooSmallTargets: hitTargets.filter(item => item.width < 43.5 || item.height < 43.5).slice(0, 30).map(({ element, ...item }) => item),
+      overlaps,
     };
   })()`);
 }
@@ -147,7 +173,7 @@ app.whenReady().then(async () => {
       if (stage && target) stage.scrollTop = Math.max(0, target.offsetTop - 18);
       return true;
     })()`);
-    await waitFor(win, `!document.querySelector('#operationsOverview')?.classList.contains('hidden') && document.querySelector('#operationsOverview')?.innerText.includes('확인이 필요한 신호')`);
+    await waitFor(win, `!document.querySelector('#operationsOverview')?.classList.contains('hidden') && document.querySelector('#operationsOverview')?.innerText.includes('최근 24시간 응답과 실행 위험')`);
     // Chromium can return a stale first frame for a newly shown BrowserWindow.
     // Prime the compositor once so the checked artifact always reflects the DOM.
     await win.webContents.capturePage();
@@ -236,7 +262,43 @@ app.whenReady().then(async () => {
       viewReports.push(report);
       await capture(win, outputDir, `loadtoagent-readability-${view}.png`);
     }
-    const failures = viewReports.filter(report => report.tooSmall.length || report.lowContrast.length);
+    await win.webContents.executeJavaScript(`(() => { document.querySelector('#newRunBtn')?.click(); return true; })()`);
+    await waitFor(win, `!document.querySelector('#runModal')?.classList.contains('hidden') && !document.querySelector('#runModal')?.inert`);
+    await wait(400);
+    await win.webContents.executeJavaScript(`(() => { for (const animation of document.getAnimations()) { try { animation.finish(); } catch {} } return true; })()`);
+    viewReports.push(await auditVisibleText(win, 'run-modal'));
+    await win.webContents.executeJavaScript(`(() => { document.querySelector('#cancelRunBtn')?.click(); return true; })()`);
+
+    await win.webContents.executeJavaScript(`(() => {
+      const app = window.LoadToAgentApp;
+      app.state.view = 'all';
+      app.syncViewChrome();
+      app.render('view');
+      document.querySelector('#sessionGrid [data-session-id]')?.click();
+      return true;
+    })()`);
+    await waitFor(win, `document.querySelector('#detailDrawer')?.classList.contains('open') && !document.querySelector('#detailDrawer')?.inert && document.querySelector('#drawerContent')?.innerText.length > 20`);
+    await wait(400);
+    await win.webContents.executeJavaScript(`(() => { for (const animation of document.getAnimations()) { try { animation.finish(); } catch {} } return true; })()`);
+    viewReports.push(await auditVisibleText(win, 'detail-drawer'));
+    await win.webContents.executeJavaScript(`(() => { document.querySelector('#closeDrawerBtn')?.click(); return true; })()`);
+
+    await win.webContents.executeJavaScript(`(async () => {
+      const app = window.LoadToAgentApp;
+      app.state.view = 'terminal';
+      app.syncViewChrome();
+      app.render('view');
+      await window.LoadToAgentTerminal.activate(app.state.snapshot, app.state.workspaces, 'general');
+      document.querySelector('#newTmuxSessionBtn')?.click();
+      return true;
+    })()`);
+    await waitFor(win, `!document.querySelector('#tmuxCreateModal')?.classList.contains('hidden') && !document.querySelector('#tmuxCreateModal')?.inert`);
+    await wait(400);
+    await win.webContents.executeJavaScript(`(() => { for (const animation of document.getAnimations()) { try { animation.finish(); } catch {} } return true; })()`);
+    viewReports.push(await auditVisibleText(win, 'tmux-create-modal'));
+    await win.webContents.executeJavaScript(`(() => { document.querySelector('#cancelTmuxCreateBtn')?.click(); return true; })()`);
+
+    const failures = viewReports.filter(report => report.tooSmall.length || report.lowContrast.length || report.tooSmallTargets.length || report.overlaps.length);
     if (failures.length) throw new Error(`전 화면 텍스트 가독성 기준 미달: ${JSON.stringify(failures)}`);
 
     process.stdout.write(`readability visual check passed ${JSON.stringify(viewReports)}\n`);

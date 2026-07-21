@@ -141,15 +141,15 @@ const BEGINNER_GUIDE_LABELS = [
   '이 네 가지만 익히면 충분해요',
   'AI에게 일 맡기기',
   '진행 상황 확인',
-  '확인·주의 항목 찾기',
+  '내 응답과 상태 신호 확인',
   '작업 자세히 보기',
   '>홈<',
   '>진행 중<',
-  '>확인·주의<',
+  '>확인할 일<',
   '>고급 도구<',
-  '>대화·명령창<',
-  '>예약·반복<',
-  '>여러 명령창<',
+  '>AI 세션 터미널<',
+  '>예약·실행 단계<',
+  '>tmux 터미널 관리<',
   '내 터미널 세션',
   'AI 대화 기록',
   '이 대화가 오른쪽 터미널과 연결되어 있습니다',
@@ -158,7 +158,7 @@ const BEGINNER_GUIDE_LABELS = [
   'tmux 안의 명령창만',
   'AI에게 새 일 맡기기',
   'AI들이 맡은 일',
-  '여러 명령창 만들기',
+  'tmux 세션 만들기',
   '현재 설치 버전',
   '업데이트 확인',
 ];
@@ -168,6 +168,83 @@ const DISALLOWED_UI_JARGON = [
   'SESSION STREAM',
   'AGENT MIND MAP',
   'NEW TMUX SESSION',
+];
+
+const SEMANTIC_UI_COPY = [
+  '상태 정보 불확실',
+  '감지된 상태 신호',
+  '상태·관계 직접 확인',
+  '완료 신호 수신',
+  '완료 신호 미확인',
+  '최근 실행 이벤트',
+  '로그에서 찾은 산출물 후보',
+  '로그에 기록된 테스트 실행',
+  '승인 메시지 보내기',
+  '거절 메시지 보내기',
+  '다른 AI로 새 작업 만들기',
+  'CLI 설치 감지',
+  '내 응답 필요',
+  '위험 신호 · 긴급',
+  '2분 이상 새 활동 없음',
+  'AI 기억 한도 75% 이상 사용',
+  '부모 작업 연결 정보 없음',
+  '현재 추정 단계',
+  '결과 확인',
+  '반복 실행 횟수',
+  'AI 세션 터미널',
+  'tmux 터미널 관리',
+  '프로젝트 폴더 필터',
+  '도움 AI',
+  '설정상 동시 도움 AI 한도',
+];
+
+const AMBIGUOUS_KO_MESSAGE_VALUES = [
+  '근거 부족',
+  '실행 건강 상태',
+  '높은 신뢰도',
+  '보통 신뢰도',
+  '낮은 신뢰도',
+  '검증 필요',
+  '완료 이벤트 확인',
+  '구조화된 진행 상황',
+  '관측된 산출물',
+  '테스트·검증 기록',
+  '승인하고 계속',
+  '거절하고 중단',
+  '다른 AI로 넘기기',
+  '사용 가능한 AI',
+  '확인·주의',
+  '예약·반복',
+  '대화·명령창',
+  '여러 명령창',
+  '동시에 유지 가능',
+  '최근 활동이 지연됨',
+  '작업 정체 감지',
+  '서브 AI',
+  '실행 시작 관측',
+  '관측된 반복 정보',
+  '근거와 상세 보기',
+  '여러 창 작업 만들기',
+  '조치 필요',
+  '에이전트 루프 실행 중',
+  '에이전트 메시지',
+  '작업공간 미지정',
+  '에이전트 탐색 경로',
+  '에이전트 운영 상태',
+];
+
+const MANAGEMENT_SEMANTIC_CONTRACTS = [
+  'function matchesManagementFilter',
+  'RESPONSE_ATTENTION_KINDS.has(session.attention.kind)',
+  'RECENT_SESSION_WINDOW_MS = 24 * 60 * 60 * 1000',
+  'function managementBucket(session, now = Date.now())',
+  'needsManagementReview',
+  'management-filter-group response',
+  'management-filter-group risk',
+  'signals.length',
+  'loggedRatio',
+  'attention.kind === "approval"',
+  't("management.detected")',
 ];
 
 const MONITOR_WORKER_CONTRACTS = [
@@ -584,6 +661,10 @@ const TERMINAL_RUNTIME_CONTRACTS = [
   'function queueHistoryRefresh',
   'selectTmuxById',
   'window.LoadToAgentTerminal',
+  "t('terminal.detach_tmux_input')",
+  "t('terminal.recovered_after_host_restart')",
+  'entry.pendingResize',
+  'resizeObserver.observe',
 ];
 
 const IPC_MODULE_FILES = [
@@ -603,6 +684,9 @@ const MAIN_PROCESS_CONTRACTS = [
   'Quit app · Keep terminal sessions',
   '退出应用 · 保留终端会话',
   'new TerminalHostClient',
+  "terminalManager.on('reconnect'",
+  "terminalManager.on('reconnect-error'",
+  "sendTerminal('terminals:connection'",
   'terminalManager.dispose({ shutdownIfIdle: true })',
   "session.status === 'running' || session.status === 'starting'",
   'event.preventDefault()',
@@ -654,6 +738,9 @@ const PRELOAD_IPC_CONTRACTS = [
   'installDownloadedUpdate',
   'onUpdateState',
   'onAttentionRequested',
+  'onTerminalConnection',
+  "terminalWrite: (id, data) => ipcRenderer.invoke('terminals:write'",
+  "terminalResize: (id, cols, rows) => ipcRenderer.invoke('terminals:resize'",
   'pauseAgent',
   'resumeAgentRun',
   'retryAgent',
@@ -736,6 +823,10 @@ function registerUiContractTests(context) {
       DISALLOWED_UI_JARGON,
       jargon => `${jargon} 전문 용어가 기본 화면에 남아 있습니다.`,
     );
+    assert.ok(
+      html.includes('for="runCwd" data-i18n="ui.work_folder"'),
+      '새 작업 창의 작업 폴더 라벨은 폴더 필터와 분리된 번역 키를 사용해야 합니다.',
+    );
     assertIncludesAll(
       monitorWorker,
       MONITOR_WORKER_CONTRACTS,
@@ -768,6 +859,12 @@ function registerUiContractTests(context) {
     );
     assertIncludesAll(app, APP_READABILITY_CONTRACTS);
     assertIncludesAll(app, APP_AGENT_CONTRACTS);
+    assertIncludesAll(
+      app,
+      MANAGEMENT_SEMANTIC_CONTRACTS,
+      contract => `${contract} 상태·행동 의미 일치 계약이 없습니다.`,
+    );
+    assert.equal(app.includes('Number(health.score'), false, '검증되지 않은 건강 점수를 UI에 표시하면 안 됩니다.');
     assert.equal(app.includes('agent-focus-layout'), false);
     assert.equal(app.includes("state.view === 'subagents'"), false);
     const styles = STYLE_FILES
@@ -785,6 +882,18 @@ function registerUiContractTests(context) {
       I18N_MESSAGE_CONTRACTS,
       contract => `${contract} 명시 메시지 계약이 없습니다.`,
     );
+    assertIncludesAll(
+      i18nMessages,
+      SEMANTIC_UI_COPY,
+      copy => `${copy} 의미 중심 UI 문구가 없습니다.`,
+    );
+    for (const copy of AMBIGUOUS_KO_MESSAGE_VALUES) {
+      assert.equal(
+        i18nMessages.includes(`"ko":"${copy}"`),
+        false,
+        `${copy} 모호한 한국어 UI 문구가 다시 추가되었습니다.`,
+      );
+    }
     assertExcludesAll(
       i18n,
       LEGACY_I18N_INFERENCE_CONTRACTS,
@@ -889,6 +998,8 @@ function registerUiContractTests(context) {
     for (const channel of TRUSTED_IPC_CHANNELS) {
       assert.ok(ipcSource.includes(`handleTrusted('${channel}'`), `${channel} IPC에 신뢰 발신자 검증이 없습니다.`);
     }
+    assert.ok(ipcSource.includes("ipcMain.handle('terminals:write'"), '터미널 입력 IPC 응답 계약이 없습니다.');
+    assert.ok(ipcSource.includes("ipcMain.handle('terminals:resize'"), '터미널 크기 변경 IPC 응답 계약이 없습니다.');
     const preload = fs.readFileSync(path.join(root, 'preload.js'), 'utf8');
     assertIncludesAll(
       preload,

@@ -25,13 +25,13 @@
 .drawer-loading b {
   margin-top: 13px;
   color: #b9c4d1;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .drawer-loading small {
   margin-top: 5px;
   color: #596678;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .drawer-backdrop {
@@ -101,7 +101,7 @@
   max-width: 420px;
   margin-top: 8px;
   color: #78879a;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .drawer-error button {
@@ -144,7 +144,7 @@
   background: #121924;
   box-shadow: 0 12px 36px rgba(0,0,0,.35);
   color: #bdc7d4;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .drawer-backdrop:not(.hidden) {
@@ -252,7 +252,7 @@
   font-weight: 700;
   letter-spacing: .12em;
   text-transform: uppercase;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .drawer-title h2 {

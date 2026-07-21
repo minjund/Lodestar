@@ -222,7 +222,7 @@
 
 .terminal-history-message header time {
   color: #536678;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .terminal-history-empty {
@@ -237,13 +237,13 @@
 
 .terminal-history-empty b {
   color: #a9b8c4;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-history-empty span {
   margin-top: 6px;
   color: #607183;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .terminal-screen .xterm-viewport {
@@ -291,7 +291,7 @@
   color: #aebbc8;
   font-weight: 650;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-controlbar button {
@@ -303,7 +303,7 @@
   color: #aebbc8;
   font-weight: 650;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-resource-head button {
@@ -316,7 +316,7 @@
   color: #aebbc8;
   font-weight: 650;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-resource-head>div b {
@@ -329,7 +329,7 @@
   display: block;
   margin-top: 3px;
   color: #667689;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-tab span {
@@ -345,13 +345,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: #667688;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-command-form label {
   color: #70d5b1;
   font-weight: 700;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-history-panel.collapsed .terminal-history-head {
@@ -396,7 +396,7 @@
   align-items: center;
   gap: 5px;
   color: #5fdcaf;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .08em;
 }
@@ -478,7 +478,7 @@
   border-radius: 10px;
   background: #14232e;
   color: #75d9ee;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .terminal-session-item.active .terminal-session-icon {
@@ -503,7 +503,7 @@
   white-space: nowrap;
   margin-top: 4px;
   color: #7e8ea0;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .terminal-session-item em {
@@ -514,7 +514,7 @@
   margin-top: 4px;
   color: #506274;
   font-family: "Cascadia Code",Consolas,monospace;
-  font-size: 9px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -528,7 +528,7 @@
 
 .terminal-resource-empty {
   color: #58687a;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.5;
   margin: 4px;
   padding: 22px 12px;
@@ -567,14 +567,14 @@
 .terminal-resource-tip b {
   display: block;
   color: #afc7c3;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .terminal-resource-tip small {
   display: block;
   margin-top: 4px;
   color: #647b7a;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -617,7 +617,7 @@
   background: #12272b;
   color: #70dfbd;
   font-family: "Cascadia Code",Consolas,monospace;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -643,7 +643,7 @@
   max-width: 640px;
   margin-top: 5px;
   color: #708294;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .terminal-workspace-actions {
@@ -665,7 +665,7 @@
   border-radius: 999px;
   background: #101922;
   color: #7e8c9b;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -722,7 +722,7 @@
   padding: 0 9px;
   border-color: #2a3b48;
   background: #101922;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .terminal-key-actions kbd {
@@ -732,7 +732,7 @@
   background: #0a1118;
   color: #8292a2;
   font-family: inherit;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -796,7 +796,7 @@
   text-transform: uppercase;
   letter-spacing: .08em;
   color: #62dcba;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .terminal-history-head b {
@@ -816,7 +816,7 @@
   white-space: nowrap;
   margin-top: 3px;
   color: #657789;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .terminal-history-list {
@@ -855,13 +855,13 @@
 
 .terminal-subagent-progress>header b {
   color: #92ecd0;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-subagent-progress>header span {
   margin-top: 3px;
   color: #718b89;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -869,7 +869,7 @@
   flex: 0 0 auto;
   max-width: 48%;
   color: #7e9d98;
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.4;
   text-align: right;
 }
@@ -916,14 +916,14 @@
 
 .terminal-subagent-card>header span {
   color: #d8e8e4;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 750;
 }
 
 .terminal-subagent-card>header small {
   margin-top: 2px;
   color: #687d84;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .terminal-subagent-card>header>b {
@@ -932,7 +932,7 @@
   border: 1px solid #3b4c52;
   border-radius: 999px;
   color: #94a3aa;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -955,7 +955,7 @@
   gap: 7px;
   margin-top: 7px;
   color: #a8b9bd;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -1004,19 +1004,19 @@
 
 .terminal-subagent-card>ol li b {
   color: #90aba7;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .terminal-subagent-card>ol li span {
   margin-top: 2px;
   color: #829399;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
 .terminal-subagent-card>ol li time {
   color: #536a70;
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .terminal-history-empty.with-subagents {
@@ -1035,7 +1035,7 @@
 
 .terminal-history-message header b {
   color: #75dfba;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .terminal-history-message p {
@@ -1044,7 +1044,7 @@
   white-space: pre-wrap;
   overflow: auto;
   max-height: 180px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.58;
 }
 
@@ -1056,7 +1056,7 @@
   min-height: 40px;
   padding: 0 13px;
   color: #79cdb4;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.3;
 }
 
@@ -1093,7 +1093,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: #d6e1e8;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .terminal-console-head small {
@@ -1103,7 +1103,7 @@
   white-space: nowrap;
   margin-top: 3px;
   color: #607485;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .terminal-console-pulse {
@@ -1121,7 +1121,7 @@
   border-radius: 7px;
   background: #121c25;
   color: #718394;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -1185,7 +1185,7 @@
 
 .terminal-empty p {
   margin: 8px 20px 0;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.55;
   max-width: 420px;
   color: #718294;
@@ -1211,12 +1211,12 @@
 
 .terminal-command-form .terminal-command-label label {
   color: #8adfc3;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .terminal-command-label>span {
   color: #576a7b;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .terminal-command-composer {
@@ -1241,7 +1241,7 @@
   justify-self: end;
   padding: 0 5px 2px;
   color: #607487;
-  font-size: 9px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1266,7 +1266,7 @@
 
 .terminal-command-form button {
   border: 1px solid #36775f;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   height: 38px;
@@ -1297,7 +1297,7 @@
   padding: 0 13px;
   border-top-color: #14222a;
   background: #081017;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .terminal-notice-dot {
@@ -1322,7 +1322,7 @@
   margin-top: 6px;
   overflow: visible;
   color: #b8c5cf;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -1465,8 +1465,8 @@ body[data-current-view="terminal"] .topbar h1 {
 }
 
 .terminal-resource-head>div b { color: #eef5f7; font-size: 14px; }
-.terminal-resource-head>div span { margin-top: 5px; color: #93a6b2; font-size: 11px; }
-.terminal-resource-live { font-size: 10px; }
+.terminal-resource-head>div span { margin-top: 5px; color: #93a6b2; font-size: 12px; }
+.terminal-resource-live { font-size: 12px; }
 .terminal-session-list { gap: 9px; padding: 12px; }
 .terminal-session-row { grid-template-columns: minmax(0,1fr) 28px; gap: 5px; }
 
@@ -1486,10 +1486,10 @@ body[data-current-view="terminal"] .topbar h1 {
 .terminal-session-item[data-status="failed"] { border-color: #58323c; border-left-color: #ef7d8e; }
 .terminal-session-item[data-status="completed"] { border-left-color: #6cbdd1; }
 .terminal-session-item.active { border-color: #438d77; border-left-color: #62e1b7; box-shadow: inset 2px 0 #62e1b7,0 9px 24px rgba(0,0,0,.2); }
-.terminal-session-icon { width: 42px; height: 42px; font-size: 10px; }
+.terminal-session-icon { width: 42px; height: 42px; font-size: 12px; }
 .terminal-session-item b { color: #edf4f6; font-size: 13px; }
-.terminal-session-item small { color: #9aaab5; font-size: 11px; }
-.terminal-session-item em { color: #718391; font-size: 10px; }
+.terminal-session-item small { color: #9aaab5; font-size: 12px; }
+.terminal-session-item em { color: #718391; font-size: 12px; }
 
 .terminal-session-status {
   display: inline-flex;
@@ -1502,7 +1502,7 @@ body[data-current-view="terminal"] .topbar h1 {
   border-radius: 999px;
   color: #a7b6bf;
   background: #111c24;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 750;
   white-space: nowrap;
 }
@@ -1518,33 +1518,33 @@ body[data-current-view="terminal"] .topbar h1 {
 .terminal-session-status[data-status="completed"] i { background: #72c9dc; }
 
 .terminal-controlbar { min-height: 72px; padding: 11px 16px; }
-.terminal-target-icon { width: 44px; height: 44px; font-size: 11px; }
+.terminal-target-icon { width: 44px; height: 44px; font-size: 12px; }
 .terminal-target-meta b { color: #eef5f7; font-size: 15px; }
-.terminal-target-meta span { margin-top: 6px; color: #8fa1af; font-size: 11px; }
-.terminal-connection-state { min-height: 32px; font-size: 11px; }
+.terminal-target-meta span { margin-top: 6px; color: #8fa1af; font-size: 12px; }
+.terminal-connection-state { min-height: 32px; font-size: 12px; }
 .terminal-connection-state[data-status="attention"] { border-color: #6f5133; color: #f2b66e; background: #291f14; }
 .terminal-connection-state[data-status="attention"] i { background: #ffbb62; box-shadow: 0 0 9px rgba(255,187,98,.52); }
 .terminal-connection-state[data-status="completed"] { border-color: #355f69; color: #8bd3e2; background: #10242a; }
 .terminal-connection-state[data-status="completed"] i { background: #70cadd; }
-.terminal-controlbar .terminal-key-actions button { height: 34px; font-size: 11px; }
+.terminal-controlbar .terminal-key-actions button { height: 34px; font-size: 12px; }
 
 .terminal-stage { grid-template-columns: minmax(330px,40%) minmax(0,1fr); }
 .terminal-history-head { min-height: 76px; padding: 12px 13px 12px 16px; }
-.terminal-history-head span { font-size: 10px; }
+.terminal-history-head span { font-size: 12px; }
 .terminal-history-head b { font-size: 14px; }
-.terminal-history-head small { color: #8294a2; font-size: 11px; }
+.terminal-history-head small { color: #8294a2; font-size: 12px; }
 .terminal-history-list { padding: 14px; }
 .terminal-history-message { padding: 12px 13px; border-color: #263944; }
-.terminal-history-message header b { font-size: 11px; }
+.terminal-history-message header b { font-size: 12px; }
 .terminal-history-message p,.terminal-history-copy { color: #cad5dc; font-size: 12px; line-height: 1.66; }
-.terminal-history-panel footer { min-height: 42px; color: #8dd9c1; font-size: 10px; }
+.terminal-history-panel footer { min-height: 42px; color: #8dd9c1; font-size: 12px; }
 
 .terminal-console-head { min-height: 58px; padding: 9px 14px; border-bottom-color: #263844; background: #0b141b; }
 .terminal-console-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .terminal-console-head b { color: #edf4f6; font-size: 13px; }
-.terminal-console-head small { color: #8496a4; font-size: 10px; }
+.terminal-console-head small { color: #8496a4; font-size: 12px; }
 .terminal-console-tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
-.terminal-console-state { padding: 6px 9px; font-size: 10px; }
+.terminal-console-state { padding: 6px 9px; font-size: 12px; }
 .terminal-console-state[data-status="attention"] { color: #f2b56f; background: #2b2014; }
 .terminal-console-state[data-status="completed"] { color: #8bd4e3; background: #11262c; }
 
@@ -1553,7 +1553,7 @@ body[data-current-view="terminal"] .topbar h1 {
 .terminal-font-controls button:hover:not(:disabled),.terminal-font-controls button:focus-visible { color: #8aefd0; background: #14252a; outline: none; }
 .terminal-font-controls button:disabled { opacity: .32; cursor: default; }
 .terminal-font-controls output { color: #8fa2ae; font: 750 10px/1 var(--font-mono,"Cascadia Code",monospace); text-align: center; }
-.terminal-focus-button { display: inline-flex; min-height: 32px; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid #335248; border-radius: 8px; color: #9bdcc8; background: #10231f; font-size: 10px; font-weight: 750; cursor: pointer; }
+.terminal-focus-button { display: inline-flex; min-height: 32px; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid #335248; border-radius: 8px; color: #9bdcc8; background: #10231f; font-size: 12px; font-weight: 750; cursor: pointer; }
 .terminal-focus-button b { color: inherit; font-size: 13px; }
 .terminal-focus-button:hover,.terminal-focus-button:focus-visible,.terminal-focus-button[aria-pressed="true"] { border-color: #4c9c83; color: #96f0d1; background: #16342b; outline: none; }
 
@@ -1561,12 +1561,12 @@ body[data-current-view="terminal"] .topbar h1 {
 .terminal-screen { inset: 15px; }
 .terminal-screen .xterm { padding: 5px; }
 .terminal-command-form { gap: 8px; padding: 11px 14px 12px; }
-.terminal-command-form .terminal-command-label label { font-size: 11px; }
-.terminal-command-label>span { color: #718391; font-size: 10px; }
+.terminal-command-form .terminal-command-label label { font-size: 12px; }
+.terminal-command-label>span { color: #718391; font-size: 12px; }
 .terminal-command-composer { padding: 6px; border-color: #38505c; }
 .terminal-command-form textarea { min-height: 48px; color: #edf3f7; font-size: 13px; line-height: 1.55; }
 .terminal-command-form button { height: 40px; font-size: 12px; }
-.terminal-notice { min-height: 30px; color: #8293a0; font-size: 10px; }
+.terminal-notice { min-height: 30px; color: #8293a0; font-size: 12px; }
 
 #terminalSection.terminal-focus-mode .terminal-layout { display: grid!important; grid-template-columns: minmax(0,1fr)!important; }
 #terminalSection.terminal-focus-mode .terminal-resource-panel,

@@ -15,7 +15,7 @@
   background: color-mix(in srgb,var(--provider) 11%,#111620);
   border: 1px solid color-mix(in srgb,var(--provider) 32%,#202938);
   color: var(--provider);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 850;
   letter-spacing: -.03em;
 }
@@ -123,7 +123,7 @@
   border-radius: 5px;
   background: rgba(89,216,255,.06);
   color: #76c8df;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 750;
   letter-spacing: .02em;
 }
@@ -155,14 +155,14 @@
 .token-breakdown span {
   display: block;
   color: #566173;
-  font-size: 7px;
+  font-size: 12px;
 }
 
 .token-breakdown b {
   display: block;
   margin-top: 2px;
   color: #aeb9c6;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 570;
 }
 
@@ -184,7 +184,7 @@
   border-radius: 7px;
   background: color-mix(in srgb,var(--provider) 11%,#131822);
   color: var(--provider);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .now-strip>div {
@@ -351,7 +351,7 @@
 
 .token-hero-head span {
   color: #6d798d;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .token-hero-head b {
@@ -361,14 +361,14 @@
 .token-tile span {
   display: block;
   color: #606c7e;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .token-tile small {
   display: block;
   margin-top: 4px;
   color: #4e596a;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .token-note {
@@ -378,7 +378,7 @@
   background: #0d121a;
   color: #697588;
   line-height: 1.55;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .motion-content-in .token-tile {
@@ -491,7 +491,7 @@
   align-items: center;
   gap: 7px;
   color: #6d798c;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .card-provider-line b {
@@ -512,7 +512,7 @@
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .card-title {
@@ -535,7 +535,7 @@
   white-space: nowrap;
   overflow: hidden;
   color: #9ba8b8;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .now-strip b {
@@ -555,14 +555,14 @@
   text-overflow: ellipsis;
   margin-top: 3px;
   color: #95a3b4;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .preview-line b {
   color: #778397;
   text-transform: uppercase;
   white-space: nowrap;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .preview-line span {
@@ -570,7 +570,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: #a7b3c1;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .context-meter-head>div span {
@@ -579,7 +579,7 @@
   letter-spacing: .08em;
   text-transform: uppercase;
   color: #909eaf;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .context-meter-foot {
@@ -588,13 +588,13 @@
   gap: 10px;
   margin-top: 6px;
   color: #909eaf;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .token-row span {
   display: block;
   color: #909eaf;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .card-footer {
@@ -606,7 +606,7 @@
   border-top: 1px solid var(--line-soft);
   background: rgba(7,10,16,.42);
   color: #909eaf;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .context-meter-head>div strong {

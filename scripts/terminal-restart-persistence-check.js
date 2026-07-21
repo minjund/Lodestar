@@ -138,6 +138,8 @@ function processExists(pid) {
   const hostFile = path.join(userData, 'terminal-host.json');
   const beforeMarker = `LTA_BEFORE_RESTART_${Date.now()}`;
   const afterMarker = `LTA_AFTER_RESTART_${Date.now()}`;
+  const recoveryMarker = `LTA_AFTER_HOST_RECOVERY_${Date.now()}`;
+  const gracefulRecoveryMarker = `LTA_AFTER_HOST_SIGTERM_${Date.now()}`;
   const [firstPort, secondPort] = await Promise.all([reservePort(), reservePort()]);
   let firstApp = null;
   let secondApp = null;
@@ -181,9 +183,67 @@ function processExists(pid) {
       : `printf '${afterMarker}\\n'`;
     await evaluate(secondPage.send, `window.loadtoagent.terminalCommand(${JSON.stringify(terminalId)}, ${JSON.stringify(afterCommand)})`);
     await waitFor(secondPage.send, `(async () => (await window.loadtoagent.terminalGet(${JSON.stringify(terminalId)}))?.replay?.includes(${JSON.stringify(afterMarker)}))()`, '재연결 뒤 동일 터미널에 명령을 보내지 못했습니다.');
+
+    await pause(300);
+    const crashedHostPid = hostPid;
+    process.kill(crashedHostPid, process.platform === 'win32' ? 'SIGTERM' : 'SIGKILL');
+    let nextHostPid = 0;
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      try {
+        const pid = Number(JSON.parse(fs.readFileSync(hostFile, 'utf8')).pid || 0);
+        if (pid && pid !== crashedHostPid && processExists(pid)) {
+          nextHostPid = pid;
+          break;
+        }
+      } catch {}
+      await pause(120);
+    }
+    if (!nextHostPid) throw new Error('터미널 호스트가 강제 종료 뒤 자동으로 다시 실행되지 않았습니다.');
+    hostPid = nextHostPid;
+    const recovered = await waitFor(secondPage.send, `(async () => (await window.loadtoagent.terminalList()).find(item => item.id === ${JSON.stringify(terminalId)} && item.status === 'running' && item.recoveredAfterHostRestart) || null)()`, '호스트 강제 종료 뒤 저장된 터미널을 새 프로세스로 복구하지 못했습니다.');
+    if (recovered.pid === terminalPid) throw new Error('호스트 강제 종료 뒤 PTY PID가 새 프로세스로 교체되지 않았습니다.');
+    const recoveryCommand = bootstrap.platform.id === 'win32'
+      ? `Write-Output "${recoveryMarker}"`
+      : `printf '${recoveryMarker}\\n'`;
+    await evaluate(secondPage.send, `window.loadtoagent.terminalCommand(${JSON.stringify(terminalId)}, ${JSON.stringify(recoveryCommand)})`);
+    await waitFor(secondPage.send, `(async () => (await window.loadtoagent.terminalGet(${JSON.stringify(terminalId)}))?.replay?.includes(${JSON.stringify(recoveryMarker)}))()`, '호스트 복구 뒤 터미널 명령을 실행하지 못했습니다.');
+
+    await pause(300);
+    const terminatedHostPid = hostPid;
+    process.kill(terminatedHostPid, 'SIGTERM');
+    let gracefulHostPid = 0;
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      try {
+        const pid = Number(JSON.parse(fs.readFileSync(hostFile, 'utf8')).pid || 0);
+        if (pid && pid !== terminatedHostPid && processExists(pid)) {
+          gracefulHostPid = pid;
+          break;
+        }
+      } catch {}
+      await pause(120);
+    }
+    if (!gracefulHostPid) throw new Error('터미널 호스트가 SIGTERM 뒤 자동으로 다시 실행되지 않았습니다.');
+    hostPid = gracefulHostPid;
+    const gracefulRecovered = await waitFor(secondPage.send, `(async () => (await window.loadtoagent.terminalList()).find(item => item.id === ${JSON.stringify(terminalId)} && item.status === 'running' && item.recoveredAfterHostRestart && item.pid !== ${JSON.stringify(recovered.pid)}) || null)()`, '호스트 SIGTERM 뒤 저장된 터미널을 새 프로세스로 복구하지 못했습니다.');
+    if (gracefulRecovered.pid === recovered.pid) throw new Error('호스트 SIGTERM 뒤 PTY PID가 새 프로세스로 교체되지 않았습니다.');
+    const gracefulCommand = bootstrap.platform.id === 'win32'
+      ? `Write-Output "${gracefulRecoveryMarker}"`
+      : `printf '${gracefulRecoveryMarker}\\n'`;
+    await evaluate(secondPage.send, `window.loadtoagent.terminalCommand(${JSON.stringify(terminalId)}, ${JSON.stringify(gracefulCommand)})`);
+    await waitFor(secondPage.send, `(async () => (await window.loadtoagent.terminalGet(${JSON.stringify(terminalId)}))?.replay?.includes(${JSON.stringify(gracefulRecoveryMarker)}))()`, '호스트 SIGTERM 복구 뒤 터미널 명령을 실행하지 못했습니다.');
     await evaluate(secondPage.send, `window.loadtoagent.terminalClose(${JSON.stringify(terminalId)})`);
     terminalId = '';
-    outcome = { ok: true, hostPid, terminalPid, sameSession: restored.id, status: restored.status };
+    outcome = {
+      ok: true,
+      hostPid,
+      crashedHostPid,
+      terminatedHostPid,
+      terminalPid,
+      recoveredTerminalPid: recovered.pid,
+      gracefulRecoveredTerminalPid: gracefulRecovered.pid,
+      sameSession: gracefulRecovered.id,
+      status: gracefulRecovered.status,
+    };
   } finally {
     if (terminalId && secondPage) {
       try { await evaluate(secondPage.send, `window.loadtoagent.terminalClose(${JSON.stringify(terminalId)})`); } catch {}

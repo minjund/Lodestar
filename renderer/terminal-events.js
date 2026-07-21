@@ -9,6 +9,7 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
     refreshSessions, renderHistoryPanel, fitEntry, attachTmux, currentTmux, manageTmux,
     closeTmuxModal, errorMessage, notice, reorderSession, moveSessionByOffset,
     setTerminalFontSize, toggleTerminalFocusMode,
+    isAiTerminalSession,
   } = context;
 
   const runBusy = async (button, action) => {
@@ -283,17 +284,13 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
       });
       renderAll();
     });
-    $('#terminalCloseBtn').addEventListener('click', async event => {
-      const session = currentSession();
-      if (!session) {
-        state.selectedTmux = null;
-        renderAll();
-        showSelection();
-        return;
-      }
-      if (session.status === 'running' && !window.confirm(t('terminal.session.confirm_end', { title: session.title }))) return;
-      await runBusy(event.currentTarget, async () => {
-        const closed = await guarded(() => window.loadtoagent.terminalClose(session.id), t('terminal.session.ended'), `terminal-close:${session.id}`);
+    const endTerminalSession = async (button, session) => {
+      if (!session) return;
+      const confirmation = isAiTerminalSession(session) ? 'terminal.session.confirm_end_ai' : 'terminal.session.confirm_end';
+      if (session.type !== 'tmux' && session.status === 'running' && !window.confirm(t(confirmation, { title: session.title }))) return;
+      await runBusy(button, async () => {
+        const message = session.type === 'tmux' ? t('terminal.tmux.detached_input') : t('terminal.session.ended');
+        const closed = await guarded(() => window.loadtoagent.terminalClose(session.id), message, `terminal-close:${session.id}`);
         if (!closed) return;
         const entry = state.terminals.get(session.id);
         if (entry) {
@@ -310,7 +307,29 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
         await refreshSessions();
       });
       renderAll();
+    };
+    $('#terminalCloseBtn').addEventListener('click', async event => {
+      const session = currentSession();
+      if (!session) {
+        state.selectedTmux = null;
+        renderAll();
+        await showSelection();
+        return;
+      }
+      if (isAiTerminalSession(session)) {
+        state.captureGeneration += 1;
+        state.selectedId = null;
+        state.boundAgent = null;
+        state.boundTargetId = '';
+        renderAll();
+        renderHistoryPanel();
+        await showSelection();
+        notice(t('terminal.view_closed_ai_kept'), 'success');
+        return;
+      }
+      await endTerminalSession(event.currentTarget, session);
     });
+    $('#terminalEndSessionBtn').addEventListener('click', event => endTerminalSession(event.currentTarget, currentSession()));
     $('#terminalHistoryToggle').addEventListener('click', () => {
       state.historyCollapsed = !state.historyCollapsed;
       renderHistoryPanel();
@@ -415,5 +434,9 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
     });
     window.loadtoagent.onTerminalState(payload => refreshSessions(payload));
     window.loadtoagent.onTerminalError(payload => notice(payload && payload.message || t('terminal.error.input_failed'), 'error'));
+    window.loadtoagent.onTerminalConnection?.(payload => {
+      const tone = payload?.state === 'failed' ? 'error' : payload?.state === 'connected' ? 'success' : 'info';
+      notice(payload?.message || t('terminal.error.input_failed'), tone);
+    });
   }
 };
