@@ -19,6 +19,7 @@ window.LoadToAgentAppFactories.createRuntimeOverview = function createRuntimeOve
 
   let runtimeTicker = 0;
   let runtimeRenderVersion = 0;
+  let pendingRuntimeFocus = null;
 
   function activeRootLoops() {
     return visibleSessions()
@@ -126,7 +127,7 @@ window.LoadToAgentAppFactories.createRuntimeOverview = function createRuntimeOve
     return t("runtime.elapsed_hours", { count: Math.floor(minutes / 60) });
   }
 
-  function scheduleCard(item) {
+  function scheduleCard(item, index = 0) {
     const session = automationSession(item);
     const cwd = (item.cwds || [])[0] || "";
     const workspace = String(cwd).replace(/\\/g, "/").split("/").filter(Boolean).pop();
@@ -135,8 +136,8 @@ window.LoadToAgentAppFactories.createRuntimeOverview = function createRuntimeOve
       <strong>${esc(item.name)}</strong>
       <small>${esc(scheduleRule(item.rrule))} · ${esc(location)}</small>`;
     return session
-      ? `<button type="button" class="runtime-schedule-card ${item.enabled ? "" : "paused"}" data-automation-id="${esc(item.id)}" data-automation-enabled="${item.enabled ? "true" : "false"}" data-automation-session="${esc(session.id)}">${body}<i aria-hidden="true">↗</i></button>`
-      : `<article class="runtime-schedule-card ${item.enabled ? "" : "paused"}" data-automation-id="${esc(item.id)}" data-automation-enabled="${item.enabled ? "true" : "false"}">${body}<i aria-hidden="true">${item.enabled ? "●" : "Ⅱ"}</i></article>`;
+      ? `<button type="button" role="option" aria-selected="false" tabindex="${index === 0 ? "0" : "-1"}" class="runtime-schedule-card ${item.enabled ? "" : "paused"}" data-automation-id="${esc(item.id)}" data-automation-enabled="${item.enabled ? "true" : "false"}" data-automation-session="${esc(session.id)}">${body}<i aria-hidden="true">↗</i></button>`
+      : `<article role="option" aria-selected="false" aria-disabled="true" tabindex="${index === 0 ? "0" : "-1"}" class="runtime-schedule-card ${item.enabled ? "" : "paused"}" data-automation-id="${esc(item.id)}" data-automation-enabled="${item.enabled ? "true" : "false"}">${body}<i aria-hidden="true">${item.enabled ? "●" : "Ⅱ"}</i></article>`;
   }
 
   function emptySchedules() {
@@ -146,7 +147,8 @@ window.LoadToAgentAppFactories.createRuntimeOverview = function createRuntimeOve
   function loopSelector(loop, selected) {
     const provider = providerInfo(loop.provider);
     return `<button type="button" class="runtime-loop-tab ${selected ? "selected" : ""}" data-loop-select="${esc(loop.id)}"
-      style="${providerStyle(loop.provider)}" aria-pressed="${selected ? "true" : "false"}">
+      id="runtime-loop-tab-${esc(loop.id)}" role="tab" aria-controls="runtime-loop-panel-${esc(loop.id)}"
+      style="${providerStyle(loop.provider)}" aria-selected="${selected ? "true" : "false"}" aria-pressed="${selected ? "true" : "false"}" tabindex="${selected ? "0" : "-1"}">
       <span class="runtime-loop-tab-mark">${esc(provider.mark)}</span>
       <span><b>${esc(loop.title)}</b><small>${esc(provider.label)} · <span data-runtime-started-at="${esc(loop.startedAt || "")}">${esc(elapsedSince(loop.startedAt))}</span></small></span>
       <i aria-hidden="true"></i>
@@ -178,7 +180,7 @@ window.LoadToAgentAppFactories.createRuntimeOverview = function createRuntimeOve
     const iterationLabel = iteration > 0
       ? t("runtime.iteration_value", { count: iteration })
       : session.loop ? t("runtime.iteration_observed") : t("runtime.iteration_scheduled");
-    return `<article class="runtime-loop-detail" style="${providerStyle(session.provider)}" data-motion-key="runtime-loop:${esc(session.id)}" data-motion-value="${esc(session.updatedAt || "")}">
+    return `<article id="runtime-loop-panel-${esc(session.id)}" class="runtime-loop-detail" role="tabpanel" aria-labelledby="runtime-loop-tab-${esc(session.id)}" style="${providerStyle(session.provider)}" data-motion-key="runtime-loop:${esc(session.id)}" data-motion-value="${esc(session.updatedAt || "")}">
       <header>
         <div><span class="runtime-loop-kicker"><i></i>${esc(t("runtime.active_loop"))}</span><h3>${esc(session.title)}</h3><p>${esc(provider.label)} · ${esc(session.model || t("session.model_unknown"))}</p></div>
         <button type="button" class="runtime-open-task" data-loop-open="${esc(session.id)}">${esc(t("runtime.open_task"))}<span aria-hidden="true">↗</span></button>
@@ -225,6 +227,12 @@ window.LoadToAgentAppFactories.createRuntimeOverview = function createRuntimeOve
     const restoreScheduleFocus = document.activeElement === previousScheduleList;
     const focusedAutomationId = document.activeElement?.closest?.("[data-automation-id]")?.dataset.automationId || "";
     const focusedLoopId = document.activeElement?.closest?.("[data-loop-select]")?.dataset.loopSelect || "";
+    const detectedFocus = restoreScheduleFocus
+      ? { type: "schedule-list", id: "" }
+      : focusedAutomationId ? { type: "automation", id: focusedAutomationId }
+        : focusedLoopId ? { type: "loop", id: focusedLoopId } : null;
+    if (detectedFocus) pendingRuntimeFocus = detectedFocus;
+    const focusIntent = detectedFocus || pendingRuntimeFocus;
     const automations = visibleAutomations();
     const loops = activeRootLoops();
     const enabled = automations.filter((item) => item.enabled);
@@ -239,10 +247,10 @@ window.LoadToAgentAppFactories.createRuntimeOverview = function createRuntimeOve
     <div class="runtime-overview-grid">
       <aside class="runtime-schedule-lane">
         <header><div><span>${esc(t("runtime.schedule_lane"))}</span><b>${esc(t("runtime.schedule_list"))}</b></div><em>${String(automations.length).padStart(2, "0")}</em></header>
-        <div class="runtime-schedule-list" role="region" tabindex="0" aria-label="${esc(t("runtime.schedule_list_label"))}">${automations.length ? automations.map(scheduleCard).join("") : emptySchedules()}</div>
+        <div class="runtime-schedule-list" role="listbox" tabindex="-1" aria-label="${esc(t("runtime.schedule_list_label"))}">${automations.length ? automations.map(scheduleCard).join("") : emptySchedules()}</div>
       </aside>
       <section class="runtime-loop-lane" aria-label="${esc(t("runtime.loop_lane"))}">
-        <header class="runtime-loop-lane-head"><div><span>${esc(t("runtime.loop_lane"))}</span><b>${esc(t("runtime.loop_system"))}</b><small>${esc(t("runtime.inferred_phase"))}</small></div>${loops.length > 1 ? `<div class="runtime-loop-tabs" aria-label="${esc(t("runtime.choose_loop"))}">${loops.map((loop) => loopSelector(loop, loop.id === selectedId)).join("")}</div>` : ""}</header>
+        <header class="runtime-loop-lane-head"><div><span>${esc(t("runtime.loop_lane"))}</span><b>${esc(t("runtime.loop_system"))}</b><small>${esc(t("runtime.inferred_phase"))}</small></div>${loops.length ? `<div class="runtime-loop-tabs" role="tablist" aria-orientation="horizontal" aria-label="${esc(t("runtime.choose_loop"))}">${loops.map((loop) => loopSelector(loop, loop.id === selectedId)).join("")}</div>` : ""}</header>
         ${selected ? loopDetail(selected) : noActiveLoop()}
       </section>
     </div>`;
@@ -258,11 +266,12 @@ window.LoadToAgentAppFactories.createRuntimeOverview = function createRuntimeOve
         const list = tabList.getBoundingClientRect();
         if (item.left < list.left || item.right > list.right) selectedTab.scrollIntoView({ block: "nearest", inline: "nearest" });
       }
-      const focusTarget = restoreScheduleFocus
+      const focusTarget = focusIntent?.type === "schedule-list"
         ? scheduleList
-        : focusedAutomationId ? section.querySelector(`[data-automation-id="${CSS.escape(focusedAutomationId)}"]`)
-          : focusedLoopId ? section.querySelector(`[data-loop-select="${CSS.escape(focusedLoopId)}"]`) : null;
+        : focusIntent?.type === "automation" ? section.querySelector(`[data-automation-id="${CSS.escape(focusIntent.id)}"]`)
+          : focusIntent?.type === "loop" ? section.querySelector(`[data-loop-select="${CSS.escape(focusIntent.id)}"]`) : null;
       focusTarget?.focus({ preventScroll: true });
+      if (focusTarget && document.activeElement === focusTarget) pendingRuntimeFocus = null;
       if (scheduleList) scheduleList.scrollTop = scheduleScrollTop;
       if (tabList && previousLoopTabs && previousSelectedId === selectedId) tabList.scrollLeft = loopScrollLeft;
     });

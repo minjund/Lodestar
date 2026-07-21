@@ -5,7 +5,7 @@ window.LoadToAgentAppFactories = window.LoadToAgentAppFactories || {};
 window.LoadToAgentAppFactories.createSessionEventBindings = function createSessionEventBindings(context = {}) {
   const {
     $, state, selectView, renderProviderOverview, renderProviderFilter, toggleProviderFilter, announceProviderFilter, renderSessions, renderTmuxMap, openDrawer, openSubagentConversation,
-    dispatchAgentCommand, openAgentTerminal, copyBridgeCommand, openSessionOrigin,
+    dispatchAgentCommand, openAgentTerminal, copyBridgeCommand, openSessionOrigin, saveDashboardPreferences = () => {},
   } = context;
 
   function bindSessionListEvents() {
@@ -20,6 +20,35 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
       const sessionTarget = event.target.closest("[data-loop-open], [data-automation-session]");
       if (sessionTarget) openDrawer(sessionTarget.dataset.loopOpen || sessionTarget.dataset.automationSession);
     });
+    $("#automationOverview").addEventListener("keydown", (event) => {
+      const loop = event.target.closest("[data-loop-select]");
+      if (loop && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+        const tabs = Array.from(event.currentTarget.querySelectorAll("[data-loop-select]"));
+        const current = Math.max(0, tabs.indexOf(loop));
+        const next = event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? tabs.length - 1
+            : (current + (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1) + tabs.length) % tabs.length;
+        event.preventDefault();
+        state.selectedRuntimeLoopId = tabs[next].dataset.loopSelect;
+        renderSessions("focus");
+        requestAnimationFrame(() => $("#automationOverview")?.querySelector(`[data-loop-select="${CSS.escape(state.selectedRuntimeLoopId)}"]`)?.focus());
+        return;
+      }
+      const schedule = event.target.closest("[data-automation-id]");
+      if (!schedule || !["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+      const cards = Array.from(event.currentTarget.querySelectorAll("[data-automation-id]"));
+      const current = Math.max(0, cards.indexOf(schedule));
+      const next = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? cards.length - 1
+          : (current + (event.key === "ArrowDown" ? 1 : -1) + cards.length) % cards.length;
+      event.preventDefault();
+      cards.forEach((candidate, index) => { candidate.tabIndex = index === next ? 0 : -1; });
+      cards[next]?.focus();
+    });
     $("#providerOverview").addEventListener("click", (event) => {
       const card = event.target.closest("[data-provider-card]");
       if (!card) return;
@@ -29,11 +58,23 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
       renderProviderOverview();
       renderSessions("filter");
       announceProviderFilter();
-      requestAnimationFrame(() => {
-        const next = $("#providerOverview").querySelector(`[data-provider-card="${CSS.escape(card.dataset.providerCard)}"]`);
-        next?.classList.add("filter-clicked");
-        next?.focus();
-      });
+      saveDashboardPreferences();
+      const next = $("#providerOverview").querySelector(`[data-provider-card="${CSS.escape(card.dataset.providerCard)}"]`);
+      next?.classList.add("filter-clicked");
+      next?.focus();
+    });
+    $("#providerOverview").addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+      const cards = Array.from(event.currentTarget.querySelectorAll("[data-provider-card]"));
+      if (!cards.length) return;
+      const current = Math.max(0, cards.indexOf(event.target.closest("[data-provider-card]")));
+      const next = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? cards.length - 1
+          : (current + (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1) + cards.length) % cards.length;
+      event.preventDefault();
+      cards[next].focus();
     });
     $("#sessionGrid").addEventListener("click", (event) => {
       const card = event.target.closest("[data-session-id]");
@@ -197,9 +238,24 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
       }
       const node = event.target.closest("[data-tmux-type][data-tmux-id]");
       if (!node) return;
-      state.tmuxFocus = { type: node.dataset.tmuxType, id: node.dataset.tmuxId };
+      const nextFocus = { type: node.dataset.tmuxType, id: node.dataset.tmuxId };
+      state.tmuxFocus = nextFocus;
       renderTmuxMap();
+      requestAnimationFrame(() => $("#tmuxMap")?.querySelector(`[data-tmux-type="${CSS.escape(nextFocus.type)}"][data-tmux-id="${CSS.escape(nextFocus.id)}"]`)?.focus());
       if (node.dataset.tmuxType === "pane") window.LoadToAgentTerminal?.selectTmuxById(node.dataset.tmuxId);
+    });
+    $("#tmuxMap").addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+      const nodes = Array.from(event.currentTarget.querySelectorAll("[data-tmux-type][data-tmux-id]"));
+      const current = Math.max(0, nodes.indexOf(event.target.closest("[data-tmux-type][data-tmux-id]")));
+      const next = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? nodes.length - 1
+          : (current + (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1) + nodes.length) % nodes.length;
+      event.preventDefault();
+      nodes.forEach((candidate, index) => { candidate.tabIndex = index === next ? 0 : -1; });
+      nodes[next]?.focus();
     });
     $("#tmuxBreadcrumbs").addEventListener("click", (event) => {
       if (event.target.closest("[data-tmux-reset]")) state.tmuxFocus = null;
@@ -209,6 +265,19 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
         state.tmuxFocus = { type: node.dataset.tmuxType, id: node.dataset.tmuxId };
       }
       renderTmuxMap();
+    });
+    $("#tmuxBreadcrumbs").addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      const items = Array.from(event.currentTarget.querySelectorAll("button"));
+      const current = Math.max(0, items.indexOf(event.target.closest("button")));
+      const next = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? items.length - 1
+          : (current + (event.key === "ArrowRight" ? 1 : -1) + items.length) % items.length;
+      event.preventDefault();
+      items.forEach((candidate, index) => { candidate.tabIndex = index === next ? 0 : -1; });
+      items[next]?.focus();
     });
     $("#tmuxResetBtn").addEventListener("click", () => {
       state.tmuxFocus = null;

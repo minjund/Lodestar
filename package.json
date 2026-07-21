@@ -49,6 +49,7 @@
     "test:visual": "electron scripts/visual-check.js",
     "test:responsive": "electron scripts/responsive-check.js",
     "test:interaction": "electron scripts/interaction-check.js",
+    "audit:ui": "electron scripts/browser-audit-host.js",
     "test:runtime-overview": "electron scripts/runtime-overview-visual.js",
     "test:update:mac": "node scripts/mac-update-integration-test.js",
     "demo:readme": "electron scripts/readme-demo.js",

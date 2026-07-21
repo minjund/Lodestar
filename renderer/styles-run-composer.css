@@ -615,6 +615,11 @@
   font-size: 11px;
 }
 
+.run-prompt-count.warning {
+  color: #ffbd68;
+  font-weight: 700;
+}
+
 .run-advanced>summary small {
   display: block;
   margin-top: 3px;

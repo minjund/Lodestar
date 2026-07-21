@@ -466,8 +466,8 @@
   background: transparent;
   color: #7f8ba0;
   cursor: pointer;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   font-size: 17px;
 }
 
@@ -607,8 +607,8 @@
 }
 
 .workspace-remove {
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   border: 0;
   border-radius: 9px;
   background: #131c27;

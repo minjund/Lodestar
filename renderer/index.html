@@ -20,6 +20,7 @@
   <link rel="stylesheet" href="styles-runtime-overview.css" />
   <link rel="stylesheet" href="styles-onboarding.css" />
   <link rel="stylesheet" href="styles-settings.css" />
+  <link rel="stylesheet" href="styles-quality.css" />
   <link rel="stylesheet" href="styles-responsive-shell.css" />
   <link rel="stylesheet" href="styles-responsive-workflows.css" />
   <link rel="stylesheet" href="styles-responsive-runtime.css" />
@@ -27,8 +28,8 @@
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
 </head>
 <body>
-  <a class="skip-link" href="#mainContent" data-i18n="app.accessibility.skip_to_content">본문으로 바로가기</a>
-  <div class="app-shell">
+  <div id="appShell" class="app-shell">
+    <a class="skip-link" href="#mainContent" data-i18n="app.accessibility.skip_to_content">본문으로 바로가기</a>
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-orbit" aria-hidden="true"><span></span></div>
@@ -36,27 +37,27 @@
       </div>
 
       <nav class="view-nav" aria-label="화면 선택" data-i18n-aria-label="app.nav.label">
-        <button class="nav-item active" type="button" data-view="all" aria-label="홈" data-i18n-aria-label="app.nav.home" title="홈" data-i18n-title="app.nav.home"><span class="nav-icon">⌂</span><span data-i18n="app.nav.home">홈</span><b id="navAllCount">0</b></button>
-        <button class="nav-item" type="button" data-view="active" aria-label="진행 중" data-i18n-aria-label="app.nav.active" title="진행 중" data-i18n-title="app.nav.active"><span class="nav-icon live-dot"></span><span data-i18n="app.nav.active">진행 중</span><b id="navActiveCount">0</b></button>
-        <button class="nav-item" type="button" data-view="waiting" aria-label="내 확인 필요" data-i18n-aria-label="app.nav.needs_review" title="내 확인 필요" data-i18n-title="app.nav.needs_review"><span class="nav-icon">!</span><span data-i18n="app.nav.needs_review">내 확인 필요</span><b id="navWaitingCount">0</b></button>
-        <button class="nav-item runtime-nav-item" type="button" data-view="runtime" aria-label="스케줄·루프" data-i18n-aria-label="app.nav.runtime" title="스케줄·루프" data-i18n-title="app.nav.runtime"><span class="nav-icon runtime-nav-icon">↻</span><span data-i18n="app.nav.runtime">스케줄·루프</span><b id="navRuntimeCount">0</b></button>
+        <button class="nav-item active" type="button" data-view="all" aria-label="홈" data-i18n-aria-label="app.nav.home" aria-keyshortcuts="Meta+1 Control+1" aria-controls="liveSection globalStats sessionSection" title="홈" data-i18n-title="app.nav.home"><span class="nav-icon">⌂</span><span data-i18n="app.nav.home">홈</span><b id="navAllCount">0</b></button>
+        <button class="nav-item" type="button" data-view="active" aria-label="진행 중" data-i18n-aria-label="app.nav.active" aria-keyshortcuts="Meta+2 Control+2" aria-controls="liveSection sessionSection" title="진행 중" data-i18n-title="app.nav.active"><span class="nav-icon live-dot"></span><span data-i18n="app.nav.active">진행 중</span><b id="navActiveCount">0</b></button>
+        <button class="nav-item" type="button" data-view="waiting" aria-label="내 확인 필요" data-i18n-aria-label="app.nav.needs_review" aria-keyshortcuts="Meta+3 Control+3" aria-controls="sessionSection" title="내 확인 필요" data-i18n-title="app.nav.needs_review"><span class="nav-icon">!</span><span data-i18n="app.nav.needs_review">내 확인 필요</span><b id="navWaitingCount">0</b></button>
+        <button class="nav-item runtime-nav-item" type="button" data-view="runtime" aria-label="스케줄·루프" data-i18n-aria-label="app.nav.runtime" aria-keyshortcuts="Meta+4 Control+4" aria-controls="automationOverview" title="스케줄·루프" data-i18n-title="app.nav.runtime"><span class="nav-icon runtime-nav-icon">↻</span><span data-i18n="app.nav.runtime">스케줄·루프</span><b id="navRuntimeCount">0</b></button>
         <div class="nav-group-label" data-i18n="app.nav.continue_session">기존 세션에 이어서 입력</div>
-        <button class="nav-item" type="button" data-view="terminal" aria-label="세션 터미널" data-i18n-aria-label="app.nav.session_terminal" title="세션 터미널" data-i18n-title="app.nav.session_terminal"><span class="nav-icon">›_</span><span data-i18n="app.nav.session_terminal">세션 터미널</span><b id="navTerminalCount">0</b></button>
+        <button class="nav-item" type="button" data-view="terminal" aria-label="세션 터미널" data-i18n-aria-label="app.nav.session_terminal" aria-keyshortcuts="Meta+5 Control+5" aria-controls="terminalSection" title="세션 터미널" data-i18n-title="app.nav.session_terminal"><span class="nav-icon">›_</span><span data-i18n="app.nav.session_terminal">세션 터미널</span><b id="navTerminalCount">0</b></button>
         <div class="nav-group-label tmux-only" data-i18n="ui.tmux_only">tmux 전용</div>
-        <button class="nav-item tmux-nav-item" type="button" data-view="tmux" aria-label="tmux 작업" data-i18n-aria-label="app.nav.tmux" title="tmux 작업" data-i18n-title="app.nav.tmux"><span class="nav-icon">▦</span><span data-i18n="app.nav.tmux">tmux 작업</span><b id="navTmuxCount">0</b></button>
+        <button class="nav-item tmux-nav-item" type="button" data-view="tmux" aria-label="tmux 작업" data-i18n-aria-label="app.nav.tmux" aria-keyshortcuts="Meta+6 Control+6" aria-controls="tmuxSection" title="tmux 작업" data-i18n-title="app.nav.tmux"><span class="nav-icon">▦</span><span data-i18n="app.nav.tmux">tmux 작업</span><b id="navTmuxCount">0</b></button>
         <div class="nav-group-label" data-i18n="app.nav.application">프로그램</div>
-        <button class="nav-item settings-nav-item" type="button" data-view="settings" aria-label="설정" data-i18n-aria-label="app.nav.settings" title="설정" data-i18n-title="app.nav.settings"><span class="nav-icon">⚙</span><span data-i18n="app.nav.settings">설정</span><b id="navUpdateBadge" class="hidden">NEW</b></button>
+        <button class="nav-item settings-nav-item" type="button" data-view="settings" aria-label="설정" data-i18n-aria-label="app.nav.settings" aria-keyshortcuts="Meta+7 Control+7" aria-controls="settingsSection" title="설정" data-i18n-title="app.nav.settings"><span class="nav-icon">⚙</span><span data-i18n="app.nav.settings">설정</span><b id="navUpdateBadge" class="hidden">NEW</b></button>
         <button id="mobileMoreBtn" class="nav-item mobile-more-nav" type="button" aria-label="더보기" data-i18n-aria-label="app.nav.more" title="더보기" data-i18n-title="app.nav.more" aria-expanded="false" aria-controls="mobileToolsMenu"><span class="nav-icon">•••</span><span data-i18n="app.nav.more">더보기</span></button>
       </nav>
 
       <section class="sidebar-section">
-        <div class="section-title"><span data-i18n="ui.available_ai">사용 가능한 AI</span><button id="probeBtn" class="icon-button" type="button" title="AI 연결 상태 다시 확인" data-i18n-title="ui.check_ai_connections_again" aria-label="AI 연결 상태 다시 확인" data-i18n-aria-label="ui.check_ai_connections_again">↻</button></div>
+        <div class="section-title"><span data-i18n="ui.available_ai">사용 가능한 AI</span><button id="probeBtn" class="icon-button" type="button" title="AI 연결 상태 다시 확인" data-i18n-title="ui.check_ai_connections_again" aria-label="AI 연결 상태 다시 확인" data-i18n-aria-label="ui.check_ai_connections_again" aria-controls="providerRail">↻</button></div>
         <div id="providerRail" class="provider-rail"></div>
       </section>
 
       <section class="sidebar-section workspace-section">
-        <div class="section-title"><span data-i18n="ui.workspaces">작업 폴더</span><button id="addWorkspaceBtn" class="icon-button" type="button" title="작업 폴더 추가" data-i18n-title="ui.add_workspace" aria-label="작업 폴더 추가" data-i18n-aria-label="ui.add_workspace">＋</button></div>
-        <div id="workspaceList" class="workspace-list"></div>
+        <div class="section-title"><span data-i18n="ui.workspaces">작업 폴더</span><button id="addWorkspaceBtn" class="icon-button" type="button" title="작업 폴더 추가" data-i18n-title="ui.add_workspace" aria-label="작업 폴더 추가" data-i18n-aria-label="ui.add_workspace" aria-controls="workspaceList">＋</button></div>
+        <div id="workspaceList" class="workspace-list" role="group" aria-label="작업 폴더 필터" data-i18n-aria-label="quality.workspace_filter"></div>
       </section>
 
       <div class="sidebar-footer">
@@ -74,6 +75,7 @@
           <p id="pageSubtitle" class="subtitle" data-i18n="ui.active_work_and_items_needing_your_review_appear_first_find">진행 중인 일과 내 확인이 필요한 일을 먼저 보여주고, 나머지 기록은 아래에서 찾을 수 있습니다.</p>
         </div>
         <div class="top-actions">
+          <button id="shortcutHelpBtn" class="top-icon-action" type="button" aria-label="키보드 단축키 보기" data-i18n-aria-label="quality.shortcuts.open" aria-keyshortcuts="?" aria-controls="shortcutHelpModal"><span aria-hidden="true">⌨</span></button>
           <button id="guideBtn" class="guide-toggle" type="button" aria-controls="beginnerGuide" aria-expanded="true"><span aria-hidden="true">?</span><span><b data-i18n="ui.10_minute_quick_start">10분 시작 가이드</b><small id="guideButtonProgress" data-i18n="common.progress" data-i18n-params='{"current":0,"total":4}'>0 / 4 완료</small></span></button>
           <div class="sync-state"><span></span><div><b>LIVE</b><small id="lastSync" data-i18n="ui.connecting">연결 중</small></div></div>
           <button id="newRunBtn" class="primary-button new-run-cta" type="button" aria-label="AI에게 새 일 맡기기" data-i18n-aria-label="ui.assign_a_new_task_to_ai" aria-keyshortcuts="Meta+N Control+N"><span class="new-run-cta-icon" aria-hidden="true">＋</span><span class="new-run-cta-copy"><b data-i18n="ui.new_ai_task">새 AI 작업</b><small><kbd>⌘N</kbd></small></span></button>
@@ -101,7 +103,7 @@
       <section id="updateNotice" class="update-notice hidden" aria-live="polite">
         <span class="update-notice-signal" aria-hidden="true"><i></i></span>
         <div><b id="updateNoticeTitle" data-i18n="ui.a_new_version_is_available">새 버전을 사용할 수 있습니다.</b><small id="updateNoticeText" data-i18n="ui.download_the_update_from_settings">설정에서 업데이트 파일을 받을 수 있습니다.</small></div>
-        <button id="updateNoticeBtn" type="button"><span data-i18n="settings.update.view">업데이트 보기</span> <span>→</span></button>
+        <button id="updateNoticeBtn" type="button" aria-controls="updatePanel"><span data-i18n="settings.update.view">업데이트 보기</span> <span>→</span></button>
       </section>
 
       <section id="automationOverview" class="automation-overview hidden" aria-label="예약 작업과 실행 루프" data-i18n-aria-label="runtime.section_label"></section>
@@ -191,7 +193,7 @@
           <aside class="terminal-resource-panel">
             <div class="terminal-resource-head"><div><b data-i18n="ui.my_terminal_sessions">내 터미널 세션</b><span id="terminalSessionSummary" data-i18n="common.running" data-i18n-params='{"count":0}'>0개 실행 중</span></div><span class="terminal-resource-live"><i></i>LIVE</span></div>
             <p id="terminalReorderHelp" class="sr-only" data-i18n="terminal.reorder_help">세션 옆의 위아래 버튼을 누르거나, 세션에 초점을 둔 뒤 Alt와 위아래 화살표 키를 눌러 순서를 바꿀 수 있습니다.</p>
-            <div id="terminalSessionList" class="terminal-session-list"></div>
+            <div id="terminalSessionList" class="terminal-session-list" role="listbox" aria-label="터미널 세션" data-i18n-aria-label="quality.terminal_sessions"></div>
             <div class="terminal-resource-tip"><span>⌘</span><p><b data-i18n="ui.sessions_stay_open_when_you_change_views">세션은 화면을 옮겨도 유지됩니다.</b><small data-i18n="ui.output_and_draft_commands_remain_when_you_return_from_another">다른 작업을 보고 돌아와도 출력과 작성 중인 명령이 그대로 남아 있어요.</small></p></div>
           </aside>
 
@@ -201,8 +203,8 @@
               <div class="terminal-workspace-actions">
                 <div id="terminalConnectionState" class="terminal-connection-state"><i></i><span data-i18n="ui.waiting_for_selection">선택 대기</span></div>
                 <div class="terminal-key-actions">
-                <button type="button" data-terminal-signal="interrupt" title="현재 실행 중인 명령 중단" data-i18n-title="ui.interrupt_the_running_command"><span data-i18n="ui.interrupt">실행 중단</span><kbd>Ctrl C</kbd></button>
-                <button type="button" data-terminal-signal="clear" title="터미널 화면 정리" data-i18n-title="ui.clear_terminal_screen"><span data-i18n="ui.clear">화면 정리</span><kbd>Ctrl L</kbd></button>
+                <button type="button" data-terminal-signal="interrupt" title="현재 실행 중인 명령 중단" data-i18n-title="ui.interrupt_the_running_command" aria-keyshortcuts="Control+C"><span data-i18n="ui.interrupt">실행 중단</span><kbd>Ctrl C</kbd></button>
+                <button type="button" data-terminal-signal="clear" title="터미널 화면 정리" data-i18n-title="ui.clear_terminal_screen" aria-keyshortcuts="Control+L"><span data-i18n="ui.clear">화면 정리</span><kbd>Ctrl L</kbd></button>
                 <button id="terminalRestartBtn" type="button" data-i18n="ui.restart">다시 시작</button>
                 <button id="terminalAttachBtn" class="hidden" type="button" data-i18n="ui.control_directly">직접 조작하기</button>
                 <button id="terminalCloseBtn" class="terminal-danger-button" type="button" data-i18n="ui.end_session">세션 종료</button>
@@ -233,9 +235,9 @@
                 <div id="terminalViewport" class="terminal-viewport"><div id="terminalEmpty" class="terminal-empty"><span>›_</span><h3 data-i18n="ui.choose_a_session_to_continue">이어갈 세션을 선택하세요</h3><p data-i18n="ui.choose_a_session_on_the_left_or_create_one_to">왼쪽 세션을 고르거나 새 세션을 만들면 실시간 출력과 명령 입력창이 열립니다.</p></div></div>
                 <form id="terminalCommandForm" class="terminal-command-form">
                   <div class="terminal-command-label"><label id="terminalCommandLabel" for="terminalCommandInput" data-i18n="ui.send_command_to_terminal">터미널에 명령 보내기</label><span data-i18n="ui.enter_to_send_shift_enter_for_newline">Enter 전송 · Shift+Enter 줄바꿈</span></div>
-                  <div class="terminal-command-composer"><textarea id="terminalCommandInput" rows="2" placeholder="먼저 왼쪽에서 세션을 선택하세요" data-i18n-placeholder="ui.select_a_session_on_the_left_first" spellcheck="false"></textarea><button type="submit"><span data-i18n="common.send">보내기</span><b>↵</b></button></div>
+                  <div class="terminal-command-composer"><textarea id="terminalCommandInput" rows="2" maxlength="8000" aria-describedby="terminalCommandCount" placeholder="먼저 왼쪽에서 세션을 선택하세요" data-i18n-placeholder="ui.select_a_session_on_the_left_first" spellcheck="false"></textarea><button id="terminalCommandClearBtn" class="terminal-command-clear hidden" type="button" aria-label="작성 중인 명령 지우기" data-i18n-aria-label="quality.terminal_clear_draft">×</button><button type="submit"><span data-i18n="common.send">보내기</span><b>↵</b></button><small id="terminalCommandCount" class="terminal-command-count">0 / 8,000</small></div>
                 </form>
-                <div id="terminalNotice" class="terminal-notice" role="status" aria-live="polite" aria-atomic="true"><span class="terminal-notice-dot"></span><span data-i18n="ui.select_a_session_to_start_typing">세션을 선택하면 바로 입력할 수 있습니다.</span></div>
+                <div id="terminalNotice" class="terminal-notice" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"><span class="terminal-notice-dot"></span><span data-i18n="ui.select_a_session_to_start_typing">세션을 선택하면 바로 입력할 수 있습니다.</span></div>
               </section>
             </div>
           </div></div>
@@ -258,7 +260,7 @@
           <div class="terminal-layout tmux-control-layout">
             <aside class="terminal-resource-panel tmux-resource-panel">
               <div class="terminal-resource-head tmux-resources"><div><b data-i18n="ui.tmux_terminals_only">tmux 안의 명령창만</b><span data-i18n="ui.regular_terminals_are_hidden">일반 명령창은 표시하지 않음</span></div></div>
-              <div id="terminalTmuxList" class="terminal-tmux-list"></div>
+              <div id="terminalTmuxList" class="terminal-tmux-list" role="listbox" aria-label="tmux 칸" data-i18n-aria-label="quality.tmux_panes"></div>
             </aside>
             <div id="tmuxWorkbenchMount" class="terminal-workbench-mount"></div>
           </div>
@@ -290,19 +292,22 @@
         <div class="sessions-heading">
           <div><p class="eyebrow" data-i18n="ui.history">지난 기록</p><h2 id="viewTitle" data-i18n="ui.recent_conversations_and_tasks">최근 대화와 작업</h2></div>
           <div class="session-tools">
-            <label class="search-box"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" aria-label="작업 검색" data-i18n-aria-label="ui.search_tasks" placeholder="작업 이름, AI, 폴더 찾기" data-i18n-placeholder="ui.find_task_ai_or_folder" autocomplete="off" /></label>
-            <div id="providerFilter" class="provider-filter" role="group" aria-label="AI 제공사 필터" data-i18n-aria-label="ui.ai_provider_filter"></div>
+            <label class="search-box"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" maxlength="240" aria-label="작업 검색" data-i18n-aria-label="ui.search_tasks" aria-keyshortcuts="/" placeholder="작업 이름, AI, 폴더 찾기" data-i18n-placeholder="ui.find_task_ai_or_folder" autocomplete="off" /><button id="searchClearBtn" class="search-clear hidden" type="button" aria-label="검색어 지우기" data-i18n-aria-label="filter.clear_search" title="검색어 지우기" data-i18n-title="filter.clear_search">×</button></label>
+            <div id="providerFilter" class="provider-filter" role="toolbar" aria-label="AI 제공사 필터" data-i18n-aria-label="ui.ai_provider_filter"></div>
             <p id="providerFilterStatus" class="sr-only" role="status" aria-live="polite"></p>
             <select id="sortSelect" aria-label="정렬" data-i18n-aria-label="ui.sort"><option value="recent" data-i18n="ui.most_recently_active">최근에 움직인 순서</option><option value="tokens" data-i18n="ui.highest_usage">많이 사용한 순서</option><option value="context" data-i18n="ui.highest_context_usage">기억 공간을 많이 쓴 순서</option></select>
+            <button id="resetFiltersBtn" class="filter-reset hidden" type="button" data-i18n="filter.reset_all">필터 초기화</button>
           </div>
         </div>
+        <p id="sessionResultSummary" class="session-result-summary" aria-live="polite"></p>
         <div id="sessionGrid" class="session-grid"></div>
         <button id="loadMoreBtn" class="load-more hidden" type="button" data-i18n="ui.show_more_tasks">작업 더 보기</button>
         <div id="emptyState" class="empty-state hidden">
           <div class="empty-orbit"><span></span></div>
           <h3 data-i18n="ui.no_tasks_to_show_yet">아직 보여줄 작업이 없습니다</h3>
           <p data-i18n="ui.change_the_search_filters_or_assign_a_new_task_to">검색 조건을 바꾸거나 AI에게 새 일을 맡겨보세요.</p>
-          <button class="primary-button" data-open-run data-i18n="ui.assign_a_new_task_to_ai">AI에게 새 일 맡기기</button>
+          <button id="emptyClearFiltersBtn" class="ghost-button hidden" type="button" data-i18n="quality.clear_conditions">조건 지우기</button>
+          <button class="primary-button" type="button" data-open-run data-i18n="ui.assign_a_new_task_to_ai">AI에게 새 일 맡기기</button>
         </div>
       </section>
     </main>
@@ -320,18 +325,18 @@
     <div class="drawer-head">
       <div id="drawerProviderMark" class="provider-mark">AI</div>
       <div class="drawer-title"><span id="drawerProvider" data-i18n="ui.ai_task">AI 작업</span><h2 id="drawerTitle" data-i18n="drawer.title">작업 자세히 보기</h2></div>
-      <button id="closeDrawerBtn" class="close-button" aria-label="닫기" data-i18n-aria-label="common.close">×</button>
+      <button id="closeDrawerBtn" class="close-button" type="button" aria-label="닫기" data-i18n-aria-label="common.close">×</button>
     </div>
     <div id="drawerMeta" class="drawer-meta"></div>
-    <div class="drawer-tabs" role="tablist">
-      <button id="drawerTabChat" class="drawer-tab active" role="tab" aria-selected="true" aria-controls="drawerContent" tabindex="0" data-tab="chat" data-i18n="ui.conversation">대화 내용</button>
-      <button id="drawerTabLifecycle" class="drawer-tab" role="tab" aria-selected="false" aria-controls="drawerContent" tabindex="-1" data-tab="lifecycle" data-i18n="ui.progress">진행 과정</button>
-      <button id="drawerTabTokens" class="drawer-tab" role="tab" aria-selected="false" aria-controls="drawerContent" tabindex="-1" data-tab="tokens" data-i18n="ui.usage">사용량</button>
+    <div class="drawer-tabs" role="tablist" aria-orientation="horizontal">
+      <button id="drawerTabChat" class="drawer-tab active" type="button" role="tab" aria-selected="true" aria-controls="drawerContent" tabindex="0" data-tab="chat" data-i18n="ui.conversation">대화 내용</button>
+      <button id="drawerTabLifecycle" class="drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawerContent" tabindex="-1" data-tab="lifecycle" data-i18n="ui.progress">진행 과정</button>
+      <button id="drawerTabTokens" class="drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawerContent" tabindex="-1" data-tab="tokens" data-i18n="ui.usage">사용량</button>
     </div>
     <div id="drawerContent" class="drawer-content" role="tabpanel" aria-labelledby="drawerTabChat" tabindex="0"></div>
   </aside>
 
-  <div id="runModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="runModalTitle" aria-describedby="runModalDescription">
+  <div id="runModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="runModalTitle" aria-describedby="runModalDescription" aria-hidden="true" inert>
     <form id="runForm" class="run-modal run-composer">
       <div class="modal-head">
         <div><p class="eyebrow" data-i18n="ui.start_ai_task">AI 작업 시작</p><h2 id="runModalTitle" data-i18n="ui.what_should_the_ai_work_on">무슨 일을 맡길까요?</h2><p id="runModalDescription" class="run-modal-intro" data-i18n="ui.describe_the_task_then_choose_which_ai_will_work_in">할 일을 먼저 적고, 어떤 AI가 어디서 작업할지 선택하세요.</p></div>
@@ -339,13 +344,13 @@
       </div>
       <section class="run-step run-request-step" aria-labelledby="runRequestLabel">
         <div class="run-step-head"><i>1</i><span><b id="runRequestLabel" data-i18n="ui.describe_the_task">할 일 적기</b><small data-i18n="ui.include_the_expected_result_and_constraints_for_better_accuracy">결과와 제약을 함께 적으면 더 정확해요.</small></span></div>
-        <label class="run-prompt-field"><span class="sr-only" data-i18n="ui.task_for_ai">AI에게 맡길 일</span><textarea id="runPrompt" required rows="5" maxlength="8000" placeholder="예: 로그인 화면의 오류를 찾아 고치고, 관련 테스트까지 실행해줘" data-i18n-placeholder="ui.example_find_and_fix_the_login_screen_error_then_run"></textarea></label>
+        <label class="run-prompt-field"><span class="sr-only" data-i18n="ui.task_for_ai">AI에게 맡길 일</span><textarea id="runPrompt" required rows="5" maxlength="8000" aria-describedby="runPromptCount" placeholder="예: 로그인 화면의 오류를 찾아 고치고, 관련 테스트까지 실행해줘" data-i18n-placeholder="ui.example_find_and_fix_the_login_screen_error_then_run"></textarea></label>
         <div class="run-prompt-tools"><div class="run-prompt-examples" aria-label="빠른 요청 예시" data-i18n-aria-label="ui.quick_prompt_examples"><button type="button" data-run-prompt-key="run.example.fix" data-i18n="ui.fix_a_bug">오류 수정</button><button type="button" data-run-prompt-key="run.example.review" data-i18n="ui.review_code">코드 검토</button><button type="button" data-run-prompt-key="run.example.tests" data-i18n="ui.add_tests">테스트 추가</button></div><span id="runPromptCount" class="run-prompt-count">0 / 8,000</span></div>
       </section>
       <section class="run-step run-setup-step" aria-labelledby="runSetupLabel">
         <div class="run-step-head"><i>2</i><span><b id="runSetupLabel" data-i18n="ui.choose_how_to_run">실행 방법 선택</b><small data-i18n="ui.choose_an_ai_and_workspace_to_finish_setup">AI와 작업 폴더만 고르면 준비가 끝납니다.</small></span></div>
         <div id="runProviderLabel" class="field-label" data-i18n="ui.which_ai_should_handle_it">어떤 AI에게 맡길까요?</div>
-        <div id="runProviderPicker" class="run-provider-picker" role="group" aria-labelledby="runProviderLabel"></div>
+        <div id="runProviderPicker" class="run-provider-picker" role="radiogroup" aria-labelledby="runProviderLabel"></div>
         <div id="runProviderHelp" class="run-provider-help hidden" role="status"></div>
         <div class="run-folder-field"><label class="field-label" for="runCwd" data-i18n="ui.workspaces">작업 폴더</label><div class="path-field"><input id="runCwd" required placeholder="프로젝트 폴더를 선택하세요" data-i18n-placeholder="ui.choose_a_project_folder" /><button type="button" id="pickRunCwdBtn" data-i18n="ui.browse">폴더 찾기</button></div></div>
         <div id="runWorkspaceSuggestions" class="run-workspace-suggestions" aria-label="최근 작업 폴더" data-i18n-aria-label="ui.recent_workspaces"></div>
@@ -354,24 +359,40 @@
       </section>
       <details class="run-advanced">
         <summary><span><b data-i18n="ui.advanced_settings">고급 설정</b><small data-i18n="ui.use_only_when_selecting_a_specific_model">특정 모델을 직접 지정할 때만 사용</small></span><i aria-hidden="true">↓</i></summary>
-        <label><span><span data-i18n="ui.model">사용 모델</span> <small data-i18n="ui.leave_blank_if_unsure">몰라도 비워두세요</small></span><input id="runModel" placeholder="비워두면 AI가 알아서 선택합니다" data-i18n-placeholder="ui.leave_blank_to_let_the_ai_choose" /></label>
+        <label><span><span data-i18n="ui.model">사용 모델</span> <small data-i18n="ui.leave_blank_if_unsure">몰라도 비워두세요</small></span><input id="runModel" autocomplete="off" spellcheck="false" placeholder="비워두면 AI가 알아서 선택합니다" data-i18n-placeholder="ui.leave_blank_to_let_the_ai_choose" /></label>
       </details>
-      <div id="runError" class="form-error hidden" role="alert" aria-live="assertive"></div>
-      <div class="modal-actions run-modal-actions"><span class="run-shortcut-hint"><kbd>⌘</kbd><kbd>Enter</kbd> <span data-i18n="ui.start">시작</span></span><button type="button" id="cancelRunBtn" class="ghost-button" data-i18n="common.cancel">취소</button><button type="submit" class="primary-button run-submit-button"><span class="run-submit-icon" aria-hidden="true">↗</span><span id="runSubmitLabel" data-i18n="ui.assign_to_ai">AI에게 맡기기</span></button></div>
+      <div id="runError" class="form-error hidden" role="alert" aria-live="assertive" tabindex="-1"></div>
+      <div class="modal-actions run-modal-actions"><span class="run-shortcut-hint"><kbd>⌘</kbd><kbd>Enter</kbd> <span data-i18n="ui.start">시작</span></span><button type="button" id="clearRunDraftBtn" class="ghost-button" data-i18n="quality.clear_draft">초안 지우기</button><button type="button" id="cancelRunBtn" class="ghost-button" data-i18n="common.cancel">취소</button><button type="submit" class="primary-button run-submit-button" aria-keyshortcuts="Meta+Enter Control+Enter"><span class="run-submit-icon" aria-hidden="true">↗</span><span id="runSubmitLabel" data-i18n="ui.assign_to_ai">AI에게 맡기기</span></button></div>
     </form>
   </div>
 
+  <div id="globalStatus" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
-  <div id="tmuxCreateModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="tmuxCreateTitle">
+  <div id="quickPaletteModal" class="modal-backdrop quality-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="quickPaletteTitle" aria-describedby="quickPaletteDescription" aria-hidden="true" inert>
+    <section class="quality-modal command-palette">
+      <header class="quality-modal-head"><div><p data-i18n="quality.quick_eyebrow">빠른 이동</p><h2 id="quickPaletteTitle" data-i18n="quality.quick_title">어디로 이동할까요?</h2></div><button id="closeQuickPaletteBtn" class="close-button" type="button" aria-label="빠른 이동 닫기" data-i18n-aria-label="quality.quick_close">×</button></header>
+      <p id="quickPaletteDescription" class="sr-only" data-i18n="quality.quick_description">화면이나 작업을 검색한 뒤 방향키와 Enter로 실행하세요.</p>
+      <label class="quality-search"><span aria-hidden="true">⌕</span><input id="quickPaletteInput" type="search" autocomplete="off" maxlength="80" role="combobox" aria-label="빠른 이동 검색" data-i18n-aria-label="quality.quick_search" aria-autocomplete="list" aria-controls="quickPaletteList" aria-expanded="true" placeholder="화면 또는 작업 검색" data-i18n-placeholder="quality.quick_placeholder" /></label>
+      <div id="quickPaletteList" class="quality-command-list" role="listbox" aria-label="빠른 이동 명령" data-i18n-aria-label="quality.quick_commands"></div>
+      <p id="quickPaletteStatus" class="quality-dialog-status" role="status" aria-live="polite"></p>
+    </section>
+  </div>
+  <div id="shortcutHelpModal" class="modal-backdrop quality-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="shortcutHelpTitle" aria-hidden="true" inert>
+    <section class="quality-modal shortcut-help-modal">
+      <header class="quality-modal-head"><div><p data-i18n="quality.shortcuts.eyebrow">키보드 도움말</p><h2 id="shortcutHelpTitle" data-i18n="quality.shortcuts.title">앱 단축키</h2></div><button id="closeShortcutHelpBtn" class="close-button" type="button" aria-label="단축키 도움말 닫기" data-i18n-aria-label="quality.shortcuts.close">×</button></header>
+      <dl class="shortcut-help-list"><div><dt><kbd>⌘/Ctrl</kbd><kbd>K</kbd></dt><dd data-i18n="quality.shortcuts.quick">빠른 이동 열기</dd></div><div><dt><kbd>⌘/Ctrl</kbd><kbd>1–7</kbd></dt><dd data-i18n="quality.shortcuts.views">주요 화면 이동</dd></div><div><dt><kbd>/</kbd></dt><dd data-i18n="quality.shortcuts.search">작업 검색</dd></div><div><dt><kbd>⌘/Ctrl</kbd><kbd>N</kbd></dt><dd data-i18n="quality.shortcuts.new_task">새 AI 작업</dd></div><div><dt><kbd>?</kbd></dt><dd data-i18n="quality.shortcuts.help">이 도움말 열기</dd></div><div><dt><kbd>Esc</kbd></dt><dd data-i18n="quality.shortcuts.close_action">열린 창 닫기</dd></div></dl>
+    </section>
+  </div>
+  <div id="tmuxCreateModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="tmuxCreateTitle" aria-hidden="true" inert>
     <form id="tmuxCreateForm" class="run-modal terminal-modal">
       <div class="modal-head"><div><p class="eyebrow" data-i18n="ui.advanced_work">고급 작업</p><h2 id="tmuxCreateTitle" data-i18n="ui.create_multi_window_workspace">여러 창 작업 만들기</h2></div><button type="button" id="closeTmuxCreateBtn" class="close-button" aria-label="여러 창 작업 만들기 닫기" data-i18n-aria-label="ui.close_multi_window_workspace_dialog">×</button></div>
       <div class="form-grid">
         <label><span id="tmuxEnvironmentLabel" data-i18n="ui.tmux_environment">tmux 환경</span><select id="tmuxCreateDistro" required></select></label>
-        <label><span data-i18n="ui.workspace_name">작업 묶음 이름</span><input id="tmuxCreateName" required pattern="[A-Za-z0-9_.\-]+" placeholder="my-work" /></label>
+        <label><span data-i18n="ui.workspace_name">작업 묶음 이름</span><input id="tmuxCreateName" required pattern="[A-Za-z0-9_.\-]+" placeholder="my-work" aria-describedby="tmuxCreateNameHelp" /><small id="tmuxCreateNameHelp" data-i18n="tmux.name_requirements">영문, 숫자, 마침표, 밑줄, 하이픈만 사용할 수 있습니다.</small></label>
       </div>
-      <label><span><span data-i18n="terminal.start_folder">시작 폴더</span> <small data-i18n="ui.optional">선택 사항</small></span><input id="tmuxCreateCwd" placeholder="프로젝트의 절대 경로" data-i18n-placeholder="ui.absolute_project_path" /></label>
+      <label><span><span data-i18n="terminal.start_folder">시작 폴더</span> <small data-i18n="ui.optional">선택 사항</small></span><span class="path-field"><input id="tmuxCreateCwd" placeholder="프로젝트의 절대 경로" data-i18n-placeholder="ui.absolute_project_path" /><button type="button" id="pickTmuxCwdBtn" data-i18n="ui.browse">폴더 찾기</button></span></label>
       <label><span><span data-i18n="terminal.initial_command">처음 실행할 명령</span> <small data-i18n="ui.optional">선택 사항</small></span><textarea id="tmuxCreateCommand" rows="4" placeholder="예: 실행할 AI 명령" data-i18n-placeholder="ui.example_claude_or_codex"></textarea></label>
-      <div id="tmuxCreateError" class="form-error hidden" role="alert" aria-live="assertive"></div>
+      <div id="tmuxCreateError" class="form-error hidden" role="alert" aria-live="assertive" tabindex="-1"></div>
       <div class="modal-actions"><button type="button" id="cancelTmuxCreateBtn" class="ghost-button" data-i18n="common.cancel">취소</button><button type="submit" class="primary-button" data-i18n="ui.create_workspace">작업 묶음 만들기</button></div>
     </form>
   </div>
@@ -395,6 +416,7 @@
   <script src="app-drawer-content.js"></script>
   <script src="app-drawer.js"></script>
   <script src="app-run-modal.js"></script>
+  <script src="app-quality.js"></script>
   <script src="app-events-navigation.js"></script>
   <script src="app-events-sessions.js"></script>
   <script src="app-events-filters.js"></script>

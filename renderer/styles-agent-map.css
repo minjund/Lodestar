@@ -311,6 +311,12 @@
   box-shadow: 0 0 0 6px rgba(138,232,255,.14)!important;
 }
 
+@media (pointer:coarse) {
+  :where(button,[role="button"],summary) {
+    min-height: 44px;
+  }
+}
+
 .provider-overview-card {
   --provider: #8fa2b7;
   position: relative;

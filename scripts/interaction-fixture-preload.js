@@ -327,6 +327,7 @@ const api = {
   stopAgent: runId => controlled('stopAgent', [runId], { ok: true }),
   activeRuns: async () => [],
   probeProviders: async () => controlled('probeProviders', [], Object.fromEntries(providers.map(provider => [provider.id, true]))),
+  setProviderVisibility: preference => controlled('setProviderVisibility', [preference]),
   listWorkspaces: async () => [{ name: 'fixture', path: 'D:\\fixture' }],
   addWorkspaces: async () => controlled('addWorkspaces', [], [{ name: 'fixture', path: 'D:\\fixture' }]),
   removeWorkspace: folder => controlled('removeWorkspace', [folder], []),

@@ -5,7 +5,7 @@ window.LoadToAgentAppFactories = window.LoadToAgentAppFactories || {};
 window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}) {
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
   const {
-    $, $$, esc, state, motionPreference, motionState, STATUS, markGuideStep, rememberDialogTrigger, restoreDialogTrigger,
+    $, $$, esc, state, motionPreference, motionState, STATUS, markGuideStep, rememberDialogTrigger, restoreDialogTrigger, setDialogOpenState,
     providerInfo, isLiveSession, subagentWorkState, subagentWorkLabel, isProjectlessSession, sessionWorkspaceLabel,
     agentResumeSupport, originAppInfo, selectedSession, snapshotSession, loadSessionDetail, loadSubagentParentDetail,
     chatHtml, lifecycleHtml, tokensHtml, subagentCoordinationEvents, subagentConversationHtml,
@@ -22,8 +22,7 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     $("#drawerBackdrop").classList.remove("hidden");
     $("#drawerBackdrop").classList.remove("closing");
     $("#detailDrawer").classList.add("open");
-    $("#detailDrawer").removeAttribute("inert");
-    $("#detailDrawer").setAttribute("aria-hidden", "false");
+    setDialogOpenState($("#detailDrawer"), true);
     renderDrawer();
     loadSessionDetail(id, true);
     setTimeout(() => $("#closeDrawerBtn").focus(), 0);
@@ -42,8 +41,7 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     $("#drawerBackdrop").classList.remove("hidden");
     $("#drawerBackdrop").classList.remove("closing");
     $("#detailDrawer").classList.add("open");
-    $("#detailDrawer").removeAttribute("inert");
-    $("#detailDrawer").setAttribute("aria-hidden", "false");
+    setDialogOpenState($("#detailDrawer"), true);
     renderDrawer();
     loadSessionDetail(id);
     loadSubagentParentDetail(child);
@@ -54,8 +52,7 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     if (!$("#detailDrawer").classList.contains("open")) return;
     const drawerGeneration = motionState.dialogGeneration;
     $("#detailDrawer").classList.remove("open");
-    $("#detailDrawer").setAttribute("aria-hidden", "true");
-    $("#detailDrawer").setAttribute("inert", "");
+    setDialogOpenState($("#detailDrawer"), false);
     $("#drawerBackdrop").classList.add("closing");
     clearTimeout(motionState.drawerTimer);
     motionState.drawerTimer = setTimeout(
@@ -82,18 +79,20 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     $("#drawerProvider").textContent = subagentMode
       ? t("drawer.subagent_title", { name: session.agentName || provider.label })
       : `${provider.company} · ${STATUS[session.status] || session.status}`;
-    $("#drawerTitle").textContent = subagentMode ? session.taskName || (session.delegation && session.delegation.taskName) || session.title : session.title;
+    const drawerTitle = subagentMode ? session.taskName || (session.delegation && session.delegation.taskName) || session.title : session.title;
+    $("#drawerTitle").textContent = drawerTitle;
+    $("#drawerTitle").title = drawerTitle;
     const stopping = session.runId && state.stopRequests.has(session.runId);
     const stop =
       session.runId && (session.status === "running" || session.status === "starting")
-        ? `<button class="meta-chip stop-run" data-stop-run="${esc(session.runId)}"
+        ? `<button type="button" class="meta-chip stop-run" data-stop-run="${esc(session.runId)}"
           ${stopping ? 'disabled aria-busy="true"' : ""}>
           ${esc(t(stopping ? "drawer.stop_requested" : "drawer.stop_run"))}</button>`
         : "";
     const runtime = session.runtimePresence || [];
     const resume =
       !isLiveSession(session) && agentResumeSupport(session).supported
-        ? `<button class="meta-chip resume-agent" data-resume-agent="${esc(session.id)}">▶
+        ? `<button type="button" class="meta-chip resume-agent" data-resume-agent="${esc(session.id)}">▶
           <b>${esc(t(originAppInfo(session) ? "drawer.continue_background_terminal" : "drawer.resume_in_terminal"))}</b>
         </button>`
         : "";
@@ -101,6 +100,13 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     const subagentMessageCount = subagentMode
       ? (session.messages || []).filter((message) => message.role === "user" || message.role === "assistant").length
       : 0;
+    const taskId = String(session.externalId || session.id || "");
+    const copyTask = taskId
+      ? `<button type="button" class="meta-chip meta-copy" data-copy-text="${esc(taskId)}" aria-label="${esc(t("quality.copy_task_id"))}">${esc(t("quality.task_id"))} <b>${esc(taskId.slice(0, 12))}</b><span aria-hidden="true">⧉</span></button>`
+      : "";
+    const copyWorkspace = !isProjectlessSession(session) && session.cwd
+      ? `<button type="button" class="meta-chip meta-copy" data-copy-text="${esc(session.cwd)}" aria-label="${esc(t("quality.copy_workspace"))}">${esc(t("drawer.workspace"))} <b>${esc(sessionWorkspaceLabel(session))}</b><span aria-hidden="true">⧉</span></button>`
+      : "";
     $("#drawerMeta").innerHTML = subagentMode
       ? `<span class="meta-chip work-state ${subagentWorkState(session)}">
         <b>${esc(subagentWorkLabel(session))}</b>
@@ -110,16 +116,11 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
         <span class="meta-chip">${esc(t("drawer.work_history"))} <b>${esc(t("drawer.event_count", { count: subagentMessageCount }))}</b>
         </span>
         <span class="meta-chip">${esc(t("drawer.main_instructions_results"))} <b>${esc(t("drawer.event_count", { count: communicationCount }))}</b>
-        </span>${resume}`
+        </span>${copyTask}${copyWorkspace}${resume}`
       : `<span class="meta-chip">${esc(t("drawer.model"))} <b>${esc(session.model || t("drawer.unknown"))}</b>
         </span>
-        <span class="meta-chip">${esc(t("drawer.workspace"))}
-          <b title="${esc(isProjectlessSession(session) ? window.LoadToAgentI18n.t("ui.session_not_linked_to_a_specific_project") : session.cwd)}">
-            ${esc(sessionWorkspaceLabel(session))}
-          </b>
-        </span>
-        <span class="meta-chip">${esc(t("drawer.task_id"))} <b>${esc(String(session.externalId || "").slice(0, 12) || t("drawer.unknown"))}</b>
-        </span>${
+        ${copyWorkspace || `<span class="meta-chip">${esc(t("drawer.workspace"))} <b>${esc(sessionWorkspaceLabel(session))}</b></span>`}
+        ${copyTask}${
           session.parentId
             ? `<span class="meta-chip">⑂ <b>${esc(t("drawer.helper_ai"))}</b>
         </span>`

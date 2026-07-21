@@ -4,22 +4,56 @@ window.LoadToAgentAppFactories = window.LoadToAgentAppFactories || {};
 
 window.LoadToAgentAppFactories.createFilterEventBindings = function createFilterEventBindings(context = {}) {
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
-  const { $, state, setProviderVisible = () => {}, visibleSnapshot = () => state.snapshot, closeDrawer = () => {}, renderSessions, render, renderWorkspaces, renderProviderOverview, renderProviderFilter, toggleProviderFilter, announceProviderFilter, performUiAction, toast } = context;
+  const { $, state, setProviderVisible = () => {}, visibleSnapshot = () => state.snapshot, closeDrawer = () => {}, openDrawer = () => {}, renderSessions, render, renderWorkspaces, renderProviderOverview, renderProviderFilter, toggleProviderFilter, announceProviderFilter, filteredSessions, performUiAction, toast, announce, normalizedSearch = (value) => String(value || "").trim(), saveDashboardPreferences = () => {} } = context;
 
   function bindFilterAndWorkspaceEvents() {
+    const syncFilterResetButton = () => {
+      const hasFilters = Boolean(
+        $("#searchInput").value || state.search || state.providerFilters.size || state.workspace !== "all" || state.sort !== "recent",
+      );
+      $("#resetFiltersBtn").classList.toggle("hidden", !hasFilters);
+    };
+    const moveFocus = (event, container, selector, previousKeys, nextKeys) => {
+      if (![...previousKeys, ...nextKeys, "Home", "End"].includes(event.key)) return false;
+      const items = Array.from(container.querySelectorAll(selector)).filter((item) => !item.disabled && !item.hidden);
+      if (!items.length) return false;
+      const current = Math.max(0, items.indexOf(event.target.closest(selector)));
+      const next = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? items.length - 1
+          : (current + (nextKeys.includes(event.key) ? 1 : -1) + items.length) % items.length;
+      event.preventDefault();
+      items[next].focus();
+      return true;
+    };
     $("#loadMoreBtn").addEventListener("click", () => {
+      const previousCount = document.querySelectorAll("#sessionGrid [data-session-id]").length;
       state.visibleLimit += 30;
       renderSessions("load-more");
+      const cards = document.querySelectorAll("#sessionGrid [data-session-id]");
+      cards[Math.min(previousCount, cards.length - 1)]?.focus({ preventScroll: true });
+      announce(window.LoadToAgentI18n.t("filter.more_loaded", { count: Math.max(0, cards.length - previousCount) }));
     });
     $("#workspaceList").addEventListener("click", async (event) => {
       const remove = event.target.closest("[data-remove-workspace]");
       if (remove) {
         event.stopPropagation();
-        const workspaces = await performUiAction(() => window.loadtoagent.removeWorkspace(remove.dataset.removeWorkspace), t("workspace.remove_failed"));
+        const path = remove.dataset.removeWorkspace;
+        const workspaceItems = Array.from(event.currentTarget.querySelectorAll("[data-workspace]"));
+        const workspaceIndex = Math.max(0, workspaceItems.indexOf(remove.closest(".workspace-row")?.querySelector("[data-workspace]")));
+        const workspaces = await performUiAction(() => window.loadtoagent.removeWorkspace(remove.dataset.removeWorkspace), t("workspace.remove_failed"), remove);
         if (!workspaces) return;
         state.workspaces = workspaces;
         if (state.workspace === remove.dataset.removeWorkspace) state.workspace = "all";
         render();
+        syncFilterResetButton();
+        saveDashboardPreferences();
+        requestAnimationFrame(() => {
+          const nextItems = Array.from($("#workspaceList").querySelectorAll("[data-workspace]"));
+          nextItems[Math.min(workspaceIndex, nextItems.length - 1)]?.focus();
+        });
+        announce(window.LoadToAgentI18n.t("quality.workspace_removed", { name: path.split(/[\\/]/).filter(Boolean).pop() || path }));
         return;
       }
       const item = event.target.closest("[data-workspace]");
@@ -28,17 +62,58 @@ window.LoadToAgentAppFactories.createFilterEventBindings = function createFilter
         state.visibleLimit = 30;
         renderWorkspaces();
         renderSessions("filter");
+        syncFilterResetButton();
+        saveDashboardPreferences();
       }
+    });
+    $("#workspaceList").addEventListener("keydown", (event) => {
+      moveFocus(event, event.currentTarget, "[data-workspace]", ["ArrowUp"], ["ArrowDown"]);
     });
     let searchTimer = null;
     $("#searchInput").addEventListener("input", (event) => {
       clearTimeout(searchTimer);
       const value = event.target.value;
+      $("#searchClearBtn").classList.toggle("hidden", !value);
+      syncFilterResetButton();
       searchTimer = setTimeout(() => {
-        state.search = value;
+        state.search = normalizedSearch(value);
         state.visibleLimit = 30;
         renderSessions("filter");
+        announce(window.LoadToAgentI18n.t("filter.search_results", { count: filteredSessions().length }));
+        syncFilterResetButton();
+        saveDashboardPreferences();
       }, 120);
+    });
+    $("#searchClearBtn").addEventListener("click", () => {
+      clearTimeout(searchTimer);
+      $("#searchInput").value = "";
+      $("#searchClearBtn").classList.add("hidden");
+      state.search = "";
+      state.visibleLimit = 30;
+      renderSessions("filter");
+      announce(window.LoadToAgentI18n.t("filter.search_cleared"));
+      $("#searchInput").focus();
+      syncFilterResetButton();
+      saveDashboardPreferences();
+    });
+    $("#searchInput").addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && event.currentTarget.value) {
+        event.preventDefault();
+        $("#searchClearBtn").click();
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        const first = $("#sessionGrid [data-session-id]") || $("#liveSessionGrid button, #liveSessionGrid [tabindex='0']");
+        if (first) {
+          event.preventDefault();
+          first.focus();
+        }
+        return;
+      }
+      if (event.key === "Enter" && filteredSessions().length === 1) {
+        event.preventDefault();
+        openDrawer(filteredSessions()[0].id);
+      }
     });
     $("#providerFilter").addEventListener("click", (event) => {
       const chip = event.target.closest("[data-provider-filter]");
@@ -49,50 +124,90 @@ window.LoadToAgentAppFactories.createFilterEventBindings = function createFilter
       renderProviderOverview();
       renderSessions("filter");
       announceProviderFilter();
-      requestAnimationFrame(() => {
-        const next = $("#providerFilter").querySelector(`[data-provider-filter="${CSS.escape(chip.dataset.providerFilter)}"]`);
-        next?.classList.add("filter-clicked");
-        next?.focus();
-      });
+      const next = $("#providerFilter").querySelector(`[data-provider-filter="${CSS.escape(chip.dataset.providerFilter)}"]`);
+      next?.classList.add("filter-clicked");
+      next?.focus();
+      syncFilterResetButton();
+      saveDashboardPreferences();
+    });
+    $("#providerFilter").addEventListener("keydown", (event) => {
+      moveFocus(event, event.currentTarget, "[data-provider-filter]", ["ArrowLeft", "ArrowUp"], ["ArrowRight", "ArrowDown"]);
     });
     $("#sortSelect").addEventListener("change", (event) => {
       state.sort = event.target.value;
       state.visibleLimit = 30;
       renderSessions("filter");
+      const label = event.target.selectedOptions[0]?.textContent || event.target.value;
+      announce(window.LoadToAgentI18n.t("filter.sort_changed", { sort: label, count: filteredSessions().length }));
+      syncFilterResetButton();
+      saveDashboardPreferences();
     });
-    $("#providerVisibilityList").addEventListener("change", (event) => {
+    $("#resetFiltersBtn").addEventListener("click", () => {
+      clearTimeout(searchTimer);
+      state.search = "";
+      state.providerFilters.clear();
+      state.workspace = "all";
+      state.sort = "recent";
+      state.visibleLimit = 30;
+      $("#searchInput").value = "";
+      $("#searchClearBtn").classList.add("hidden");
+      $("#sortSelect").value = "recent";
+      renderWorkspaces();
+      renderProviderFilter();
+      renderProviderOverview();
+      renderSessions("filter");
+      syncFilterResetButton();
+      saveDashboardPreferences();
+      announce(window.LoadToAgentI18n.t("filter.reset_done", { count: filteredSessions().length }));
+      $("#searchInput").focus();
+    });
+    $("#providerVisibilityList").addEventListener("change", async (event) => {
       const input = event.target.closest("[data-provider-visibility]");
       if (!input) return;
+      const providerId = input.dataset.providerVisibility;
+      const previousVisible = !input.checked;
       const selectedBeforeChange = (state.rawSnapshot?.sessions || []).find((session) => session.id === state.selectedId)
         || state.details.get(state.selectedId);
-      setProviderVisible(input.dataset.providerVisibility, input.checked);
-      Promise.resolve(window.loadtoagent.setProviderVisibility?.({ hidden: [...state.hiddenProviders] })).catch((error) => {
-        window.LoadToAgentRendererUtils.reportRecoverableError("provider-visibility-persistence", error);
-        toast(t("settings.providers.save_failed"));
-      });
+      setProviderVisible(providerId, input.checked);
       state.visibleLimit = 30;
-      if (state.selectedId) {
-        if (selectedBeforeChange && state.hiddenProviders.has(selectedBeforeChange.provider)) {
-          closeDrawer();
-        }
-      }
+      if (state.selectedId && selectedBeforeChange && state.hiddenProviders.has(selectedBeforeChange.provider)) closeDrawer();
       if (window.LoadToAgentTerminal) window.LoadToAgentTerminal.updateSnapshot(visibleSnapshot(), state.workspaces);
       render("filter");
+      try {
+        await Promise.resolve(window.loadtoagent.setProviderVisibility?.({ hidden: [...state.hiddenProviders] }));
+      } catch (error) {
+        window.LoadToAgentRendererUtils.reportRecoverableError("provider-visibility-persistence", error);
+        setProviderVisible(providerId, previousVisible);
+        if (window.LoadToAgentTerminal) window.LoadToAgentTerminal.updateSnapshot(visibleSnapshot(), state.workspaces);
+        render("filter");
+        toast(t("settings.providers.save_failed"));
+        return;
+      }
       toast(t(input.checked ? "settings.providers.shown_toast" : "settings.providers.hidden_toast"));
     });
     $("#addWorkspaceBtn").addEventListener("click", async () => {
-      const workspaces = await performUiAction(() => window.loadtoagent.addWorkspaces(), t("workspace.add_failed"));
+      const previousPaths = new Set(state.workspaces.map((workspace) => workspace.path));
+      const workspaces = await performUiAction(() => window.loadtoagent.addWorkspaces(), t("workspace.add_failed"), $("#addWorkspaceBtn"));
       if (!workspaces) return;
       state.workspaces = workspaces;
       renderWorkspaces();
+      syncFilterResetButton();
+      const added = state.workspaces.find((workspace) => !previousPaths.has(workspace.path));
+      requestAnimationFrame(() => {
+        if (added) $("#workspaceList")?.querySelector(`[data-workspace="${CSS.escape(added.path)}"]`)?.focus();
+        else $("#addWorkspaceBtn")?.focus();
+      });
+      announce(window.LoadToAgentI18n.t("quality.workspace_added", { count: state.workspaces.length }));
     });
     $("#probeBtn").addEventListener("click", async () => {
-      const nextAvailability = await performUiAction(() => window.loadtoagent.probeProviders(), t("run.cli_check_failed"));
+      const nextAvailability = await performUiAction(() => window.loadtoagent.probeProviders(), t("run.cli_check_failed"), $("#probeBtn"));
       if (!nextAvailability) return;
       state.availability = nextAvailability;
       render();
       toast(window.LoadToAgentI18n.t("ui.ai_cli_connections_were_checked_again"));
     });
+    $("#searchClearBtn").classList.toggle("hidden", !$("#searchInput").value);
+    syncFilterResetButton();
   }
 
   return { bindFilterAndWorkspaceEvents };

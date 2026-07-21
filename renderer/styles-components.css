@@ -29,6 +29,16 @@ button {
   color: inherit;
 }
 
+button[aria-busy="true"] {
+  cursor: progress;
+  opacity: .72;
+}
+
+[aria-invalid="true"] {
+  border-color: #ff7188!important;
+  box-shadow: 0 0 0 3px rgba(255,113,136,.14)!important;
+}
+
 .workspace-section {
   display: flex;
   flex: 1;
@@ -744,6 +754,25 @@ button {
   font-size: 12px;
 }
 
+.search-clear {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #8fa0b2;
+  cursor: pointer;
+}
+
+.search-clear:hover {
+  background: #1a2431;
+  color: #f0f6fb;
+}
+
 .session-tools select {
   padding: 0 28px 0 10px;
   border: 1px solid var(--line);
@@ -770,7 +799,7 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 30px;
+  min-height: 36px;
   padding: 0 9px;
   border: 1px solid transparent;
   border-radius: 7px;
@@ -779,6 +808,31 @@ button {
   white-space: nowrap;
   cursor: pointer;
   transition: color var(--motion-fast) ease, background-color var(--motion-fast) ease, border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease, transform var(--motion-fast) ease;
+}
+
+.filter-reset {
+  min-height: 40px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #0d121b;
+  color: #aab7c7;
+  white-space: nowrap;
+}
+
+.filter-reset:hover {
+  border-color: #3b4c60;
+  background: #151d28;
+  color: #f0f6fb;
+}
+
+@media (pointer:coarse) {
+  .search-clear,
+  .provider-filter-chip,
+  .filter-reset {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 .provider-filter-mark {

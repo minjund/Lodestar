@@ -47,6 +47,7 @@ const SYNTAX_CHECK_FILES = [
   'renderer/app-drawer-content.js',
   'renderer/app-drawer.js',
   'renderer/app-run-modal.js',
+  'renderer/app-quality.js',
   'renderer/app-events-navigation.js',
   'renderer/app-events-sessions.js',
   'renderer/app-events-filters.js',
@@ -99,6 +100,14 @@ const REQUIRED_UI_IDS = [
   'loadMoreBtn',
   'detailDrawer',
   'runModal',
+  'quickPaletteModal',
+  'quickPaletteInput',
+  'shortcutHelpModal',
+  'shortcutHelpBtn',
+  'sessionResultSummary',
+  'emptyClearFiltersBtn',
+  'clearRunDraftBtn',
+  'terminalCommandClearBtn',
   'drawerContent',
   'sidebarAppVersion',
   'settingsSection',
@@ -177,6 +186,7 @@ const APP_MODULES = [
   'app-drawer-content.js',
   'app-drawer.js',
   'app-run-modal.js',
+  'app-quality.js',
   'app-events-navigation.js',
   'app-events-sessions.js',
   'app-events-filters.js',
@@ -196,6 +206,7 @@ const APP_PUBLIC_API_CONTRACTS = [
   'createAgentActions',
   'createDrawer',
   'createRunModal',
+  'createQualityEnhancements',
   'createEventBindings',
   'window.LoadToAgentApp = app',
 ];
@@ -339,6 +350,7 @@ const STYLE_FILES = [
   'styles-runtime-overview.css',
   'styles-onboarding.css',
   'styles-settings.css',
+  'styles-quality.css',
   'styles-responsive-shell.css',
   'styles-responsive-workflows.css',
   'styles-responsive-runtime.css',
@@ -444,6 +456,60 @@ const INTERACTION_STYLE_CONTRACTS = [
   'resume-ready',
   'control-handoff',
   'control-origin-resume',
+];
+
+const QUALITY_201_300_APP_CONTRACTS = [
+  'QUALITY_PREF_STORAGE_KEY',
+  'QUALITY_PREF_VERSION = 3',
+  'function qualityText',
+  'function defaultQualityPreferences',
+  'function loadQualityPreferences',
+  'function saveQualityPreferences',
+  'function applyQualityPreferences',
+  'function markInputModality',
+  'function describeControl',
+  'function enhanceControl',
+  'function enhanceQualityControls',
+  'function installQualityMutationObserver',
+  'function installPressedStateMirrors',
+  'function installFormRecovery',
+  'function installDetailsStateMemory',
+  'function installOverflowTitles',
+  'function installViewportSafetyClass',
+  'function installGlobalQualityGuards',
+  'qualityGuardsInstalled',
+  'data-quality-disabled-reason',
+  'data-quality-touch-target',
+  'data-quality-pressed',
+  'data-quality-control',
+  'aria-required',
+  'body.dataset.inputModality',
+  'body.dataset.qualityMotion',
+  'body.dataset.qualityDensity',
+  'document.documentElement.dataset.qualityViewport',
+  'requestAnimationFrame(() => enhanceQualityControls())',
+  'MutationObserver',
+];
+
+const QUALITY_201_300_STYLE_CONTRACTS = [
+  'Quality pass 201–300',
+  'body.quality-keyboard-mode :focus-visible',
+  '[data-quality-control]',
+  '[data-quality-pressed="true"]',
+  '[data-quality-disabled="true"]',
+  '[data-quality-touch-target="padded"]::after',
+  '[data-quality-density="compact"] .session-grid',
+  '[data-quality-motion="reduced"] *',
+  '[data-quality-viewport="mobile"] .quality-modal',
+  'touch-action: manipulation',
+  'cursor: not-allowed',
+  'outline: 3px solid #77e2c2',
+];
+
+const QUALITY_201_300_I18N_CONTRACTS = [
+  'quality.disabled_reason',
+  'Unavailable for the current state.',
+  '当前状态不可用。',
 ];
 
 const TERMINAL_RUNTIME_CONTRACTS = [
@@ -728,6 +794,21 @@ function registerUiContractTests(context) {
       INTERACTION_STYLE_CONTRACTS,
       contract => `${contract} UI 계약이 없습니다.`,
     );
+    assertIncludesAll(
+      app,
+      QUALITY_201_300_APP_CONTRACTS,
+      contract => `${contract} 201–300 품질 보강 계약이 없습니다.`,
+    );
+    assertIncludesAll(
+      styles,
+      QUALITY_201_300_STYLE_CONTRACTS,
+      contract => `${contract} 201–300 품질 스타일 계약이 없습니다.`,
+    );
+    assertIncludesAll(
+      i18nMessages,
+      QUALITY_201_300_I18N_CONTRACTS,
+      contract => `${contract} 201–300 품질 번역 계약이 없습니다.`,
+    );
     assert.match(styles, /-webkit-line-clamp:\s*5/, '서브에이전트 미리보기의 5줄 제한 계약이 없습니다.');
     assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)/, '동작 줄이기 미디어 계약이 없습니다.');
     const terminal = rendererSource([
@@ -902,6 +983,25 @@ function registerLegacyNameTests(context) {
 
 function registerDocumentationContractTests(context) {
   const { test, root } = context;
+  test('UI 전수 점검 장부는 기존 항목을 제외해 1–300 완료 항목을 정확히 기록한다', () => {
+    const auditFiles = [
+      ['UI-AUDIT-100.md', 1],
+      ['UI-AUDIT-101-200.md', 101],
+      ['UI-AUDIT-201-300.md', 201],
+    ];
+    const allItems = [];
+    for (const [file, start] of auditFiles) {
+      const source = fs.readFileSync(path.join(root, 'docs', file), 'utf8');
+      const items = [...source.matchAll(/^(\d+)\. \[x\]/gm)].map(match => Number(match[1]));
+      assert.equal(items.length, 100, `${file} 완료 항목이 100개가 아닙니다.`);
+      assert.deepStrictEqual(items, Array.from({ length: 100 }, (_, index) => start + index), `${file} 번호가 예상 범위와 다릅니다.`);
+      assert.equal(source.includes('[ ]'), false, `${file}에 검증되지 않은 UI 점검 항목이 남아 있습니다.`);
+      allItems.push(...items);
+    }
+    assert.equal(allItems.length, 300, '전체 UI 점검 장부 완료 항목이 300개가 아닙니다.');
+    assert.equal(new Set(allItems).size, 300, 'UI 점검 항목 번호가 겹칩니다.');
+  });
+
   test('README와 릴리스 워크플로가 npm·Windows·macOS 실행 경로를 안내한다', () => {
     for (const file of ['README.md', 'README.ko.md', 'README.zh-CN.md']) {
       const readme = fs.readFileSync(path.join(root, file), 'utf8');

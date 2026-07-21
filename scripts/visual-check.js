@@ -221,8 +221,10 @@ app.whenReady().then(() => {
       const tmuxImage = await win.webContents.capturePage();
       const tmuxOutput = path.join(outputDir, 'loadtoagent-tmux-map.png');
       fs.writeFileSync(tmuxOutput, tmuxImage.toPNG());
+      const tmuxControlReady = await waitForRenderer(win, `Boolean(document.querySelector('.tmux-pane-node.has-agent [data-control-tmux]'))`, 80, 100);
+      if (!tmuxControlReady) throw new Error('tmux 지도에서 조작할 AI 칸을 찾지 못했습니다.');
       await win.webContents.executeJavaScript("document.querySelector('.tmux-pane-node.has-agent [data-control-tmux]')?.click()");
-      await waitForRenderer(win, `(() => document.querySelector('#runModal')?.classList.contains('hidden') && document.querySelector('#drawerBackdrop')?.classList.contains('hidden'))()`, 60, 100);
+      await waitForRenderer(win, `(() => document.querySelector('#runModal')?.classList.contains('hidden') && document.querySelector('#drawerBackdrop')?.classList.contains('hidden') && !document.querySelector('#terminalTmuxTools')?.classList.contains('hidden'))()`, 60, 100);
       const tmuxControlMetrics = await win.webContents.executeJavaScript(`(() => ({
         tmuxSectionVisible: !document.querySelector('#tmuxSection')?.classList.contains('hidden'),
         generalSectionHidden: document.querySelector('#terminalSection')?.classList.contains('hidden') || false,

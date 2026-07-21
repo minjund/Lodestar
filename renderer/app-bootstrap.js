@@ -25,6 +25,7 @@
     "createDrawerContent",
     "createDrawer",
     "createRunModal",
+    "createQualityEnhancements",
     "createNavigationEventBindings",
     "createSessionEventBindings",
     "createFilterEventBindings",
@@ -33,9 +34,10 @@
   ].forEach(install);
   window.LoadToAgentApp = app;
 
-  const { $, esc, state, loadGuideState, loadProviderVisibility, projectVisibleSnapshot, visibleSnapshot, isProviderVisible, bindEvents, render, timeOnly, loadSessionDetail, renderUpdateSettings, syncViewChrome, selectView, openDrawer, openSubagentConversation, toast } = app;
+  const { $, esc, state, loadGuideState, loadQualityState = () => {}, loadProviderVisibility, projectVisibleSnapshot, visibleSnapshot, isProviderVisible, bindEvents, render, timeOnly, loadSessionDetail, renderUpdateSettings, syncViewChrome, selectView, openDrawer, openSubagentConversation, toast } = app;
 
   async function init() {
+    loadQualityState();
     loadGuideState();
     if (!window.loadtoagent) {
       $("#emptyState").classList.remove("hidden");

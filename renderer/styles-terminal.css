@@ -1038,6 +1038,15 @@
   box-shadow: 0 0 0 3px rgba(85,214,168,.07);
 }
 
+.terminal-command-count {
+  grid-column: 1 / -1;
+  justify-self: end;
+  padding: 0 5px 2px;
+  color: #607487;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
 .terminal-command-form textarea {
   border-radius: 9px;
   color: #dce6ee;

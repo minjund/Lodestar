@@ -43,7 +43,10 @@
     historyRefreshTimer: null,
     historyRequests: new Map(),
     commandDrafts: new Map(),
+    commandHistory: new Map(),
+    commandHistoryNavigation: { targetId: '', index: -1, draft: '' },
     commandSending: false,
+    pendingActions: new Set(),
     sessionOrder: loadSessionOrder(),
     draggedSessionId: '',
     sessionDragJustEnded: false,
@@ -206,7 +209,10 @@
 
   function restoreCurrentDraft() {
     const input = $('#terminalCommandInput');
-    if (input) input.value = state.commandDrafts.get(currentTargetId()) || '';
+    if (input) {
+      input.value = state.commandDrafts.get(currentTargetId()) || '';
+      $('#terminalCommandClearBtn')?.classList.toggle('hidden', !input.value);
+    }
   }
 
   function renderHistoryPanel(forceBottom = false) {
@@ -279,7 +285,9 @@
     }, 240);
   }
 
-  async function guarded(action, successMessage = '') {
+  async function guarded(action, successMessage = '', actionKey = '') {
+    if (actionKey && state.pendingActions.has(actionKey)) return null;
+    if (actionKey) state.pendingActions.add(actionKey);
     try {
       const result = await action();
       if (successMessage) notice(successMessage, 'success');
@@ -287,6 +295,8 @@
     } catch (error) {
       notice(errorMessage(error), 'error');
       return null;
+    } finally {
+      if (actionKey) state.pendingActions.delete(actionKey);
     }
   }
 
@@ -311,6 +321,7 @@
   function modeSessions(mode = state.mode) {
     const rank = new Map(normalizedSessionOrder().map((id, index) => [id, index]));
     return state.sessions
+      .filter(Boolean)
       .filter(session => session.type !== 'agent' || window.LoadToAgentApp?.isProviderVisible?.(session.provider) !== false)
       .filter(session => mode === 'tmux' ? session.type === 'tmux' : session.type !== 'tmux')
       .sort((left, right) => (rank.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right.id) ?? Number.MAX_SAFE_INTEGER));

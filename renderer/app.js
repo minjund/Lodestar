@@ -234,8 +234,16 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     $("#mobileMoreBtn")?.setAttribute("aria-expanded", "false");
     document.querySelector(".main-stage")?.scrollTo({ top: 0, behavior: "auto" });
     if (options.focusMain) $("#mainContent")?.focus({ preventScroll: true });
+    const resultCount = ["all", "active", "waiting"].includes(view) && typeof context.filteredSessions === "function"
+      ? context.filteredSessions().length
+      : null;
+    announce(resultCount == null
+      ? t("navigation.view_changed", { view: VIEW_TITLES[view] || view })
+      : t("navigation.view_results", { view: VIEW_TITLES[view] || view, count: resultCount }));
   }
   function currentDialog() {
+    if (!$("#quickPaletteModal")?.classList.contains("hidden")) return $("#quickPaletteModal");
+    if (!$("#shortcutHelpModal")?.classList.contains("hidden")) return $("#shortcutHelpModal");
     if (!$("#runModal").classList.contains("hidden")) return $("#runModal");
     if (!$("#tmuxCreateModal").classList.contains("hidden")) return $("#tmuxCreateModal");
     if ($("#detailDrawer").classList.contains("open")) return $("#detailDrawer");
@@ -277,7 +285,34 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     if (trigger && trigger.isConnected) trigger.focus({ preventScroll: true });
     return true;
   }
-  window.LoadToAgentA11y = { rememberDialogTrigger, restoreDialogTrigger };
+  function setDialogOpenState(dialog, open) {
+    if (!dialog) return;
+    const shell = $("#appShell");
+    if (open) {
+      dialog.removeAttribute("inert");
+      dialog.setAttribute("aria-hidden", "false");
+      shell?.setAttribute("inert", "");
+      document.body.classList.add("dialog-open");
+      return;
+    }
+    dialog.setAttribute("inert", "");
+    dialog.setAttribute("aria-hidden", "true");
+    const anotherDialog = [$("#runModal"), $("#tmuxCreateModal"), $("#detailDrawer"), $("#quickPaletteModal"), $("#shortcutHelpModal")]
+      .some((item) => item && item !== dialog && !item.classList.contains("hidden") && (item.classList.contains("open") || item.matches(".modal-backdrop")));
+    if (!anotherDialog) {
+      shell?.removeAttribute("inert");
+      document.body.classList.remove("dialog-open");
+    }
+  }
+  function announce(message) {
+    const region = $("#globalStatus");
+    if (!region) return;
+    region.textContent = "";
+    requestAnimationFrame(() => {
+      region.textContent = String(message || "");
+    });
+  }
+  window.LoadToAgentA11y = { rememberDialogTrigger, restoreDialogTrigger, setDialogOpenState, announce };
   function readablePreview(value, maxCharacters = 120) {
     const full = String(value == null ? "" : value)
       .replace(/\s+/g, " ")
@@ -590,6 +625,8 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     trapDialogFocus,
     rememberDialogTrigger,
     restoreDialogTrigger,
+    setDialogOpenState,
+    announce,
     readablePreview,
     memoryCategoryLabel,
     jsonValueHtml,

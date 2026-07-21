@@ -56,6 +56,10 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
   function renderWorkspaces() {
     const list = $("#workspaceList");
     const projectlessCount = visibleSessions().filter((session) => !session.parentId && isProjectlessSession(session)).length;
+    const savedWorkspaceExists = state.workspace === "all"
+      || (state.workspace === PROJECTLESS_WORKSPACE && projectlessCount > 0)
+      || state.workspaces.some((workspace) => workspace.path === state.workspace);
+    if (!savedWorkspaceExists) state.workspace = "all";
     list.innerHTML =
       `<button type="button" class="workspace-item ${state.workspace === "all" ? "selected" : ""}"
         data-workspace="all" aria-pressed="${state.workspace === "all" ? "true" : "false"}">
@@ -122,6 +126,23 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
     $("#navRuntimeCount").textContent = scheduledCount + loopCount;
     const tmuxSessionCount = Number(state.snapshot?.tmux?.summary?.sessions || 0);
     $("#navTmuxCount").textContent = tmuxSessionCount;
+    const navCounts = {
+      all: rootCount,
+      active: activeRootCount,
+      waiting: totals.waiting || 0,
+      runtime: scheduledCount + loopCount,
+      terminal: Number($("#navTerminalCount").textContent || 0),
+      tmux: tmuxSessionCount,
+    };
+    document.querySelectorAll(".nav-item[data-view]").forEach((button) => {
+      const key = {
+        all: "app.nav.home", active: "app.nav.active", waiting: "app.nav.needs_review", runtime: "app.nav.runtime",
+        terminal: "app.nav.session_terminal", tmux: "app.nav.tmux", settings: "app.nav.settings",
+      }[button.dataset.view];
+      const label = t(key);
+      const count = navCounts[button.dataset.view];
+      button.setAttribute("aria-label", Number.isFinite(count) ? t("quality.nav_count", { label, count }) : label);
+    });
     const tmuxShortcut = $("#openTmuxFromAgentWork");
     $("#agentWorkTmuxCount").textContent = tmuxSessionCount;
     tmuxShortcut.dataset.i18nParams = JSON.stringify({ count: tmuxSessionCount });
@@ -253,16 +274,19 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
     pruneProviderFilters();
     const summaries = (state.snapshot && state.snapshot.summary && state.snapshot.summary.providers) || state.providers;
     const sessions = visibleSessions();
-    $("#providerOverview").innerHTML = summaries
-      .filter((provider) => isProviderVisible(provider.id))
-      .map((provider) => {
+    const visibleSummaries = summaries.filter((provider) => isProviderVisible(provider.id));
+    const overviewTabStopId = state.providerFilters.size ? [...state.providerFilters][0] : visibleSummaries[0]?.id;
+    $("#providerOverview").innerHTML = visibleSummaries
+      .map((provider, index) => {
         const rootCount = sessions.filter((session) => session.provider === provider.id && !session.parentId).length;
         const selected = state.providerFilters.has(provider.id);
+        const tabStop = provider.id === overviewTabStopId;
         return `<button type="button" class="provider-overview-card ${selected ? "selected" : ""}"
           data-provider-card="${esc(provider.id)}"
           data-motion-key="provider:${esc(provider.id)}"
           data-motion-value="${provider.active || 0}:${rootCount}:${(provider.usage && provider.usage.total) || 0}"
           style="${providerStyle(provider.id)}"
+          tabindex="${tabStop ? "0" : "-1"}"
           aria-pressed="${selected ? "true" : "false"}">
       <div class="poc-head">
         <span class="provider-mark">${esc(provider.mark)}</span>
@@ -301,10 +325,11 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
   function renderProviderFilter() {
     pruneProviderFilters();
     const allSelected = state.providerFilters.size === 0;
+    const tabStopId = allSelected ? "all" : [...state.providerFilters][0];
     const button = (id, label, mark = "") => {
       const selected = id === "all" ? allSelected : state.providerFilters.has(id);
       return `<button type="button" class="provider-filter-chip ${selected ? "selected" : ""}"
-        data-provider-filter="${esc(id)}" aria-pressed="${selected ? "true" : "false"}">
+        data-provider-filter="${esc(id)}" tabindex="${id === tabStopId ? "0" : "-1"}" aria-pressed="${selected ? "true" : "false"}">
         <i class="provider-filter-check" aria-hidden="true">✓</i>
         ${mark ? `<span class="provider-filter-mark" aria-hidden="true">${esc(mark)}</span>` : ""}<b>${esc(label)}</b>
       </button>`;
@@ -331,7 +356,7 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
     if (state.view === "waiting") sessions = sessions.filter((session) => session.status === "waiting");
     if (state.providerFilters.size) sessions = sessions.filter((session) => state.providerFilters.has(session.provider));
     sessions = sessions.filter(matchesWorkspaceFilter);
-    const query = state.search.trim().toLowerCase();
+    const query = state.search.replace(/\s+/g, " ").trim().toLowerCase();
     if (query) {
       sessions = sessions.filter((session) =>
         [session.title, session.model, session.cwd, session.agentName, ...(session.messages || []).slice(-12).map((item) => item.text)]
@@ -355,7 +380,7 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
     let sessions = [...visibleSessions()];
     if (state.providerFilters.size) sessions = sessions.filter((session) => state.providerFilters.has(session.provider));
     sessions = sessions.filter(matchesWorkspaceFilter);
-    const query = state.search.trim().toLowerCase();
+    const query = state.search.replace(/\s+/g, " ").trim().toLowerCase();
     if (query)
       sessions = sessions.filter((session) =>
         [session.title, session.model, session.cwd, session.agentName, session.agentRole, ...(session.messages || []).map((item) => item.text)]

@@ -143,7 +143,7 @@ window.LoadToAgentAppFactories.createTmuxRenderer = function createTmuxRenderer(
     const percent = Math.max(0, Math.min(100, Number(context.percent || 0)));
     return `<article class="tmux-pane-node ${pane.active ? "active" : ""} ${pane.dead ? "dead" : ""} ${agent ? "has-agent" : ""}"
       ${agent ? `style="${providerStyle(agent.provider)}"` : ""}>
-      <button type="button" class="tmux-pane-main" data-tmux-type="pane" data-tmux-id="${esc(pane.id)}">
+      <button type="button" class="tmux-pane-main" data-tmux-type="pane" data-tmux-id="${esc(pane.id)}" aria-pressed="${state.tmuxFocus?.type === "pane" && state.tmuxFocus?.id === pane.id ? "true" : "false"}">
         <span class="tmux-pane-head">
           <b>${t('tmux.split_pane_number', { number: pane.index + 1 })}</b><span>${t('tmux.process_number', { pid: pane.pid || "--" })}</span>
           <i>${pane.dead ? t('tmux.state.ended') : pane.active ? t('tmux.state.active') : t('tmux.state.background')}</i>
@@ -191,7 +191,7 @@ window.LoadToAgentAppFactories.createTmuxRenderer = function createTmuxRenderer(
 
   function tmuxWindowTree(window) {
     return `<div class="tmux-window-tree">
-      <button type="button" class="tmux-window-node ${window.active ? "active" : ""}" data-tmux-type="window" data-tmux-id="${esc(window.id)}">
+      <button type="button" class="tmux-window-node ${window.active ? "active" : ""}" data-tmux-type="window" data-tmux-id="${esc(window.id)}" aria-pressed="${state.tmuxFocus?.type === "window" && state.tmuxFocus?.id === window.id ? "true" : "false"}">
       <small>${t('tmux.open_window')}</small>
       <strong>${window.index + 1}. ${esc(window.name)}</strong>
       <span>${t('tmux.split_count', { count: window.panes.length })}</span>
@@ -206,7 +206,7 @@ window.LoadToAgentAppFactories.createTmuxRenderer = function createTmuxRenderer(
 
   function tmuxSessionTree(tmuxSession) {
     return `<div class="tmux-session-tree">
-      <button type="button" class="tmux-session-node ${tmuxSession.attached ? "attached" : ""}" data-tmux-type="session" data-tmux-id="${esc(tmuxSession.id)}">
+      <button type="button" class="tmux-session-node ${tmuxSession.attached ? "attached" : ""}" data-tmux-type="session" data-tmux-id="${esc(tmuxSession.id)}" aria-pressed="${state.tmuxFocus?.type === "session" && state.tmuxFocus?.id === tmuxSession.id ? "true" : "false"}">
       <small>${t('tmux.workspace')}</small>
       <strong>${esc(tmuxSession.name)}</strong>
       <span>${tmuxSession.attached ? t('terminal.tmux.attached') : t('terminal.tmux.running_background')} · ${t('tmux.open_window_count', { count: tmuxSession.windows.length })}</span>
@@ -277,11 +277,12 @@ window.LoadToAgentAppFactories.createTmuxRenderer = function createTmuxRenderer(
     const index = tmuxEntities(tmux);
     const path = tmuxFocusPath(index);
     $("#tmuxBreadcrumbs").innerHTML = path.length
-      ? `<button type="button" data-tmux-reset>${t('tmux.full_list')}</button>${path
+      ? `<button type="button" data-tmux-reset tabindex="-1">${t('tmux.full_list')}</button>${path
           .map(
-            (item) => `<i>›</i>
+            (item) => `<i aria-hidden="true">›</i>
       <button type="button"
         class="${item.type === state.tmuxFocus.type && item.id === state.tmuxFocus.id ? "current" : ""}"
+        ${item.type === state.tmuxFocus.type && item.id === state.tmuxFocus.id ? 'aria-current="location" tabindex="0"' : 'tabindex="-1"'}
         data-tmux-type="${item.type}" data-tmux-id="${esc(item.id)}">
         ${esc(item.label)}
       </button>`,
@@ -303,7 +304,7 @@ window.LoadToAgentAppFactories.createTmuxRenderer = function createTmuxRenderer(
     $("#tmuxMap").innerHTML = distros
       .map(
         (distro) => `<section class="tmux-distro-group">
-      <button type="button" class="tmux-distro-node" data-tmux-type="distro" data-tmux-id="${esc(distro.id)}">
+      <button type="button" class="tmux-distro-node" data-tmux-type="distro" data-tmux-id="${esc(distro.id)}" aria-pressed="${state.tmuxFocus?.type === "distro" && state.tmuxFocus?.id === distro.id ? "true" : "false"}">
       <span>${esc(environmentLabel)}</span>
       <div>
       <small>${t('tmux.runtime_environment')}</small>
@@ -318,6 +319,9 @@ window.LoadToAgentAppFactories.createTmuxRenderer = function createTmuxRenderer(
       </section>`,
       )
       .join("");
+    const mapNodes = Array.from($("#tmuxMap").querySelectorAll("[data-tmux-type][data-tmux-id]"));
+    const focusedNode = mapNodes.find((node) => node.dataset.tmuxType === state.tmuxFocus?.type && node.dataset.tmuxId === state.tmuxFocus?.id) || mapNodes[0];
+    mapNodes.forEach((node) => { node.tabIndex = node === focusedNode ? 0 : -1; });
   }
 
   return { tmuxEntities, tmuxFocusPath, linkedTmuxSubagents, tmuxPaneCard, tmuxWindowTree, tmuxSessionTree, filteredTmuxDistros, renderTmuxMap };

@@ -4,10 +4,9 @@ window.LoadToAgentAppFactories = window.LoadToAgentAppFactories || {};
 
 window.LoadToAgentAppFactories.createNavigationEventBindings = function createNavigationEventBindings(context = {}) {
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
-  const errorText = (error, key) => window.LoadToAgentI18n.errorText(error, key);
   const {
     $, state, motionPreference, saveGuideState, selectView, renderUpdateSettings,
-    filteredSessions, renderSessions, openRunModal, openDrawer, toast,
+    filteredSessions, renderSessions, openRunModal, openDrawer, toast, performUiAction,
   } = context;
 
   function bindNavigationAndUpdateEvents() {
@@ -15,6 +14,18 @@ window.LoadToAgentAppFactories.createNavigationEventBindings = function createNa
       const button = event.target.closest(".nav-item");
       if (!button || !button.dataset.view) return;
       selectView(button.dataset.view);
+    });
+    $(".view-nav").addEventListener("keydown", (event) => {
+      if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+      const buttons = Array.from(document.querySelectorAll(".view-nav .nav-item[data-view]")).filter((button) => !button.hidden);
+      const current = Math.max(0, buttons.indexOf(event.target.closest(".nav-item[data-view]")));
+      const next = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? buttons.length - 1
+          : (current + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+      event.preventDefault();
+      buttons[next]?.focus();
     });
     $("#updateNoticeBtn").addEventListener("click", () => {
       selectView("settings");
@@ -58,39 +69,49 @@ window.LoadToAgentAppFactories.createNavigationEventBindings = function createNa
       $("#mobileMoreBtn").setAttribute("aria-expanded", opening ? "true" : "false");
       if (opening) setTimeout(() => menu.querySelector("button")?.focus(), 0);
     });
+    $("#mobileToolsMenu").addEventListener("keydown", (event) => {
+      if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+      const buttons = Array.from(event.currentTarget.querySelectorAll("button:not([disabled])"));
+      const current = Math.max(0, buttons.indexOf(event.target.closest("button")));
+      const next = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? buttons.length - 1
+          : (current + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+      event.preventDefault();
+      buttons[next]?.focus();
+    });
     $("#mobileToolsMenu").addEventListener("click", (event) => {
       const button = event.target.closest("[data-mobile-view]");
       if (button) selectView(button.dataset.mobileView, { focusMain: true });
     });
+    document.addEventListener("pointerdown", (event) => {
+      const menu = $("#mobileToolsMenu");
+      if (menu.classList.contains("hidden") || menu.contains(event.target) || $("#mobileMoreBtn").contains(event.target)) return;
+      const focusWasInside = menu.contains(document.activeElement);
+      menu.classList.add("hidden");
+      $("#mobileMoreBtn").setAttribute("aria-expanded", "false");
+      if (focusWasInside) $("#mobileMoreBtn").focus({ preventScroll: true });
+    });
     $("#checkUpdateBtn").addEventListener("click", async () => {
-      try {
-        state.update = { ...(state.update || {}), status: "checking", error: "" };
-        renderUpdateSettings();
-        state.update = await window.loadtoagent.checkForUpdate();
-        renderUpdateSettings();
-      } catch (error) {
-        toast(errorText(error, "ui.could_not_check_for_updates"));
-      }
+      state.update = { ...(state.update || {}), status: "checking", error: "" };
+      renderUpdateSettings();
+      const update = await performUiAction(() => window.loadtoagent.checkForUpdate(), "ui.could_not_check_for_updates", $("#checkUpdateBtn"));
+      if (update) state.update = update;
+      else state.update = { ...(state.update || {}), status: "error" };
+      renderUpdateSettings();
     });
     $("#installUpdateBtn").addEventListener("click", async () => {
-      try {
-        state.update = { ...(state.update || {}), status: "downloading", error: "" };
-        renderUpdateSettings();
-        state.update = await window.loadtoagent.installDownloadedUpdate();
-        renderUpdateSettings();
-        if (state.update && state.update.installMode === "manual") toast(t("ui.open_installer"));
-      } catch (error) {
-        if (state.update && state.update.asset) state.update.status = "available";
-        renderUpdateSettings();
-        toast(errorText(error, "ui.could_not_prepare_the_update_file"));
-      }
+      state.update = { ...(state.update || {}), status: "downloading", error: "" };
+      renderUpdateSettings();
+      const update = await performUiAction(() => window.loadtoagent.installDownloadedUpdate(), "ui.could_not_prepare_the_update_file", $("#installUpdateBtn"));
+      if (update) state.update = update;
+      else if (state.update && state.update.asset) state.update.status = "available";
+      renderUpdateSettings();
+      if (state.update && state.update.installMode === "manual") toast(t("ui.open_installer"));
     });
     $("#openReleaseBtn").addEventListener("click", async () => {
-      try {
-        await window.loadtoagent.openUpdateRelease();
-      } catch (error) {
-        toast(errorText(error, "ui.could_not_open_the_github_release_page"));
-      }
+      await performUiAction(() => window.loadtoagent.openUpdateRelease(), "ui.could_not_open_the_github_release_page", $("#openReleaseBtn"));
     });
   }
 

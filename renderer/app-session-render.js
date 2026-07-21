@@ -215,6 +215,8 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
     const graphLiveCount = showMap ? renderAgentMap(graphFilteredSessions(), motionKind) : 0;
     const regular = state.view === "all" ? sessions.filter((session) => !isLiveSession(session)) : state.view === "active" ? [] : sessions;
     const visible = regular.slice(0, state.visibleLimit);
+    const resultCount = graphLiveCount + regular.length;
+    $("#sessionResultSummary").textContent = window.LoadToAgentI18n.t("quality.results_summary", { count: resultCount });
     $("#liveSection").classList.toggle("hidden", graphLiveCount === 0);
     $("#viewTitle").textContent = VIEW_TITLES[state.view] || window.LoadToAgentI18n.t("ui.recent_conversations_and_tasks");
     $("#sessionGrid").innerHTML = visible.map((session) => sessionCard(session)).join("");
@@ -222,6 +224,8 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
     $("#loadMoreBtn").classList.toggle("hidden", regular.length <= state.visibleLimit);
     $("#loadMoreBtn").textContent = window.LoadToAgentI18n.t("common.remaining", { count: regular.length - state.visibleLimit });
     $("#emptyState").classList.toggle("hidden", graphLiveCount + regular.length !== 0);
+    const hasConditions = Boolean(state.search || state.providerFilters.size || state.workspace !== "all" || state.sort !== "recent");
+    $("#emptyClearFiltersBtn").classList.toggle("hidden", resultCount !== 0 || !hasConditions);
     if (graphLiveCount + regular.length === 0) {
       const emptyCopy = state.search
         ? [window.LoadToAgentI18n.t("ui.no_search_results"), window.LoadToAgentI18n.t("ui.clear_the_search_or_change_the_ai_and_workspace_filters")]

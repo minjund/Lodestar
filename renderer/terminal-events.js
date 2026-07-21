@@ -10,15 +10,32 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
     closeTmuxModal, errorMessage, notice, reorderSession, moveSessionByOffset,
   } = context;
 
+  const runBusy = async (button, action) => {
+    if (!button || button.dataset.busy === 'true') return null;
+    const wasDisabled = button.disabled;
+    button.dataset.busy = 'true';
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    try {
+      return await action();
+    } finally {
+      if (button.isConnected) {
+        delete button.dataset.busy;
+        button.disabled = wasDisabled;
+        button.removeAttribute('aria-busy');
+      }
+    }
+  };
+
   bindTerminalSessionEvents();
   bindTmuxEvents();
   bindTerminalWindowAndPreloadEvents();
 
   function bindTerminalSessionEvents() {
-    $('#newPowerShellBtn').addEventListener('click', () => createTerminal(state.platform.localShell));
-    $('#newWslBtn').addEventListener('click', () => createTerminal('wsl'));
+    $('#newPowerShellBtn').addEventListener('click', event => runBusy(event.currentTarget, () => createTerminal(state.platform.localShell)));
+    $('#newWslBtn').addEventListener('click', event => runBusy(event.currentTarget, () => createTerminal('wsl')));
     $('#newTmuxSessionBtn').addEventListener('click', openTmuxModal);
-    $('#refreshTmuxTerminalBtn').addEventListener('click', refreshSnapshot);
+    $('#refreshTmuxTerminalBtn').addEventListener('click', event => runBusy(event.currentTarget, refreshSnapshot));
     const sessionList = $('#terminalSessionList');
     const clearDropMarkers = () => {
       sessionList.querySelectorAll('.dragging, .drop-before, .drop-after').forEach(item => {
@@ -88,6 +105,19 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
     });
     sessionList.addEventListener('keydown', event => {
       const item = event.target.closest('[data-terminal-id]');
+      if (item && !event.altKey && ['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+        const items = Array.from(sessionList.querySelectorAll('[data-terminal-id]'));
+        const current = Math.max(0, items.indexOf(item));
+        const next = event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? items.length - 1
+            : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        event.preventDefault();
+        items.forEach((candidate, index) => { candidate.tabIndex = index === next ? 0 : -1; });
+        items[next]?.focus();
+        return;
+      }
       if (!item || !event.altKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
       event.preventDefault();
       const changed = moveSessionByOffset(item.dataset.terminalId, event.key === 'ArrowUp' ? -1 : 1);
@@ -100,38 +130,109 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
       const item = event.target.closest('[data-tmux-distro][data-tmux-pane]');
       if (item) selectTmux(item.dataset.tmuxDistro, item.dataset.tmuxPane);
     });
+    $('#terminalTmuxList').addEventListener('keydown', event => {
+      if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+      const items = Array.from(event.currentTarget.querySelectorAll('[data-tmux-distro][data-tmux-pane]'));
+      const current = Math.max(0, items.indexOf(event.target.closest('[data-tmux-distro][data-tmux-pane]')));
+      const next = event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? items.length - 1
+          : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      event.preventDefault();
+      items.forEach((candidate, index) => { candidate.tabIndex = index === next ? 0 : -1; });
+      items[next]?.focus();
+    });
     $('#terminalCommandForm').addEventListener('submit', async event => {
       event.preventDefault();
       if (state.commandSending) return;
       const input = $('#terminalCommandInput');
       const sent = await sendCommand(input.value);
-      if (!sent) return;
+      if (!sent) {
+        if ($('#terminalNotice')?.dataset.tone === 'error') $('#terminalNotice').focus({ preventScroll: true });
+        return;
+      }
+      const targetId = currentTargetId();
+      const history = state.commandHistory.get(targetId) || [];
+      const command = input.value;
+      if (command && history[history.length - 1] !== command) state.commandHistory.set(targetId, [...history, command].slice(-100));
       input.value = '';
-      state.commandDrafts.delete(currentTargetId());
+      state.commandDrafts.delete(targetId);
+      state.commandHistoryNavigation = { targetId, index: -1, draft: '' };
+      $('#terminalCommandClearBtn').classList.add('hidden');
+      $('#terminalCommandCount').classList.remove('warning');
       input.focus({ preventScroll: true });
     });
     $('#terminalCommandInput').addEventListener('input', event => {
       const targetId = currentTargetId();
       if (targetId) state.commandDrafts.set(targetId, event.target.value);
+      $('#terminalCommandCount').textContent = `${event.target.value.length.toLocaleString()} / 8,000`;
+      $('#terminalCommandClearBtn').classList.toggle('hidden', !event.target.value);
+      const count = $('#terminalCommandCount');
+      const wasWarning = count.dataset.warning === 'true';
+      const warning = event.target.value.length >= 7_200;
+      count.classList.toggle('warning', warning);
+      count.dataset.warning = warning ? 'true' : 'false';
+      if (warning && !wasWarning) window.LoadToAgentA11y?.announce(t('quality.command_near_limit', { count: 8_000 - event.target.value.length }));
+      state.commandHistoryNavigation = { targetId, index: -1, draft: event.target.value };
     });
     $('#terminalCommandInput').addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
         event.preventDefault();
         $('#terminalCommandForm').requestSubmit();
+        return;
       }
+      if (event.key === 'Escape' && event.currentTarget.value) {
+        event.preventDefault();
+        $('#terminalCommandClearBtn').click();
+        return;
+      }
+      if (!['ArrowUp', 'ArrowDown'].includes(event.key) || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+      const targetId = currentTargetId();
+      const history = state.commandHistory.get(targetId) || [];
+      if (!history.length) return;
+      event.preventDefault();
+      let navigation = state.commandHistoryNavigation;
+      if (navigation.targetId !== targetId || navigation.index < 0) navigation = { targetId, index: history.length, draft: event.currentTarget.value };
+      if (event.key === 'ArrowUp') navigation.index = Math.max(0, navigation.index - 1);
+      else navigation.index = Math.min(history.length, navigation.index + 1);
+      event.currentTarget.value = navigation.index >= history.length ? navigation.draft : history[navigation.index];
+      state.commandHistoryNavigation = navigation;
+      state.commandDrafts.set(targetId, event.currentTarget.value);
+      $('#terminalCommandClearBtn').classList.toggle('hidden', !event.currentTarget.value);
+      $('#terminalCommandCount').textContent = `${event.currentTarget.value.length.toLocaleString()} / 8,000`;
+      const input = event.currentTarget;
+      requestAnimationFrame(() => {
+        if (input.isConnected) input.setSelectionRange(input.value.length, input.value.length);
+      });
+    });
+    $('#terminalCommandClearBtn').addEventListener('click', () => {
+      const input = $('#terminalCommandInput');
+      input.value = '';
+      const targetId = currentTargetId();
+      if (targetId) state.commandDrafts.delete(targetId);
+      state.commandHistoryNavigation = { targetId, index: -1, draft: '' };
+      $('#terminalCommandClearBtn').classList.add('hidden');
+      $('#terminalCommandCount').textContent = '0 / 8,000';
+      $('#terminalCommandCount').classList.remove('warning');
+      input.focus({ preventScroll: true });
+      window.LoadToAgentA11y?.announce(t('quality.terminal_draft_cleared'));
     });
     document.querySelectorAll('[data-terminal-signal]').forEach(button => button.addEventListener('click', () => sendSignal(button.dataset.terminalSignal)));
-    $('#terminalRestartBtn').addEventListener('click', async () => {
+    $('#terminalRestartBtn').addEventListener('click', async event => {
       const session = currentSession();
       if (!session) return;
-      const restarted = await guarded(() => window.loadtoagent.terminalRestart(session.id), t('terminal.session.restarted'));
-      if (restarted) {
-        const entry = state.terminals.get(session.id);
-        if (entry) entry.terminal.reset();
-        await refreshSessions();
-      }
+      await runBusy(event.currentTarget, async () => {
+        const restarted = await guarded(() => window.loadtoagent.terminalRestart(session.id), t('terminal.session.restarted'), `terminal-restart:${session.id}`);
+        if (restarted) {
+          const entry = state.terminals.get(session.id);
+          if (entry) entry.terminal.reset();
+          await refreshSessions();
+        }
+      });
+      renderAll();
     });
-    $('#terminalCloseBtn').addEventListener('click', async () => {
+    $('#terminalCloseBtn').addEventListener('click', async event => {
       const session = currentSession();
       if (!session) {
         state.selectedTmux = null;
@@ -140,21 +241,24 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
         return;
       }
       if (session.status === 'running' && !window.confirm(t('terminal.session.confirm_end', { title: session.title }))) return;
-      const closed = await guarded(() => window.loadtoagent.terminalClose(session.id), t('terminal.session.ended'));
-      if (!closed) return;
-      const entry = state.terminals.get(session.id);
-      if (entry) {
-        entry.terminal.dispose();
-        entry.host.remove();
-        state.terminals.delete(session.id);
-      }
-      state.commandDrafts.delete(session.id);
-      state.selectedId = null;
-      if (state.boundTargetId === session.id) {
-        state.boundAgent = null;
-        state.boundTargetId = '';
-      }
-      await refreshSessions();
+      await runBusy(event.currentTarget, async () => {
+        const closed = await guarded(() => window.loadtoagent.terminalClose(session.id), t('terminal.session.ended'), `terminal-close:${session.id}`);
+        if (!closed) return;
+        const entry = state.terminals.get(session.id);
+        if (entry) {
+          entry.terminal.dispose();
+          entry.host.remove();
+          state.terminals.delete(session.id);
+        }
+        state.commandDrafts.delete(session.id);
+        state.selectedId = null;
+        if (state.boundTargetId === session.id) {
+          state.boundAgent = null;
+          state.boundTargetId = '';
+        }
+        await refreshSessions();
+      });
+      renderAll();
     });
     $('#terminalHistoryToggle').addEventListener('click', () => {
       state.historyCollapsed = !state.historyCollapsed;
@@ -165,21 +269,26 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
   }
 
   function bindTmuxEvents() {
-    $('#terminalAttachBtn').addEventListener('click', attachTmux);
+    $('#terminalAttachBtn').addEventListener('click', event => runBusy(event.currentTarget, attachTmux));
     $('#terminalTmuxTools').addEventListener('click', event => {
       const button = event.target.closest('[data-tmux-manage]');
-      if (button) manageTmux(button.dataset.tmuxManage);
+      if (button) runBusy(button, () => manageTmux(button.dataset.tmuxManage));
     });
     $('#terminalTmuxLayout').addEventListener('change', async event => {
       const remote = currentTmux();
       if (!remote) return;
-      const result = await guarded(() => window.loadtoagent.tmuxSelectLayout({ distro: remote.distro.name, target: remote.window.nativeId, layout: event.target.value }), t('terminal.tmux.layout_changed'));
+      const result = await guarded(() => window.loadtoagent.tmuxSelectLayout({ distro: remote.distro.name, target: remote.window.nativeId, layout: event.target.value }), t('terminal.tmux.layout_changed'), `tmux-layout:${remote.window.nativeId}`);
       if (result) setTimeout(refreshSnapshot, 250);
     });
     $('#tmuxCreateForm').addEventListener('submit', async event => {
       event.preventDefault();
       const submit = event.currentTarget.querySelector('[type="submit"]');
+      if (submit.dataset.busy === 'true') return;
+      submit.dataset.busy = 'true';
       submit.disabled = true;
+      submit.setAttribute('aria-busy', 'true');
+      $('#closeTmuxCreateBtn').disabled = true;
+      $('#cancelTmuxCreateBtn').disabled = true;
       const error = $('#tmuxCreateError');
       error.classList.add('hidden');
       try {
@@ -190,23 +299,55 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
           command: $('#tmuxCreateCommand').value,
         });
         if (result && result.ok) {
-          closeTmuxModal();
+          closeTmuxModal(true);
           notice(t('terminal.tmux.workspace_created'), 'success');
           setTimeout(refreshSnapshot, 300);
         } else {
           error.textContent = result && result.error || t('terminal.tmux.workspace_create_failed');
           error.classList.remove('hidden');
+          error.focus({ preventScroll: true });
         }
       } catch (failure) {
         error.textContent = errorMessage(failure);
         error.classList.remove('hidden');
+        error.focus({ preventScroll: true });
       } finally {
+        delete submit.dataset.busy;
         submit.disabled = false;
+        submit.removeAttribute('aria-busy');
+        $('#closeTmuxCreateBtn').disabled = false;
+        $('#cancelTmuxCreateBtn').disabled = false;
       }
     });
-    $('#closeTmuxCreateBtn').addEventListener('click', closeTmuxModal);
-    $('#cancelTmuxCreateBtn').addEventListener('click', closeTmuxModal);
-    $('#tmuxCreateModal').addEventListener('click', event => { if (event.target === event.currentTarget) closeTmuxModal(); });
+    $('#tmuxCreateForm').addEventListener('invalid', event => {
+      event.target.setAttribute('aria-invalid', 'true');
+    }, true);
+    $('#tmuxCreateForm').addEventListener('input', event => {
+      if (event.target.matches('input, textarea, select') && event.target.checkValidity()) event.target.removeAttribute('aria-invalid');
+    });
+    $('#tmuxCreateName').addEventListener('blur', event => {
+      const normalized = event.target.value.trim().replace(/\s+/g, '-');
+      if (normalized !== event.target.value) {
+        event.target.value = normalized;
+        event.target.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+    $('#pickTmuxCwdBtn').addEventListener('click', event => runBusy(event.currentTarget, async () => {
+      try {
+        const folder = await window.loadtoagent.pickWorkspace();
+        if (folder) $('#tmuxCreateCwd').value = folder;
+      } catch (failure) {
+        notice(errorMessage(failure), 'error');
+      }
+    }));
+    $('#closeTmuxCreateBtn').addEventListener('click', () => closeTmuxModal());
+    $('#cancelTmuxCreateBtn').addEventListener('click', () => closeTmuxModal());
+    let tmuxBackdropPress = null;
+    $('#tmuxCreateModal').addEventListener('pointerdown', event => { tmuxBackdropPress = event.target === event.currentTarget; });
+    $('#tmuxCreateModal').addEventListener('click', event => {
+      if (event.target === event.currentTarget && tmuxBackdropPress !== false) closeTmuxModal();
+      tmuxBackdropPress = null;
+    });
   }
 
   function bindTerminalWindowAndPreloadEvents() {

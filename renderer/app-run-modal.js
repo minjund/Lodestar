@@ -15,10 +15,14 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
     markGuideStep,
     rememberDialogTrigger,
     restoreDialogTrigger,
+    setDialogOpenState,
+    announce,
     providerInfo,
     providerStyle,
     visibleProviders = () => state.providers,
     isProviderVisible = () => true,
+    restoreRunDraft = () => {},
+    clearRunDraft = () => {},
   } = context;
 
   function providerPickerHtml() {
@@ -29,7 +33,8 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
         return `<button type="button" class="run-provider-option ${selected ? "selected" : ""}"
           data-run-provider="${esc(provider.id)}"
           style="${providerStyle(provider.id)}"
-          aria-pressed="${selected ? "true" : "false"}"
+          role="radio" aria-checked="${selected ? "true" : "false"}"
+          tabindex="${selected ? "0" : "-1"}"
           ${installed ? "" : "disabled"}>
         <span class="provider-mini-mark">${esc(provider.mark)}</span>
         <span class="run-provider-copy">
@@ -76,7 +81,7 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
       .map((workspace) => {
         const path = workspace.path || workspace.name || "";
         const active = path === selected;
-        return `<button type="button" data-run-workspace="${esc(path)}" class="${active ? "selected" : ""}" title="${esc(path)}">
+        return `<button type="button" data-run-workspace="${esc(path)}" class="${active ? "selected" : ""}" title="${esc(path)}" aria-pressed="${active ? "true" : "false"}">
         <span aria-hidden="true">⌘</span>
         ${esc(workspace.name || path.split(/[\\/]/).filter(Boolean).pop() || window.LoadToAgentI18n.t("ui.workspaces"))}
         </button>`;
@@ -87,7 +92,14 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
   function syncRunComposer() {
     const prompt = $("#runPrompt");
     const count = $("#runPromptCount");
-    if (prompt && count) count.textContent = `${prompt.value.length.toLocaleString(uiLocale())} / 8,000`;
+    if (prompt && count) {
+      const wasWarning = count.dataset.warning === "true";
+      const warning = prompt.value.length >= 7_200;
+      count.textContent = `${prompt.value.length.toLocaleString(uiLocale())} / 8,000`;
+      count.classList.toggle("warning", warning);
+      count.dataset.warning = warning ? "true" : "false";
+      if (warning && !wasWarning) announce(t("run.prompt_near_limit", { count: Math.max(0, 8_000 - prompt.value.length) }));
+    }
     const submitLabel = $("#runSubmitLabel");
     const submit = $('#runForm button[type="submit"]');
     const hasProvider = isProviderVisible(state.runProvider) && Boolean(state.availability[state.runProvider]);
@@ -120,6 +132,8 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
     submit.dataset.submitting = submitting ? "true" : "false";
     submit.disabled = submitting || !isProviderVisible(state.runProvider) || !state.availability[state.runProvider];
     submit.setAttribute("aria-busy", submitting ? "true" : "false");
+    $("#closeRunModalBtn").disabled = submitting;
+    $("#cancelRunBtn").disabled = submitting;
     const label = $("#runSubmitLabel");
     if (label) label.textContent = submitting
       ? t("run.preparing")
@@ -128,6 +142,7 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
 
   function openRunModal() {
     rememberDialogTrigger();
+    restoreRunDraft();
     const installed = visibleProviders().find((provider) => state.availability[provider.id]);
     if ((!isProviderVisible(state.runProvider) || !state.availability[state.runProvider]) && installed) state.runProvider = installed.id;
     if (!isProviderVisible(state.runProvider)) state.runProvider = visibleProviders()[0]?.id || "";
@@ -142,6 +157,7 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
     syncRunComposer();
     clearTimeout(motionState.modalTimer);
     clearTimeout(motionState.modalFocusTimer);
+    setDialogOpenState($("#runModal"), true);
     $("#runModal").classList.remove("hidden", "closing");
     const focusPromptIfOutside = () => {
       const modal = $("#runModal");
@@ -153,9 +169,10 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
     motionState.modalFocusTimer = setTimeout(focusPromptIfOutside, motionPreference.matches ? 0 : 300);
   }
 
-  function closeRunModal() {
+  function closeRunModal(force = false) {
     const modal = $("#runModal");
     if (modal.classList.contains("hidden") || modal.classList.contains("closing")) return;
+    if (force !== true && $('#runForm button[type="submit"]').dataset.submitting === "true") return;
     const modalGeneration = motionState.dialogGeneration;
     clearTimeout(motionState.modalFocusTimer);
     modal.classList.add("closing");
@@ -164,6 +181,7 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
       () => {
         modal.classList.add("hidden");
         modal.classList.remove("closing");
+        setDialogOpenState(modal, false);
         restoreDialogTrigger(modalGeneration);
       },
       motionPreference.matches ? 0 : 220,
@@ -187,20 +205,52 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
     }, 3200);
   }
 
-  async function performUiAction(action, failureMessage) {
+  async function performUiAction(action, failureMessage, control = null) {
+    if (control?.dataset.busy === "true") return null;
+    const wasDisabled = Boolean(control?.disabled);
+    if (control) {
+      control.dataset.busy = "true";
+      control.disabled = true;
+      control.setAttribute("aria-busy", "true");
+    }
     try {
       return await action();
     } catch (error) {
       toast(window.LoadToAgentI18n.errorText(error, failureMessage));
       return null;
+    } finally {
+      if (control?.isConnected) {
+        delete control.dataset.busy;
+        control.disabled = wasDisabled;
+        control.removeAttribute("aria-busy");
+      }
     }
   }
 
   async function handleRun(event) {
     event.preventDefault();
+    const prompt = $("#runPrompt");
+    const cwd = $("#runCwd");
+    const invalid = [];
+    if (!prompt.value.trim()) {
+      prompt.setAttribute("aria-invalid", "true");
+      invalid.push({ element: prompt, message: t("quality.run_prompt_required") });
+    }
+    if (!cwd.value.trim()) {
+      cwd.setAttribute("aria-invalid", "true");
+      invalid.push({ element: cwd, message: t("quality.run_cwd_required") });
+    }
+    if (invalid.length) {
+      $("#runError").textContent = invalid[0].message;
+      $("#runError").classList.remove("hidden");
+      invalid[0].element.focus({ preventScroll: true });
+      announce(invalid[0].message);
+      return;
+    }
     if (!isProviderVisible(state.runProvider) || !state.availability[state.runProvider]) {
       $("#runError").textContent = window.LoadToAgentI18n.t("ui.no_ai_cli_is_ready_follow_the_official_setup_guide");
       $("#runError").classList.remove("hidden");
+      $("#runError").focus({ preventScroll: true });
       return;
     }
     setRunSubmitting(true);
@@ -215,13 +265,14 @@ window.LoadToAgentAppFactories.createRunModal = function createRunModal(context 
       });
       if (!result.ok) throw new Error(result.error || window.LoadToAgentI18n.t("ui.could_not_start_the_task"));
       markGuideStep("create");
-      closeRunModal();
-      $("#runPrompt").value = "";
+      closeRunModal(true);
+      clearRunDraft({ silent: true, focus: false });
       syncRunComposer();
       toast(window.LoadToAgentI18n.t("provider.started", { provider: providerInfo(state.runProvider).label }));
     } catch (error) {
       $("#runError").textContent = window.LoadToAgentI18n.errorText(error, "ui.could_not_start_the_task");
       $("#runError").classList.remove("hidden");
+      $("#runError").focus({ preventScroll: true });
     } finally {
       setRunSubmitting(false);
     }
