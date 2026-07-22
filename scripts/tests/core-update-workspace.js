@@ -166,7 +166,7 @@ function registerCliAndUpdateTests(context) {
     assert.deepStrictEqual(result.files, { packageRoot, helper, addon });
     assert.deepStrictEqual(chmodCalls, [{ file: helper, mode: 0o100755 }]);
     assert.equal(unpackedAsarPath(packageRoot), packageRoot);
-    assert.equal(unpackedAsarPath(packageFile), path.join(packageRoot, 'package.json'));
+    assert.equal(unpackedAsarPath(packageFile), `${packageRoot}/package.json`);
   });
 
   test('Git 태그 버전을 SemVer 순서로 비교한다', () => {
