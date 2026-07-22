@@ -12,6 +12,7 @@ const { canInstallSilently, launchDownloadedUpdate, macAppBundlePath } = require
 const { installMacUpdate } = require('../../src/macUpdateHelper');
 const { normalizeWorkspaces, readWorkspaces, removeWorkspace } = require('../../src/workspaceStore');
 const { macPathEntries, preferredNvmBin } = require('../../src/platformPath');
+const { ensureMacNodePtyRuntime, unpackedAsarPath } = require('../../src/nodePtyRuntime');
 const { ensureMacNodePtySpawnHelpersExecutable } = require('../after-pack');
 
 function registerProviderAndWorkspaceTests(context) {
@@ -130,6 +131,42 @@ function registerCliAndUpdateTests(context) {
     assert.deepStrictEqual(helpers, [helper]);
     assert.deepStrictEqual(calls.chmod, { file: helper, mode: 0o100755 });
     assert.deepStrictEqual(calls.access, { file: helper, mode: 1 });
+  });
+
+  test('macOS node-pty 런타임은 현재 아키텍처 helper 권한과 ASAR 경로를 자가 복구한다', () => {
+    const packageFile = '/Applications/LoadToAgent.app/Contents/Resources/app.asar/node_modules/node-pty/package.json';
+    const packageRoot = '/Applications/LoadToAgent.app/Contents/Resources/app.asar.unpacked/node_modules/node-pty';
+    const helper = path.join(packageRoot, 'prebuilds', 'darwin-arm64', 'spawn-helper');
+    const addon = path.join(packageRoot, 'prebuilds', 'darwin-arm64', 'pty.node');
+    let executable = false;
+    const chmodCalls = [];
+    const fileSystem = {
+      constants: { X_OK: 1 },
+      statSync: file => {
+        assert.ok(file === helper || file === addon);
+        return { isFile: () => true, mode: file === helper ? 0o100644 : 0o100644 };
+      },
+      accessSync: (file, mode) => {
+        assert.equal(file, helper);
+        assert.equal(mode, 1);
+        if (!executable) throw Object.assign(new Error('not executable'), { code: 'EACCES' });
+      },
+      chmodSync: (file, mode) => {
+        chmodCalls.push({ file, mode });
+        executable = true;
+      },
+    };
+    const result = ensureMacNodePtyRuntime({
+      platform: 'darwin',
+      arch: 'arm64',
+      fileSystem,
+      resolvePackage: () => packageFile,
+    });
+    assert.equal(result.repaired, true);
+    assert.deepStrictEqual(result.files, { packageRoot, helper, addon });
+    assert.deepStrictEqual(chmodCalls, [{ file: helper, mode: 0o100755 }]);
+    assert.equal(unpackedAsarPath(packageRoot), packageRoot);
+    assert.equal(unpackedAsarPath(packageFile), path.join(packageRoot, 'package.json'));
   });
 
   test('Git 태그 버전을 SemVer 순서로 비교한다', () => {

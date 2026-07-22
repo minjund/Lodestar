@@ -522,6 +522,98 @@ function registerTerminalLifecycleTests(context) {
     manager.dispose();
   });
 
+  test('PTY 런타임이 바뀌면 이전 터미널 호스트를 종료한 뒤 새 런타임으로 교체한다', async () => {
+    class EmptyManager extends EventEmitter {
+      list() { return []; }
+      on() { return super.on(...arguments); }
+      removeListener() { return super.removeListener(...arguments); }
+    }
+    const manager = new EmptyManager();
+    const discovery = path.join(temp, 'terminal-host-runtime-upgrade.json');
+    const endpoint = suffix => process.platform === 'win32'
+      ? `\\\\.\\pipe\\loadtoagent-host-runtime-${process.pid}-${suffix}`
+      : path.join(os.tmpdir(), `lta-host-runtime-${process.pid}-${suffix}.sock`);
+    const oldServer = new TerminalHostServer({
+      manager,
+      endpoint: endpoint('old'),
+      discoveryFile: discovery,
+      token: 'old-runtime-token',
+      runtime: 'node-pty-1.1.0',
+    });
+    await oldServer.start();
+    let replacementServer = null;
+    let retiredRuntime = '';
+    const client = new TerminalHostClient({
+      discoveryFile: discovery,
+      expectedRuntime: 'node-pty-1.2.0-beta.14',
+      connectTimeoutMs: 2_000,
+      terminateHost: async info => {
+        retiredRuntime = info.runtime;
+        oldServer.dispose();
+      },
+      spawnHost: async () => {
+        replacementServer = new TerminalHostServer({
+          manager,
+          endpoint: endpoint('new'),
+          discoveryFile: discovery,
+          token: 'new-runtime-token',
+          runtime: 'node-pty-1.2.0-beta.14',
+        });
+        await replacementServer.start();
+      },
+    });
+    await client.connect();
+
+    assert.equal(retiredRuntime, 'node-pty-1.1.0');
+    assert.equal(client.connected, true);
+    assert.equal(JSON.parse(fs.readFileSync(discovery, 'utf8')).runtime, 'node-pty-1.2.0-beta.14');
+    client.dispose();
+    replacementServer?.dispose();
+  });
+
+  test('stale 구버전 호스트 정보의 재사용된 PID는 인증 없이 종료하지 않는다', async () => {
+    class EmptyManager extends EventEmitter {
+      list() { return []; }
+      on() { return super.on(...arguments); }
+      removeListener() { return super.removeListener(...arguments); }
+    }
+    const manager = new EmptyManager();
+    const discovery = path.join(temp, 'terminal-host-stale-runtime.json');
+    const replacementEndpoint = process.platform === 'win32'
+      ? `\\\\.\\pipe\\loadtoagent-host-stale-${process.pid}`
+      : path.join(os.tmpdir(), `lta-host-stale-${process.pid}.sock`);
+    fs.writeFileSync(discovery, JSON.stringify({
+      protocol: 1,
+      endpoint: process.platform === 'win32'
+        ? `\\\\.\\pipe\\loadtoagent-missing-${process.pid}`
+        : path.join(os.tmpdir(), `lta-host-missing-${process.pid}.sock`),
+      token: 'stale-token',
+      pid: process.pid,
+    }), 'utf8');
+    let terminated = false;
+    let replacementServer = null;
+    const client = new TerminalHostClient({
+      discoveryFile: discovery,
+      connectTimeoutMs: 2_000,
+      terminateHost: () => { terminated = true; },
+      spawnHost: async () => {
+        replacementServer = new TerminalHostServer({
+          manager,
+          endpoint: replacementEndpoint,
+          discoveryFile: discovery,
+          token: 'replacement-token',
+        });
+        await replacementServer.start();
+      },
+    });
+    await client.connect();
+
+    assert.equal(terminated, false);
+    assert.equal(client.connected, true);
+    client.dispose();
+    replacementServer?.dispose();
+  });
+
   test('터미널 호스트가 죽어도 저장된 실행 세션을 같은 ID와 설정으로 다시 시작한다', () => {
     const processes = [];
     class FakePty {

@@ -41,9 +41,14 @@ const launchMarker = path.join(root, 'relaunched.txt');
 const leakedEnvironmentMarker = path.join(root, 'electron-run-as-node.txt');
 const helperPath = path.join(__dirname, '..', 'src', 'macUpdateHelper.js');
 const helperRuntime = process.env.LOADTOAGENT_UPDATE_TEST_RUNTIME || process.execPath;
+const nodePtyHelper = path.join(
+  'Contents', 'Resources', 'app.asar.unpacked', 'node_modules', 'node-pty',
+  'prebuilds', `darwin-${process.arch}`, 'spawn-helper',
+);
 
 try {
   fs.mkdirSync(path.join(sourceApp, 'Contents', 'MacOS'), { recursive: true });
+  fs.mkdirSync(path.dirname(path.join(sourceApp, nodePtyHelper)), { recursive: true });
   fs.mkdirSync(path.join(targetApp, 'Contents'), { recursive: true });
   fs.writeFileSync(path.join(sourceApp, 'Contents', 'version.txt'), 'new', 'utf8');
   fs.writeFileSync(path.join(targetApp, 'Contents', 'version.txt'), 'old', 'utf8');
@@ -62,6 +67,7 @@ try {
     `#!/bin/sh\nif [ -n "$ELECTRON_RUN_AS_NODE" ]; then /bin/echo "$ELECTRON_RUN_AS_NODE" > ${JSON.stringify(leakedEnvironmentMarker)}; fi\n/usr/bin/touch ${JSON.stringify(launchMarker)}\n`,
     { encoding: 'utf8', mode: 0o755 },
   );
+  fs.writeFileSync(path.join(sourceApp, nodePtyHelper), '#!/bin/sh\nexit 0\n', { encoding: 'utf8', mode: 0o755 });
 
   run('/usr/bin/hdiutil', [
     'create', '-volname', `LoadToAgentUpdateTest-${process.pid}`,
@@ -80,9 +86,10 @@ try {
 
   waitForFile(launchMarker);
   assert.equal(fs.readFileSync(path.join(targetApp, 'Contents', 'version.txt'), 'utf8'), 'new');
+  assert.equal(fs.statSync(path.join(targetApp, nodePtyHelper)).mode & 0o111, 0o111);
   assert.equal(fs.existsSync(leakedEnvironmentMarker), false);
   assert.match(fs.readFileSync(logPath, 'utf8'), /update installed and relaunched/);
-  console.log('✓ 실제 DMG 마운트, 앱 교체, 자동 재실행 통합 테스트 통과');
+  console.log('✓ 실제 DMG 마운트, 실행 권한 보존, 앱 교체, 자동 재실행 통합 테스트 통과');
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }

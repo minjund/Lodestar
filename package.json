@@ -1,6 +1,6 @@
 {
   "name": "loadtoagent",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "description": "A local desktop dashboard for Claude, Codex, Gemini, and Grok sessions.",
   "main": "main.js",
   "author": "wincube AX",
@@ -44,6 +44,7 @@
     "start": "electron .",
     "test": "node scripts/regression-test.js",
     "test:terminal": "electron scripts/terminal-integration-test.js",
+    "test:terminal:mac-stress": "node scripts/mac-terminal-stress-check.js",
     "test:terminal-restart": "node scripts/terminal-restart-persistence-check.js",
     "test:bridge": "electron scripts/bridge-integration-test.js",
     "test:tmux": "node scripts/tmux-integration-test.js",
@@ -56,6 +57,7 @@
     "test:control-room": "electron scripts/control-room-visual.js",
     "test:readability": "electron scripts/readability-visual-check.js",
     "test:update:mac": "node scripts/mac-update-integration-test.js",
+    "test:artifacts:mac": "node scripts/mac-artifact-check.js",
     "demo:readme": "electron scripts/readme-demo.js",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win --publish never",
@@ -70,7 +72,7 @@
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "node-pty": "^1.1.0"
+    "node-pty": "1.2.0-beta.14"
   },
   "peerDependencies": {
     "electron": "^31.0.0"

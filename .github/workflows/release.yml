@@ -89,9 +89,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - if: runner.os == 'macOS'
+        run: npm run test:terminal:mac-stress
       - run: ${{ matrix.command }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - if: runner.os == 'macOS'
+        run: npm run test:artifacts:mac
+      - if: runner.os == 'macOS'
+        run: npm run test:terminal-restart
+        env:
+          LOADTOAGENT_TEST_EXECUTABLE: ${{ github.workspace }}/release/mac/LoadToAgent.app/Contents/MacOS/LoadToAgent
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}

@@ -10,7 +10,8 @@ const { spawn } = require('child_process');
 const { endpointFor, safeWriteJson } = require('./bridgeServer');
 const { runBestEffort } = require('./diagnostics');
 
-const TERMINAL_HOST_PROTOCOL = 1;
+const TERMINAL_HOST_PROTOCOL = 2;
+const TERMINAL_HOST_RUNTIME = `node-pty-${require('node-pty/package.json').version}`;
 const MAX_FRAME_CHARS = 4 * 1024 * 1024;
 const AUTH_TIMEOUT_MS = 5_000;
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -21,12 +22,92 @@ function sendFrame(socket, payload) {
   socket.write(`${JSON.stringify(payload)}\n`, 'utf8');
 }
 
-function readHostDiscovery(file, fileSystem = fs) {
+function incompatibleHostError(message, discovery) {
+  const error = new Error(message);
+  error.code = 'LOADTOAGENT_INCOMPATIBLE_TERMINAL_HOST';
+  error.discovery = discovery;
+  return error;
+}
+
+function readHostDiscovery(file, fileSystem = fs, expectedRuntime = TERMINAL_HOST_RUNTIME) {
   const parsed = JSON.parse(fileSystem.readFileSync(file, 'utf8'));
-  if (parsed?.protocol !== TERMINAL_HOST_PROTOCOL || !parsed.endpoint || !parsed.token) {
+  if (!parsed?.endpoint || !parsed.token || !Number.isSafeInteger(Number(parsed.pid)) || Number(parsed.pid) <= 0) {
     throw new Error('터미널 호스트 연결 정보가 올바르지 않습니다.');
   }
+  if (parsed.protocol !== TERMINAL_HOST_PROTOCOL || parsed.runtime !== expectedRuntime) {
+    throw incompatibleHostError('현재 앱과 호환되지 않는 터미널 호스트입니다.', parsed);
+  }
   return parsed;
+}
+
+function verifyHostDiscovery(discovery, timeoutMs = 1_500) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(discovery.endpoint);
+    let buffer = '';
+    let settled = false;
+    const finish = error => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = setTimeout(() => finish(new Error('이전 터미널 호스트 인증 시간이 초과되었습니다.')), timeoutMs);
+    socket.setNoDelay(true);
+    socket.on('connect', () => sendFrame(socket, { type: 'authenticate', token: discovery.token }));
+    socket.on('data', chunk => {
+      buffer += chunk.toString('utf8');
+      if (buffer.length > MAX_FRAME_CHARS) {
+        finish(new Error('이전 터미널 호스트 응답이 너무 큽니다.'));
+        return;
+      }
+      let newline;
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (!line) continue;
+        try {
+          if (JSON.parse(line).type === 'ready') {
+            finish();
+            return;
+          }
+        } catch (_invalidFrame) {}
+      }
+    });
+    socket.on('error', finish);
+    socket.on('close', () => {
+      if (!settled) finish(new Error('이전 터미널 호스트 인증 연결이 닫혔습니다.'));
+    });
+  });
+}
+
+function processExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === 'ESRCH') return false;
+    if (error?.code === 'EPERM') return true;
+    throw error;
+  }
+}
+
+async function terminateHostProcess(discovery) {
+  const pid = Number(discovery?.pid);
+  if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) {
+    throw new Error('교체할 터미널 호스트 프로세스 정보가 올바르지 않습니다.');
+  }
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch (error) {
+    if (error?.code !== 'ESRCH') throw error;
+  }
+  const deadline = Date.now() + 3_000;
+  while (processExists(pid)) {
+    if (Date.now() >= deadline) throw new Error(`이전 터미널 호스트가 종료되지 않았습니다: PID ${pid}`);
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
 }
 
 function activeSessions(manager) {
@@ -40,6 +121,7 @@ class TerminalHostServer {
     this.discoveryFile = path.resolve(options.discoveryFile || path.join(os.tmpdir(), 'loadtoagent-terminal-host.json'));
     this.endpoint = options.endpoint || endpointFor(this.platform, `${path.dirname(this.discoveryFile)}:terminal-host`);
     this.token = options.token || crypto.randomBytes(32).toString('hex');
+    this.runtime = String(options.runtime || TERMINAL_HOST_RUNTIME);
     this.server = null;
     this.clients = new Set();
     this.shutdownTimer = null;
@@ -57,6 +139,7 @@ class TerminalHostServer {
   info() {
     return {
       protocol: TERMINAL_HOST_PROTOCOL,
+      runtime: this.runtime,
       endpoint: this.endpoint,
       token: this.token,
       pid: process.pid,
@@ -207,7 +290,7 @@ class TerminalHostServer {
     if (this.server) runBestEffort('terminal-host-server-close', () => this.server.close());
     this.server = null;
     try {
-      const current = readHostDiscovery(this.discoveryFile);
+      const current = readHostDiscovery(this.discoveryFile, fs, this.runtime);
       if (current.pid === process.pid && current.token === this.token) fs.unlinkSync(this.discoveryFile);
     } catch (_missingOrReplacedDiscovery) {}
     if (this.platform !== 'win32' && fs.existsSync(this.endpoint)) {
@@ -263,6 +346,9 @@ class TerminalHostClient extends EventEmitter {
     this.discoveryFile = path.resolve(options.discoveryFile);
     this.spawnHost = typeof options.spawnHost === 'function' ? options.spawnHost : null;
     this.connectTimeoutMs = Number(options.connectTimeoutMs || 12_000);
+    this.expectedRuntime = String(options.expectedRuntime || TERMINAL_HOST_RUNTIME);
+    this.verifyHost = typeof options.verifyHost === 'function' ? options.verifyHost : verifyHostDiscovery;
+    this.terminateHost = typeof options.terminateHost === 'function' ? options.terminateHost : terminateHostProcess;
     this.socket = null;
     this.buffer = '';
     this.connected = false;
@@ -300,6 +386,16 @@ class TerminalHostClient extends EventEmitter {
       } catch (error) {
         lastError = error;
         this.resetSocket();
+        if (error?.code === 'LOADTOAGENT_INCOMPATIBLE_TERMINAL_HOST') {
+          let verified = false;
+          try {
+            await Promise.resolve(this.verifyHost(error.discovery));
+            verified = true;
+          } catch (verificationError) {
+            lastError = verificationError;
+          }
+          if (verified) await Promise.resolve(this.terminateHost(error.discovery));
+        }
       }
       if (!launched) {
         if (!this.spawnHost) throw lastError;
@@ -313,7 +409,7 @@ class TerminalHostClient extends EventEmitter {
   }
 
   connectExisting() {
-    const discovery = readHostDiscovery(this.discoveryFile);
+    const discovery = readHostDiscovery(this.discoveryFile, fs, this.expectedRuntime);
     return new Promise((resolve, reject) => {
       const socket = net.createConnection(discovery.endpoint);
       const timer = setTimeout(() => {
@@ -449,7 +545,10 @@ module.exports = {
   TerminalHostServer,
   TerminalHostClient,
   TERMINAL_HOST_PROTOCOL,
+  TERMINAL_HOST_RUNTIME,
   readHostDiscovery,
+  verifyHostDiscovery,
+  terminateHostProcess,
   launchTerminalHost,
   resolveTerminalHostExecutable,
 };

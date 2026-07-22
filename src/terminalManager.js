@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const { spawn: spawnChild } = require('child_process');
 const { runBestEffort } = require('./diagnostics');
+const { ensureMacNodePtyRuntime } = require('./nodePtyRuntime');
 
 const MAX_SESSIONS = 24;
 const MAX_INPUT_CHARS = 128 * 1024;
@@ -370,7 +371,10 @@ class TerminalManager extends EventEmitter {
   }
 
   pty() {
-    if (!this.ptyModule) this.ptyModule = require('node-pty');
+    if (!this.ptyModule) {
+      ensureMacNodePtyRuntime({ platform: this.platform });
+      this.ptyModule = require('node-pty');
+    }
     return this.ptyModule;
   }
 
