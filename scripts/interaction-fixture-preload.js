@@ -68,8 +68,19 @@ const rootSession = {
 
 const childSession = {
   ...rootSession, id: 'fixture-child', externalId: 'fixture-child-external', provider: 'gpt', model: 'gpt-fixture',
-  title: '하위 상호작용 검증', parentId: 'fixture-root', childIds: ['fixture-grandchild'], agentName: 'button-auditor', agentRole: 'tester',
-  runtimePresence: [], executions: [], runId: '', collaboration: { communications: [
+  title: '세션 관제 화면의 읽기 흐름과 개입 경로 검증', parentId: 'fixture-root', childIds: ['fixture-grandchild'], agentName: 'button-auditor', agentRole: 'tester',
+  statusDetail: '홈 화면과 대화 참여 경로를 냉정하게 검토하는 중',
+  messages: [
+    { id: 'm-user', role: 'user', text: '상호작용 테스트를 진행해줘', timestamp: now },
+    { id: 'm-assistant', role: 'assistant', text: '버튼과 입력 동작을 확인하고 있습니다.', timestamp: now },
+    { id: 'child-user', role: 'user', text: '홈에서 실행 구조가 즉시 읽히는지, 서브에이전트 대화에 직접 참여할 수 있는지 검증해줘.', timestamp: now },
+    { id: 'child-assistant', role: 'assistant', text: '실행 구조, 대화 기록, 직접 개입과 메인 에이전트 경유 개입을 순서대로 확인하고 있습니다.', timestamp: now },
+  ],
+  delegation: {
+    taskName: 'control_room_audit',
+    assignment: '홈 화면에서 메인 에이전트, 서브에이전트, PowerShell의 실행 흐름이 클릭 없이 보이는지 확인하고 대화 참여 경로까지 검증해줘.',
+  },
+  runtimePresence: [{ kind: 'windows', pid: 41001, parentPid: 40000, label: '공유 메인 프로세스' }], executions: [], runId: '', collaboration: { communications: [
     { id: 'nested-assignment', kind: 'assignment', label: '새 작업 배정', from: '/root/child', to: '/root/child/nested_check', taskName: 'nested_check', childId: 'fixture-grandchild', text: '하위 흐름을 검증해줘', timestamp: now },
     { id: 'nested-started', kind: 'started', label: '서브에이전트 실행 시작', from: 'Codex 런타임', to: '/root/child/nested_check', taskName: 'nested_check', childId: 'fixture-grandchild', text: 'started', timestamp: now },
     { id: 'nested-result', kind: 'result', label: '결과 반환', from: '/root/child/nested_check', to: '/root/child', taskName: 'nested_check', childId: 'fixture-grandchild', text: '중첩 흐름 정상', timestamp: now },
@@ -96,6 +107,8 @@ const endedSession = {
   runtimePresence: [], executions: [], runId: '',
   messages: [
     { id: 'ended-user', role: 'user', text: '이 요청은 상세 대화에서 생략하지 말고 전체 내용을 보여주되, AI가 만든 긴 로드맵은 처음부터 전부 펼치지 말고 읽기 좋은 형태로 정리해줘.', timestamp: now },
+    { id: 'ended-progress', role: 'assistant', text: '먼저 상세 대화 구조와 반응형 화면을 확인하겠습니다.', timestamp: now },
+    { id: 'ended-hidden-tool', role: 'tool', title: '검사 도구', text: '대화 탭에서 숨겨야 하는 도구 시스템 활동', timestamp: now },
     { id: 'ended-roadmap', role: 'assistant', text: `## 반응형 UI 개선 로드맵
 
 1. 현재 목표 카드에서 긴 사용자 요청을 의미가 보존되는 한 줄 요약으로 표시합니다.
@@ -441,6 +454,12 @@ const testApi = {
   },
   setTerminalGetDelays: values => { terminalGetDelays = new Map(Object.entries(values || {}).map(([id, value]) => [id, Number(value) || 0])); return true; },
   queueSessionDetail: (id, responses) => { detailResponses.set(id, clone(responses || [])); return true; },
+  setSessionRuntimePresence: (id, presence) => {
+    const session = snapshot.sessions.find(item => item.id === id);
+    if (!session) return false;
+    session.runtimePresence = clone(presence || []);
+    return true;
+  },
   clearControls: () => { failures = new Map(); delays = new Map(); terminalGetDelays = new Map(); detailResponses = new Map(); },
   restoreTerminals: () => { terminals = clone(initialTerminals); return clone(terminals); },
   restoreUpdate: () => { update = clone(availableUpdate); updateStateListeners.forEach(listener => listener(clone(update))); return clone(update); },

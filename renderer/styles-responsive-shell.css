@@ -398,6 +398,11 @@
     align-items: flex-start;
   }
 
+  .chat-progress-updates,
+  .chat-turn-waiting {
+    margin-left: 0;
+  }
+
   .json-object>div {
     grid-template-columns: 1fr;
   }

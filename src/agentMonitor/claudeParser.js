@@ -112,17 +112,21 @@ function createClaudeParser(dependencies) {
     }
   }
 
-  function initializeSession(fileInfo, parsed) {
+  function initializeSession(fileInfo, parsed, options = {}) {
     const basename = path.basename(fileInfo.file, '.jsonl');
     const subMatch = fileInfo.file.match(/[\\/]([^\\/]+)[\\/]subagents[\\/]agent-([^\\/]+)\.jsonl$/i);
     const externalId = subMatch ? subMatch[2] : basename;
     const session = baseSession('claude', externalId, fileInfo.file, fileInfo);
+    session.fullHistory = Boolean(options.fullHistory);
     session.truncated = parsed.truncated;
     session.parentId = subMatch ? `claude:${subMatch[1]}` : null;
     session.depth = subMatch ? 1 : 0;
     session.agentName = subMatch ? `agent-${subMatch[2].slice(0, 8)}` : '';
     const desktopSignals = new Set(parsed.rows.map(row => String(row && row.type || '')).filter(Boolean));
+    const entrypoints = new Set(parsed.rows.map(row => String(row && row.entrypoint || '').toLowerCase()).filter(Boolean));
+    const cliEntrypoint = [...entrypoints].some(value => /^(?:sdk-)?cli$/.test(value));
     const isDesktop = !subMatch
+      && !cliEntrypoint
       && (desktopSignals.has('queue-operation') || desktopSignals.has('last-prompt') || desktopSignals.has('ai-title'));
     session.clientKind = isDesktop ? 'claude-desktop' : 'claude-cli';
     if (isDesktop) session.sourceLabel = 'Claude 데스크톱 앱';
@@ -274,10 +278,10 @@ function createClaudeParser(dependencies) {
     return session;
   }
 
-  return function parseClaude(fileInfo) {
-    const parsed = readJsonLines(fileInfo.file);
+  return function parseClaude(fileInfo, options = {}) {
+    const parsed = readJsonLines(fileInfo.file, options.fullHistory ? Math.max(1, Number(fileInfo.size || 0) + 1) : undefined);
     if (!parsed.rows.length) return null;
-    const session = initializeSession(fileInfo, parsed);
+    const session = initializeSession(fileInfo, parsed, options);
     const state = processRows(session, parsed.rows);
     return finalizeSession(session, state, parsed, fileInfo);
   };

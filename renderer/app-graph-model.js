@@ -10,6 +10,7 @@ window.LoadToAgentAppFactories.createGraphModel = function createGraphModel(cont
     state,
     compact,
     isLiveSession,
+    stableSessionSort = sessions => [...sessions],
   } = context;
 
   function graphPath(session, byId) {
@@ -62,11 +63,7 @@ window.LoadToAgentAppFactories.createGraphModel = function createGraphModel(cont
   }
 
   function sortGraphNodes(sessions) {
-    return [...sessions].sort((a, b) => {
-      const statusA = isLiveSession(a) ? 3 : a.status === "waiting" ? 2 : a.status === "failed" ? 1 : 0;
-      const statusB = isLiveSession(b) ? 3 : b.status === "waiting" ? 2 : b.status === "failed" ? 1 : 0;
-      return statusB - statusA || Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0);
-    });
+    return stableSessionSort(sessions);
   }
 
   function graphChildren(session, model) {

@@ -168,6 +168,7 @@
 
   function resumeSupport(agentSession) {
     if (!agentSession) return { supported: false, reason: t('terminal.resume.no_session_info') };
+    if (agentSession.parentId) return { supported: false, parentControlled: true, reason: t('terminal.resume.parent_controlled') };
     const sessionId = String(agentSession.externalId || '').trim();
     if (!sessionId) return { supported: false, reason: t('terminal.resume.no_session_id') };
     const provider = String(agentSession.provider || '').toLowerCase();
@@ -178,9 +179,11 @@
     return { supported: true, provider, sessionId, args };
   }
 
-  function resumeLaunchArgs(support, prompt = '') {
+  function resumeLaunchArgs(support, prompt = '', options = {}) {
     const args = [...support.args];
     const text = String(prompt || '').trim();
+    if (options.background && text && support.provider === 'codex') return ['exec', 'resume', support.sessionId, text];
+    if (options.background && text && support.provider === 'claude') return ['--resume', support.sessionId, '--print', text];
     if (text) args.push(text);
     return args;
   }

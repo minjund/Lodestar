@@ -40,7 +40,7 @@ function terminalEnvironment(extra = {}) {
   for (const [key, value] of Object.entries({ ...process.env, ...extra })) {
     if (value != null) env[key] = String(value);
   }
-  env.TERM = env.TERM || 'xterm-256color';
+  env.TERM = !env.TERM || String(env.TERM).toLowerCase() === 'dumb' ? 'xterm-256color' : env.TERM;
   env.COLORTERM = env.COLORTERM || 'truecolor';
   return env;
 }
@@ -142,6 +142,7 @@ function normalizeLaunchOptions(options = {}, platform = process.platform) {
     args,
     bridgeId: cleanText(options.bridgeId, 100),
     title: cleanText(options.title, 100),
+    transient: Boolean(options.transient),
     cols: numericDimension(options.cols, 120, 20, 500),
     rows: numericDimension(options.rows, 32, 5, 200),
   };
@@ -207,6 +208,7 @@ function publicSession(session, includeReplay = false) {
     tmuxPane: session.options.tmuxPane,
     provider: session.options.provider,
     bridgeId: session.options.bridgeId,
+    transient: Boolean(session.options.transient),
     background: session.options.type === 'agent',
     recoveredAfterHostRestart: Boolean(session.recoveredAfterHostRestart),
     recoverySkippedReason: session.recoverySkippedReason || '',
@@ -243,6 +245,7 @@ function restoredOptions(value = {}, platform = process.platform) {
     args: Array.isArray(value.args) ? value.args.slice(0, 80).map(item => cleanText(item, 2_000)) : [],
     bridgeId: cleanText(value.bridgeId, 100),
     title: cleanText(value.title, 100),
+    transient: Boolean(value.transient),
     cols: numericDimension(value.cols, 120, 20, 500),
     rows: numericDimension(value.rows, 32, 5, 200),
   };
@@ -356,7 +359,7 @@ class TerminalManager extends EventEmitter {
       this.fileSystem.mkdirSync(path.dirname(this.storeFile), { recursive: true });
       const payload = {
         version: STORE_VERSION,
-        sessions: [...this.sessions.values()].map(persistedSession),
+        sessions: [...this.sessions.values()].filter(session => !session.options.transient).map(persistedSession),
       };
       this.fileSystem.writeFileSync(temporary, JSON.stringify(payload), 'utf8');
       this.fileSystem.renameSync(temporary, this.storeFile);
@@ -376,6 +379,11 @@ class TerminalManager extends EventEmitter {
     for (const session of this.sessions.values()) {
       if (!session.recoveryPending) continue;
       session.recoveryPending = false;
+      if (session.options.type === 'agent'
+        && /TERM is set to ["']?dumb["']?[\s\S]{0,500}Continue anyway\?/i.test(session.replay)) {
+        this.sessions.delete(session.id);
+        continue;
+      }
       if (!hasSafeAgentResume(session.options)) {
         session.status = 'exited';
         session.pid = null;
@@ -485,6 +493,12 @@ class TerminalManager extends EventEmitter {
         session.exitCode = Number.isFinite(event.exitCode) ? event.exitCode : null;
         session.signal = Number.isFinite(event.signal) ? event.signal : null;
         session.updatedAt = new Date().toISOString();
+        if (session.options.transient) {
+          this.sessions.delete(session.id);
+          this.emit('state', { change: 'removed', session: publicSession(session, false), sessions: this.list() });
+          this.persistNow();
+          return;
+        }
         this.persistNow();
         this.emitState('updated', session);
       });

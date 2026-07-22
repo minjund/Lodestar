@@ -105,6 +105,13 @@ window.LoadToAgentAppFactories.createNavigationEventBindings = function createNa
       buttons[next]?.focus();
     });
     $("#mobileToolsMenu").addEventListener("click", (event) => {
+      const guide = event.target.closest("[data-mobile-guide]");
+      if (guide) {
+        closeMobileTools(false);
+        $("#guideBtn")?.click();
+        requestAnimationFrame(() => $("#beginnerGuide")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+        return;
+      }
       const button = event.target.closest("[data-mobile-view]");
       if (button) {
         closeMobileTools(false);

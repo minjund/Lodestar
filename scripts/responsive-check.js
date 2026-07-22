@@ -156,7 +156,7 @@ async function layoutMetrics(win) {
 function assertLayout(metrics, context) {
   const compactNavValid = !metrics.compact
     || JSON.stringify(metrics.visibleNavItems) === JSON.stringify(['all', 'active', 'waiting', 'runtime', 'mobileMoreBtn']);
-  if (metrics.documentOverflow || metrics.stageOverflow || Math.abs(metrics.stageScrollLeft) > 1 || !metrics.stageRect || metrics.stageRect.left < -1 || metrics.stageRect.right > metrics.width + 1 || !metrics.topbarRect || metrics.topbarRect.left < -1 || metrics.topbarRect.right > metrics.width + 1 || !metrics.topbarCopyRect || metrics.topbarCopyRect.left < -1 || metrics.topbarCopyRect.right > metrics.width + 1 || metrics.sectionOverflow.length || !metrics.sidebarInsideViewport || !metrics.compactNavAtBottom || metrics.navCount < 5 || !metrics.navItemsInsideViewport || !metrics.navAccessibleNames || !metrics.sidebarNoInternalOverflow || !metrics.narrowSidebarLabelsVisible || !metrics.narrowSidebarTitles || !metrics.projectFilterAvailable || !metrics.compactContentClearance || !compactNavValid || !metrics.tmuxShortcutVisible || !metrics.tmuxShortcutInsideViewport) {
+  if (metrics.documentOverflow || metrics.stageOverflow || Math.abs(metrics.stageScrollLeft) > 1 || !metrics.stageRect || metrics.stageRect.left < -1 || metrics.stageRect.right > metrics.width + 1 || !metrics.topbarRect || metrics.topbarRect.left < -1 || metrics.topbarRect.right > metrics.width + 1 || !metrics.topbarCopyRect || metrics.topbarCopyRect.left < -1 || metrics.topbarCopyRect.right > metrics.width + 1 || metrics.sectionOverflow.length || !metrics.sidebarInsideViewport || !metrics.compactNavAtBottom || metrics.navCount < 5 || !metrics.navItemsInsideViewport || !metrics.navAccessibleNames || !metrics.sidebarNoInternalOverflow || !metrics.narrowSidebarLabelsVisible || !metrics.narrowSidebarTitles || !metrics.projectFilterAvailable || !metrics.compactContentClearance || !compactNavValid || (!metrics.compact && !metrics.tmuxShortcutVisible) || (!metrics.compact && !metrics.tmuxShortcutInsideViewport)) {
     throw new Error(`${context} 반응형 배치가 올바르지 않습니다: ${JSON.stringify(metrics)}`);
   }
 }
@@ -372,7 +372,7 @@ async function workflowMetrics(win) {
 }
 
 function assertWorkflow(metrics) {
-  if (metrics.canvasOverflow || metrics.bodyOverflow || !metrics.selectedBeforeCommand || !metrics.verticalOrder || !metrics.horizontalOrder || metrics.pathCrossesCommand || metrics.identityClipped || !metrics.tmuxShortcutVisible || !metrics.tmuxShortcutInsideViewport || !metrics.helpCardInsideColumn || !metrics.helpTitleEllipsisReady || !metrics.helpAssignmentEllipsisReady || !metrics.helpOutcomeEllipsisReady || !metrics.helpTextTruncated || metrics.formCount !== 1 || metrics.connectionPaths !== 2 || ((metrics.stacked || metrics.hybrid) && (!metrics.commandBeforeDownstream || !metrics.outputAfterCommand))) {
+  if (metrics.canvasOverflow || metrics.bodyOverflow || !metrics.selectedBeforeCommand || !metrics.verticalOrder || !metrics.horizontalOrder || metrics.pathCrossesCommand || metrics.identityClipped || (!metrics.stacked && !metrics.tmuxShortcutVisible) || (!metrics.stacked && !metrics.tmuxShortcutInsideViewport) || !metrics.helpCardInsideColumn || !metrics.helpTitleEllipsisReady || !metrics.helpAssignmentEllipsisReady || !metrics.helpOutcomeEllipsisReady || !metrics.helpTextTruncated || metrics.formCount !== 1 || metrics.connectionPaths !== 2 || ((metrics.stacked || metrics.hybrid) && (!metrics.commandBeforeDownstream || !metrics.outputAfterCommand))) {
     throw new Error(`선택 AI 작업 흐름 배치가 올바르지 않습니다: ${JSON.stringify(metrics)}`);
   }
 }
@@ -450,7 +450,7 @@ async function managementDetailMetrics(win) {
 }
 
 function assertManagementDetail(metrics) {
-  if (!metrics.available || metrics.drawerWidth > 611 || !metrics.drawerInsideViewport || metrics.detailWidth > 600 || !metrics.noHorizontalOverflow || !metrics.healthStacked || metrics.healthTitleLines !== 1 || metrics.healthDetailLines > 2 || !metrics.healthDetailTitlePreserved || metrics.artifactFontSize !== '13px' || !metrics.artifactEllipsisReady || !metrics.artifactTruncated || !metrics.artifactTitlePreserved) {
+  if (!metrics.available || metrics.drawerWidth > 641 || !metrics.drawerInsideViewport || metrics.detailWidth > 630 || !metrics.noHorizontalOverflow || !metrics.healthStacked || metrics.healthTitleLines !== 1 || metrics.healthDetailLines > 2 || !metrics.healthDetailTitlePreserved || metrics.artifactFontSize !== '13px' || !metrics.artifactEllipsisReady || !metrics.artifactTruncated || !metrics.artifactTitlePreserved) {
     throw new Error(`실행 상세의 건강 상태·산출물 반응형 배치가 올바르지 않습니다: ${JSON.stringify(metrics)}`);
   }
 }

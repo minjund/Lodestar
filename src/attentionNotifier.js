@@ -2,6 +2,7 @@
 
 class AttentionNotifier {
   constructor(options = {}) {
+    this.enabled = options.enabled !== false;
     this.Notification = options.Notification;
     this.isSupported = options.isSupported || (() => Boolean(this.Notification));
     this.copy = options.copy || (() => ({ title: '내 확인이 필요합니다', body: '응답이나 선택을 기다리는 AI 세션이 있습니다.' }));
@@ -12,6 +13,7 @@ class AttentionNotifier {
   }
 
   sync(snapshot) {
+    if (!this.enabled) return [];
     const needsAttention = (snapshot && Array.isArray(snapshot.sessions) ? snapshot.sessions : [])
       .filter(session => session && session.id && (
         session.attention?.required
@@ -32,6 +34,7 @@ class AttentionNotifier {
   }
 
   notify(session) {
+    if (!this.enabled) return null;
     let supported = false;
     try {
       supported = Boolean(this.Notification && this.isSupported());

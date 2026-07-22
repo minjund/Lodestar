@@ -467,15 +467,17 @@ app.whenReady().then(() => {
         const make = (id, status, kind, level, title) => ({
           ...base, id, externalId: id + '-external', parentId: null, childIds: [], title, status,
           updatedAt: now, statusDetail: title, runId: id + '-run', runtimePresence: [],
+          messages: [{ id: id + '-user', role: 'user', text: '다음 단계까지 진행해 주세요.', timestamp: now }, { id: id + '-assistant', role: 'assistant', text: title + ' 상태입니다. 다음 단계로 가기 전에 사용자의 판단이 필요합니다.', timestamp: now }],
           attention: { required: true, kind, summary: title + '에 대한 사용자 조치가 필요합니다.', requestedAt: now, source: 'observed-status', confidence: 'high' },
           progress: { stage: status, percent: status === 'failed' ? 64 : 42, completedSteps: 3, failedSteps: status === 'failed' ? 1 : 0, totalSteps: 6, currentStep: '검증 결과 확인', blocker: title, lastActivityAt: now, checkpoints: [] },
           health: { level, score: level === 'critical' ? 35 : 68, lastActivityAt: now, signals: [{ code: status === 'failed' ? 'run-failed' : status === 'paused' ? 'run-paused' : 'waiting-too-long', severity: level === 'critical' ? 'critical' : 'warning', detail: title }] },
           evidence: { confidence: 'high', status: 'observed', hierarchy: 'observed', completion: 'unverified', sources: ['runtime-event'] },
           outcome: { status: status === 'failed' ? 'failed' : 'in-progress', summary: title, verified: false, artifacts: [], checks: [] },
-          controlCapabilities: { managed: true, respond: kind === 'approval', approve: kind === 'approval', deny: kind === 'approval', sendInstruction: kind === 'approval', stop: status === 'paused', pause: false, resume: status === 'paused', retry: status === 'failed', reassign: true },
+          controlCapabilities: { managed: true, respond: ['approval', 'decision', 'input', 'response'].includes(kind), approve: kind === 'approval', deny: kind === 'approval', sendInstruction: ['approval', 'decision', 'input', 'response'].includes(kind), stop: status === 'paused', pause: false, resume: status === 'paused', retry: status === 'failed', reassign: true },
         });
         const fixtures = [
           make('visual-management-approval', 'waiting', 'approval', 'attention', '배포 승인 요청'),
+          make('visual-management-input', 'waiting', 'input', 'attention', '배포 환경 값 입력 요청'),
           make('visual-management-failed', 'failed', 'error', 'critical', '회귀 테스트 실패'),
           make('visual-management-paused', 'paused', 'paused', 'warning', '사용자가 일시정지한 실행'),
         ];
@@ -496,6 +498,10 @@ app.whenReady().then(() => {
           health: section?.querySelectorAll('.management-health').length || 0,
           controls: section?.querySelectorAll('[data-managed-run-action], [data-reassign-session]').length || 0,
           quickActions: section?.querySelectorAll('[data-attention-quick]').length || 0,
+          flows: section?.querySelectorAll('.attention-decision-flow').length || 0,
+          flowSteps: section?.querySelectorAll('.attention-decision-flow > section').length || 0,
+          replyTemplates: section?.querySelectorAll('[data-attention-draft]').length || 0,
+          evidenceDetails: section?.querySelectorAll('.attention-evidence-details').length || 0,
           visible: Boolean(section && !section.classList.contains('hidden')),
           noHorizontalOverflow: Boolean(section && section.scrollWidth <= section.clientWidth + 2),
         };
@@ -504,7 +510,7 @@ app.whenReady().then(() => {
       const managementImage = await win.webContents.capturePage();
       const managementOutput = path.join(outputDir, 'loadtoagent-management-inbox.png');
       fs.writeFileSync(managementOutput, managementImage.toPNG());
-      if (!managementMetrics.visible || managementMetrics.cards < 3 || managementMetrics.progress < 3 || managementMetrics.health < 3 || managementMetrics.controls < 5 || managementMetrics.quickActions < 2 || !managementMetrics.noHorizontalOverflow) {
+      if (!managementMetrics.visible || managementMetrics.cards < 4 || managementMetrics.progress < managementMetrics.cards || managementMetrics.health < managementMetrics.cards || managementMetrics.controls < 5 || managementMetrics.quickActions < 2 || managementMetrics.flows !== managementMetrics.cards || managementMetrics.flowSteps !== managementMetrics.cards * 3 || managementMetrics.replyTemplates < 1 || managementMetrics.evidenceDetails !== managementMetrics.cards || !managementMetrics.noHorizontalOverflow) {
         throw new Error(`관리 확인함 시각 구성이 올바르지 않습니다: ${JSON.stringify(managementMetrics)}`);
       }
       await win.webContents.executeJavaScript(`(() => { window.LoadToAgentApp.state.view = 'all'; window.LoadToAgentApp.renderSessions('view'); document.querySelector('.main-stage')?.scrollTo(0, 0); })()`);
@@ -514,26 +520,23 @@ app.whenReady().then(() => {
         window.LoadToAgentApp.state.graphExpandedProviders.clear();
         window.LoadToAgentApp.renderSessions();
         const grid = document.querySelector('#liveSessionGrid');
-        const before = document.querySelectorAll('.agent-flow-row').length;
-        const more = document.querySelector('.agent-flow-more[data-graph-provider-more]');
-        more?.click();
-        const expanded = document.querySelectorAll('.agent-flow-row').length;
-        document.querySelector('.agent-flow-more[data-graph-provider-less]')?.click();
+        const densityRoom = document.querySelector('[data-control-session="visual-density:root:0"]');
         return {
-          lanes: document.querySelectorAll('.agent-flow-lane').length,
-          visibleFlows: before,
-          expandedFlows: expanded,
-          moreButtons: document.querySelectorAll('[data-graph-provider-more]').length,
-          runtimeSegments: document.querySelectorAll('.runtime-segment').length,
-          tmuxRuntimeCards: document.querySelectorAll('.tmux-runtime .live-tmux-card').length,
-          tmuxAiPanes: Number(window.LoadToAgentApp.state.snapshot?.tmux?.summary?.aiPanes || 0),
-          tmuxFirst: document.querySelector('.runtime-segment:first-child')?.classList.contains('tmux-runtime') || false,
+          rooms: document.querySelectorAll('[data-control-session]').length,
+          mains: document.querySelectorAll('.control-room-main').length,
+          densityRoom: Boolean(densityRoom),
+          completedPreview: densityRoom?.querySelectorAll('.completed-list .helper-node').length || 0,
+          directWork: Boolean(densityRoom?.querySelector('.direct-work')),
+          legends: document.querySelectorAll('#graphBreadcrumbs .control-room-legend > span').length,
+          structureVisibleWithoutFocus: Boolean(document.querySelector('[data-control-room-overview]')),
           noHorizontalOverflow: grid ? grid.scrollWidth <= grid.clientWidth + 2 : false,
           subagentTabRemoved: !document.querySelector('[data-view="subagents"]'),
         };
       })()`);
-      if (!densityMetrics.subagentTabRemoved || densityMetrics.runtimeSegments !== 2 || densityMetrics.tmuxRuntimeCards !== 0 || !densityMetrics.tmuxFirst || densityMetrics.lanes < 4 || densityMetrics.visibleFlows > densityMetrics.lanes * 6 || densityMetrics.moreButtons < 1 || densityMetrics.expandedFlows <= densityMetrics.visibleFlows || !densityMetrics.noHorizontalOverflow) {
-        throw new Error(`대규모 에이전트 지도 밀도 조절이 올바르지 않습니다: ${JSON.stringify(densityMetrics)}`);
+      if (!densityMetrics.subagentTabRemoved || densityMetrics.rooms < 32 || densityMetrics.mains !== densityMetrics.rooms
+        || !densityMetrics.densityRoom || densityMetrics.completedPreview !== 3 || !densityMetrics.directWork
+        || densityMetrics.legends !== 3 || !densityMetrics.structureVisibleWithoutFocus || !densityMetrics.noHorizontalOverflow) {
+        throw new Error(`대규모 세션 관제 밀도 조절이 올바르지 않습니다: ${JSON.stringify(densityMetrics)}`);
       }
       if (densityFocusId) {
         await win.webContents.executeJavaScript(`(() => {
@@ -930,7 +933,7 @@ app.whenReady().then(() => {
           ended,
         };
       })()`);
-      if (!controlStateMetrics.connect.classes.includes('control-connect') || !controlStateMetrics.connect.bridge || !controlStateMetrics.origin.classes.includes('control-origin') || !controlStateMetrics.origin.origin || !controlStateMetrics.originResume.classes.includes('control-origin-resume') || !controlStateMetrics.originResume.origin || !controlStateMetrics.originResume.enabledTextarea || !controlStateMetrics.resume.classes.includes('control-resume') || !controlStateMetrics.resume.enabledTextarea || !controlStateMetrics.handoff.classes.includes('control-handoff') || !controlStateMetrics.handoff.enabledTextarea || !controlStateMetrics.ended.classes.includes('control-ended') || controlStateMetrics.ended.origin || controlStateMetrics.ended.bridge || controlStateMetrics.ended.enabledTextarea) throw new Error(`AI 입력·재개 상태 UI가 올바르지 않습니다: ${JSON.stringify(controlStateMetrics)}`);
+      if (!controlStateMetrics.connect.classes.includes('control-connect') || !controlStateMetrics.connect.bridge || !controlStateMetrics.origin.classes.includes('control-origin-resume') || controlStateMetrics.origin.origin || !controlStateMetrics.origin.enabledTextarea || !controlStateMetrics.originResume.classes.includes('control-origin-resume') || controlStateMetrics.originResume.origin || !controlStateMetrics.originResume.enabledTextarea || !controlStateMetrics.resume.classes.includes('control-resume') || !controlStateMetrics.resume.enabledTextarea || !controlStateMetrics.handoff.classes.includes('control-handoff') || !controlStateMetrics.handoff.enabledTextarea || !controlStateMetrics.ended.classes.includes('control-ended') || controlStateMetrics.ended.origin || controlStateMetrics.ended.bridge || controlStateMetrics.ended.enabledTextarea) throw new Error(`AI 입력·재개 상태 UI가 올바르지 않습니다: ${JSON.stringify(controlStateMetrics)}`);
 
       const returnClick = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
@@ -991,11 +994,11 @@ app.whenReady().then(() => {
         }
         window.LoadToAgentApp.renderSessions();
         document.querySelector('.downstream-column [data-open-subagent-chat="visual-density:child:2"]')?.click();
-      })()`, `window.LoadToAgentApp.state.graphFocusId === ${JSON.stringify(densityFocusId)} && window.LoadToAgentApp.state.drawerMode === 'subagent' && document.querySelector('[data-subagent-work-messages="1"]') && document.querySelector('[data-subagent-coordination-count="2"]') && document.querySelectorAll('.drawer-tab:not(.hidden)').length === 1 && document.querySelector('[data-resume-agent]')`);
+      })()`, `window.LoadToAgentApp.state.graphFocusId === ${JSON.stringify(densityFocusId)} && window.LoadToAgentApp.state.drawerMode === 'subagent' && document.querySelector('[data-subagent-work-messages="1"]') && document.querySelector('[data-subagent-coordination-count="2"]') && document.querySelectorAll('.drawer-tab:not(.hidden)').length === 1 && document.querySelector('[data-agent-command-route="direct"]')?.disabled && document.querySelector('[data-agent-command-route="parent"]')?.getAttribute('aria-pressed') === 'true' && !document.querySelector('[data-agent-command-form] button[type="submit"]')?.disabled`);
       const subagentConversationOutput = path.join(outputDir, 'loadtoagent-subagent-conversation.png');
       fs.writeFileSync(subagentConversationOutput, subagentConversationImage.toPNG());
-      const subagentConversationMetrics = await win.webContents.executeJavaScript(`(() => ({ focusId: window.LoadToAgentApp.state.graphFocusId, drawerMode: window.LoadToAgentApp.state.drawerMode, workMessages: Number(document.querySelector('[data-subagent-work-messages]')?.dataset.subagentWorkMessages || 0), coordinationEvents: document.querySelectorAll('[data-subagent-communication]').length, coordinationCollapsed: !document.querySelector('.subagent-coordination')?.open, visibleTabs: document.querySelectorAll('.drawer-tab:not(.hidden)').length, resumeAvailable: Boolean(document.querySelector('[data-resume-agent]')), actualWorkVisible: document.querySelector('#drawerContent')?.innerText.includes('동시에 실행되는 작업의 상태를 확인하고 있습니다.') || false, placeholderNoise: /보호된 메시지|내용 없이 통신 상태|서브에이전트 실행이 시작/.test(document.querySelector('#drawerContent')?.innerText || ''), drawerOverflow: document.querySelector('#detailDrawer')?.scrollWidth > document.querySelector('#detailDrawer')?.clientWidth + 2 }))()`);
-      if (subagentConversationMetrics.focusId !== densityFocusId || subagentConversationMetrics.drawerMode !== 'subagent' || subagentConversationMetrics.workMessages !== 1 || subagentConversationMetrics.coordinationEvents !== 2 || !subagentConversationMetrics.coordinationCollapsed || subagentConversationMetrics.visibleTabs !== 1 || !subagentConversationMetrics.resumeAvailable || !subagentConversationMetrics.actualWorkVisible || subagentConversationMetrics.placeholderNoise || subagentConversationMetrics.drawerOverflow) throw new Error(`서브에이전트 실제 작업 상세가 올바르지 않습니다: ${JSON.stringify(subagentConversationMetrics)}`);
+      const subagentConversationMetrics = await win.webContents.executeJavaScript(`(() => ({ focusId: window.LoadToAgentApp.state.graphFocusId, drawerMode: window.LoadToAgentApp.state.drawerMode, workMessages: Number(document.querySelector('[data-subagent-work-messages]')?.dataset.subagentWorkMessages || 0), coordinationEvents: document.querySelectorAll('[data-subagent-communication]').length, coordinationCollapsed: !document.querySelector('.subagent-coordination')?.open, visibleTabs: document.querySelectorAll('.drawer-tab:not(.hidden)').length, inlineRelay: document.querySelector('[data-agent-command-route="direct"]')?.disabled && document.querySelector('[data-agent-command-route="parent"]')?.getAttribute('aria-pressed') === 'true' && !document.querySelector('[data-agent-command-form] button[type="submit"]')?.disabled, actualWorkVisible: document.querySelector('#drawerContent')?.innerText.includes('동시에 실행되는 작업의 상태를 확인하고 있습니다.') || false, placeholderNoise: /보호된 메시지|내용 없이 통신 상태|서브에이전트 실행이 시작/.test(document.querySelector('#drawerContent')?.innerText || ''), drawerOverflow: document.querySelector('#detailDrawer')?.scrollWidth > document.querySelector('#detailDrawer')?.clientWidth + 2 }))()`);
+      if (subagentConversationMetrics.focusId !== densityFocusId || subagentConversationMetrics.drawerMode !== 'subagent' || subagentConversationMetrics.workMessages !== 1 || subagentConversationMetrics.coordinationEvents !== 2 || !subagentConversationMetrics.coordinationCollapsed || subagentConversationMetrics.visibleTabs !== 1 || !subagentConversationMetrics.inlineRelay || !subagentConversationMetrics.actualWorkVisible || subagentConversationMetrics.placeholderNoise || subagentConversationMetrics.drawerOverflow) throw new Error(`서브에이전트 실제 작업 상세가 올바르지 않습니다: ${JSON.stringify(subagentConversationMetrics)}`);
       await win.webContents.executeJavaScript("document.querySelector('#closeDrawerBtn')?.click()");
 
       setTestWindowSize(win, 1080, 700);

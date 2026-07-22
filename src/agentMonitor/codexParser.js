@@ -46,13 +46,14 @@ function createCodexParser(dependencies) {
     timeOps: { timestamp },
   } = dependencies;
 
-  function initializeSession(fileInfo, parsed) {
+  function initializeSession(fileInfo, parsed, options = {}) {
     const metaRow = parsed.rows.find(row => row.type === 'session_meta');
     const meta = (metaRow && metaRow.payload) || {};
     const externalId = meta.id
       || meta.session_id
       || path.basename(fileInfo.file, '.jsonl').split('-').slice(-5).join('-');
     const session = baseSession('codex', externalId, fileInfo.file, fileInfo);
+    session.fullHistory = Boolean(options.fullHistory);
     session.truncated = parsed.truncated;
     session.cwd = meta.cwd || '';
     session.originCwd = meta.cwd || '';
@@ -489,10 +490,10 @@ function createCodexParser(dependencies) {
     return session;
   }
 
-  return function parseCodex(fileInfo) {
-    const parsed = readJsonLines(fileInfo.file);
+  return function parseCodex(fileInfo, options = {}) {
+    const parsed = readJsonLines(fileInfo.file, options.fullHistory ? Math.max(1, Number(fileInfo.size || 0) + 1) : undefined);
     if (!parsed.rows.length) return null;
-    const { session, meta } = initializeSession(fileInfo, parsed);
+    const { session, meta } = initializeSession(fileInfo, parsed, options);
     const state = createParseState(session, meta);
     for (const row of parsed.rows) processRow(session, state, row);
     return finalizeSession(session, state, fileInfo);

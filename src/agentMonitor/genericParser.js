@@ -60,19 +60,20 @@ function createGenericParser(dependencies) {
     return out;
   }
 
-  function readSessionFile(fileInfo) {
+  function readSessionFile(fileInfo, options = {}) {
     const isJsonl = /\.jsonl$/i.test(fileInfo.file);
     return isJsonl
-      ? readJsonLines(fileInfo.file)
+      ? readJsonLines(fileInfo.file, options.fullHistory ? Math.max(1, Number(fileInfo.size || 0) + 1) : undefined)
       : { rows: [readJson(fileInfo.file, {})], truncated: false };
   }
 
-  function initializeSession(fileInfo, provider, parsed) {
+  function initializeSession(fileInfo, provider, parsed, options = {}) {
     const rows = parsed.rows.filter(Boolean);
     const root = rows.length === 1 ? rows[0] : { events: rows };
     const externalId = root.session_id || root.sessionId || root.id
       || path.basename(fileInfo.file).replace(/\.(jsonl?|ndjson)$/i, '');
     const session = baseSession(provider, externalId, fileInfo.file, fileInfo);
+    session.fullHistory = Boolean(options.fullHistory);
     session.truncated = parsed.truncated;
     session.cwd = root.cwd || root.projectPath || root.project_path || '';
     session.originCwd = session.cwd;
@@ -264,9 +265,9 @@ function createGenericParser(dependencies) {
     return session;
   }
 
-  return function parseGeneric(fileInfo, provider) {
-    const parsed = readSessionFile(fileInfo);
-    const initialized = initializeSession(fileInfo, provider, parsed);
+  return function parseGeneric(fileInfo, provider, options = {}) {
+    const parsed = readSessionFile(fileInfo, options);
+    const initialized = initializeSession(fileInfo, provider, parsed, options);
     if (!initialized.rows.length) return null;
     const events = initialized.rows.length === 1 && Array.isArray(initialized.root.events)
       ? initialized.root.events

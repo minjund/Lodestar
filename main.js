@@ -32,6 +32,8 @@ process.title = PRODUCT_NAME;
 if (process.platform === 'win32') app.setAppUserModelId('com.wincube.loadtoagent');
 
 const demoCapture = process.env.LOADTOAGENT_DEMO_CAPTURE === '1';
+// 사용자 메시지와 실제 개입 요청을 안정적으로 구분할 때까지 알림 발송을 중지한다.
+const ATTENTION_NOTIFICATIONS_ENABLED = false;
 let mainWindow = null;
 let monitorWorker = null;
 let runner = null;
@@ -219,23 +221,35 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   const allowedUrl = pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).href;
   mainWindow.webContents.on('will-navigate', (event, url) => { if (url !== allowedUrl) event.preventDefault(); });
-  mainWindow.once('ready-to-show', () => mainWindow && mainWindow.show());
+  const showWindow = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.show();
+    mainWindow.focus();
+  };
+  const showFallback = setTimeout(showWindow, 2_000);
+  mainWindow.once('ready-to-show', () => {
+    clearTimeout(showFallback);
+    showWindow();
+  });
   mainWindow.on('close', event => {
     if (isQuitting || !backgroundTerminalSessions().length) return;
     event.preventDefault();
     mainWindow.hide();
     ensureBackgroundTray();
   });
-  mainWindow.on('closed', () => { mainWindow = null; });
+  mainWindow.on('closed', () => {
+    clearTimeout(showFallback);
+    mainWindow = null;
+  });
 }
 
 function backgroundTerminalSessions() {
   if (!terminalManager) return [];
-  return terminalManager.list().filter(session => session.status === 'running' || session.status === 'starting');
+  return terminalManager.list().filter(session => !session.transient && (session.status === 'running' || session.status === 'starting'));
 }
 
 function visibleTerminalSessions(sessions) {
-  return (sessions || []).filter(session => session.type !== 'agent' || isProviderVisible(session.provider));
+  return (sessions || []).filter(session => !session.transient && (session.type !== 'agent' || isProviderVisible(session.provider)));
 }
 
 function showMainWindow() {
@@ -334,6 +348,7 @@ function markRendererReady() {
 
 function createAttentionNotifier() {
   return new AttentionNotifier({
+    enabled: ATTENTION_NOTIFICATIONS_ENABLED,
     Notification,
     isSupported: () => Notification.isSupported(),
     copy: session => {
@@ -362,6 +377,36 @@ function sendUpdateState(update) {
 function installationType() {
   if (app.isPackaged) return 'desktop';
   return fs.existsSync(path.join(__dirname, '.git')) ? 'source' : 'npm';
+}
+
+async function connectTerminalForStartup(timeoutMs = 4_000) {
+  const connection = terminalManager.connect();
+  let timedOut = false;
+  let timer = null;
+  connection.then(() => {
+    if (!timedOut) return;
+    const sessions = visibleTerminalSessions(terminalManager.list());
+    sendTerminal('terminals:state', { change: 'reconnected', session: null, sessions });
+    sendTerminal('terminals:connection', { state: 'connected', message: mainText('terminalHostReconnected') });
+    updateBackgroundTrayMenu();
+  }).catch(error => {
+    if (timedOut) reportRecoverableError('terminal-host-late-connect', error);
+  });
+  try {
+    await Promise.race([
+      connection,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          reject(new Error('터미널 호스트 연결을 백그라운드에서 계속합니다.'));
+        }, timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    reportRecoverableError('terminal-host-startup-connect', error);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function installDownloadedUpdate() {
@@ -428,7 +473,7 @@ async function setupRuntime() {
   }
   terminalManager.on('data', payload => sendTerminal('terminals:data', payload));
   terminalManager.on('state', payload => {
-    if (!payload.session || payload.session.type !== 'agent' || isProviderVisible(payload.session.provider)) {
+    if (!payload.session || (!payload.session.transient && (payload.session.type !== 'agent' || isProviderVisible(payload.session.provider)))) {
       sendTerminal('terminals:state', { ...payload, sessions: visibleTerminalSessions(payload.sessions) });
     }
     updateBackgroundTrayMenu();
@@ -450,7 +495,7 @@ async function setupRuntime() {
       message: mainText('terminalHostReconnectFailed', { reason: error?.message || String(error) }),
     });
   });
-  await terminalManager.connect();
+  await connectTerminalForStartup();
   availability = probeProviders();
   monitorWorker = new Worker(path.join(__dirname, 'src', 'monitorWorker.js'), {
     workerData: { runsDir, home: os.homedir(), intervalMs: 1200, availability },
@@ -480,7 +525,7 @@ function bridgePresence() {
   if (!terminalManager) return [];
   const environment = process.platform === 'win32' ? 'windows' : (process.platform === 'darwin' ? 'macos' : 'linux');
   return terminalManager.list()
-    .filter(session => session.type === 'agent' && (session.status === 'running' || session.status === 'starting'))
+    .filter(session => !session.transient && session.type === 'agent' && (session.status === 'running' || session.status === 'starting'))
     .map(session => ({
       id: session.bridgeId || session.id,
       bridgeId: session.bridgeId || '',
@@ -528,7 +573,7 @@ function requestAgentDetail(sessionId) {
       if (!pendingDetails.has(requestId)) return;
       pendingDetails.delete(requestId);
       resolve(null);
-    }, 4000);
+    }, 15000);
     pendingDetails.set(requestId, {
       resolve: value => {
         clearTimeout(timer);

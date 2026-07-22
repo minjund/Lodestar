@@ -3,8 +3,86 @@
 window.LoadToAgentAppFactories = window.LoadToAgentAppFactories || {};
 
 window.LoadToAgentAppFactories.createDrawerContent = function createDrawerContent(context = {}) {
-  const { esc, uiLocale, state, messageContentHtml, compact, fullNumber, timeOnly, providerInfo, statusIcon, agentPathTaskName, snapshotSession } = context;
+  const {
+    esc, uiLocale, state, messageContentHtml, compact, fullNumber, timeOnly, providerInfo, statusIcon, agentPathTaskName, snapshotSession,
+    controlRoomAgentGoal, inferredExecutionSummary, executionActivityLabel, executionActivityStatus,
+  } = context;
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
+
+  function conversationTurns(session, options = {}) {
+    const turns = [];
+    let current = null;
+    for (const message of session.messages || []) {
+      if (!message) continue;
+      if (message.role === "user") {
+        current = { id: message.id || `turn-${turns.length}`, user: message, assistants: [], activityAfterAssistant: false };
+        turns.push(current);
+        continue;
+      }
+      if (message.role === "assistant") {
+        if (!current) {
+          const title = String(session.title || "").trim();
+          const syntheticUser = options.synthesizeRequest === false || !title
+            ? null
+            : {
+              id: `${session.id}:request`, role: "user", text: title,
+              timestamp: session.startedAt || message.timestamp,
+            };
+          current = { id: syntheticUser?.id || message.id || `turn-${turns.length}`, user: syntheticUser, assistants: [], activityAfterAssistant: false };
+          turns.push(current);
+        }
+        current.assistants.push(message);
+        current.activityAfterAssistant = false;
+        continue;
+      }
+      if (message.role === "tool" && current && current.assistants.length) current.activityAfterAssistant = true;
+    }
+    const latestIndex = turns.length - 1;
+    const live = session.status === "running" || session.status === "starting";
+    return turns.map((turn, index) => ({
+      ...turn,
+      representative: turn.assistants.at(-1) || null,
+      progress: turn.assistants.slice(0, -1),
+      live: live && index === latestIndex,
+      awaitingFinal: Boolean(turn.activityAfterAssistant),
+    }));
+  }
+
+  function conversationRowHtml(message, session, options = {}) {
+    if (!message) return "";
+    const assistant = message.role === "assistant";
+    const label = assistant ? options.assistantLabel : options.userLabel;
+    const avatar = assistant ? providerInfo(session.provider).mark : "ME";
+    const fullTime = new Date(message.timestamp).toLocaleString(uiLocale());
+    const answerKind = assistant && options.answerKind
+      ? `<span class="chat-answer-kind${options.live ? " is-live" : ""}">${esc(options.answerKind)}</span>`
+      : "";
+    return `<div class="chat-row ${assistant ? "assistant" : "user"}" data-message-id="${esc(message.id || "")}">
+      <span class="chat-avatar">${esc(avatar)}</span>
+      <div class="chat-bubble">
+      <div class="chat-bubble-head">
+      <b>${esc(label)}</b>
+      <span title="${esc(fullTime)}">${esc(timeOnly(message.timestamp))}</span>${answerKind}
+      </div>${messageContentHtml(message, session.id)}</div>
+      </div>`;
+  }
+
+  function progressUpdatesHtml(turn, session) {
+    if (!turn.progress.length) return "";
+    const rows = turn.progress.map((message, index) => {
+      const fullTime = new Date(message.timestamp).toLocaleString(uiLocale());
+      return `<article data-progress-message-id="${esc(message.id || "")}">
+        <header><b>${esc(t("drawer.progress_update_item", { count: index + 1 }))}</b><time title="${esc(fullTime)}">${esc(timeOnly(message.timestamp))}</time></header>
+        ${messageContentHtml(message, session.id)}
+      </article>`;
+    }).join("");
+    return `<details class="chat-progress-updates" data-progress-count="${turn.progress.length}"
+      data-disclosure-key="${esc(`drawer:${session.id}:turn:${turn.id}:progress`)}">
+      <summary><span><b>${esc(t("drawer.progress_updates", { count: turn.progress.length }))}</b>
+      <small>${esc(t("drawer.progress_updates_help"))}</small></span><i aria-hidden="true">↓</i></summary>
+      <div class="chat-progress-list">${rows}</div>
+      </details>`;
+  }
 
   function chatHtml(session, options = {}) {
     const messages = session.messages || [];
@@ -12,65 +90,34 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
     const userLabel = options.userLabel || t("drawer.user");
     const assistantLabel = options.assistantLabel || providerInfo(session.provider).label;
     const conversationLabel = options.conversationLabel || t("drawer.conversation");
-    const conversation = messages.filter((message) => message.role === "user" || message.role === "assistant");
-    const activities = messages.filter((message) => message.role !== "user" && message.role !== "assistant");
+    const turns = conversationTurns(session, options);
+    const progressCount = turns.reduce((sum, turn) => sum + turn.progress.length, 0);
     const omitted = Number(session.omittedMessages || 0);
     const notice =
       omitted || session.truncated
         ? `<div class="chat-truncated">${esc(t("drawer.recent_history"))}${omitted ? ` · ${esc(t("drawer.messages_omitted", { count: omitted.toLocaleString(uiLocale()) }))}` : ""}</div>`
         : "";
-    const statusLabels = {
-      started: t("ui.working"), running: t("ui.working"),
-      done: t("ui.completed"), completed: t("ui.completed"), failed: t("drawer.failed"),
-    };
-    const statusLabel = (value) => statusLabels[value] || value || "";
-    const rows = conversation
-      .map((message) => {
-        const role = message.role === "assistant" ? "assistant" : message.role === "tool" ? "tool" : message.role === "system" ? "system" : "user";
-        const renderedMessage = role === "tool" || role === "system"
-          ? { ...message, text: window.LoadToAgentI18n.observedText(message.text) }
-          : message;
-        const label =
-          role === "assistant"
-            ? assistantLabel
-            : role === "tool"
-              ? window.LoadToAgentI18n.observedText(message.title || t("session.tool"))
-              : message.role === "system"
-                ? t("drawer.system")
-                : userLabel;
-        const avatar = role === "assistant" ? providerInfo(session.provider).mark : role === "tool" ? "⌘" : role === "system" ? "i" : "ME";
-        const fullTime = new Date(message.timestamp).toLocaleString(uiLocale());
-        return `<div class="chat-row ${role}" data-message-id="${esc(message.id || "")}">
-        <span class="chat-avatar">${esc(avatar)}</span>
-        <div class="chat-bubble">
-        <div class="chat-bubble-head">
-        <b>${esc(label)}</b>
-        <span title="${esc(fullTime)}">${esc(timeOnly(message.timestamp))}</span>
-        ${message.status ? `<span>${esc(statusLabel(message.status))}</span>` : ""}
-        </div>${messageContentHtml(renderedMessage, session.id)}</div>
-        </div>`;
-      })
-      .join("");
-    const activityHtml = activities.length
-      ? `<details class="chat-activities" data-disclosure-key="${esc(`drawer:${session.id}:activities`)}">
-      <summary>${esc(t("drawer.activities_view", { count: activities.length }))}</summary>
-      <div>${activities
-        .map(
-          (message) => `<article>
-      <header>
-      <b>${esc(window.LoadToAgentI18n.observedText(message.title || (message.role === "tool" ? t("drawer.tool_execution") : t("drawer.system"))))}</b>
-      <span>${esc(statusLabel(message.status))} · ${esc(timeOnly(message.timestamp))}</span>
-      </header>${messageContentHtml({ ...message, text: window.LoadToAgentI18n.observedText(message.text) }, session.id)}</article>`,
-        )
-        .join("")}</div>
-      </details>`
-      : "";
-    const emptyConversation = conversation.length ? "" : `<div class="empty-state compact"><h3>${esc(t("drawer.no_user_ai_conversation"))}</h3></div>`;
+    const rows = turns.map((turn) => {
+      const user = conversationRowHtml(turn.user, session, { userLabel, assistantLabel });
+      const representative = conversationRowHtml(turn.representative, session, {
+        userLabel,
+        assistantLabel,
+        answerKind: t(turn.live ? "drawer.current_progress" : turn.awaitingFinal ? "drawer.last_progress" : "drawer.final_answer"),
+        live: turn.live,
+      });
+      const waiting = turn.live && !turn.representative
+        ? `<div class="chat-turn-waiting"><span aria-hidden="true"></span><b>${esc(t("drawer.preparing_response"))}</b></div>`
+        : "";
+      return `<section class="chat-turn${turn.live ? " is-live" : ""}" data-conversation-turn="${esc(turn.id)}">
+        ${user}${representative}${waiting}${progressUpdatesHtml(turn, session)}
+      </section>`;
+    }).join("");
+    const emptyConversation = turns.length ? "" : `<div class="empty-state compact"><h3>${esc(t("drawer.no_user_ai_conversation"))}</h3></div>`;
     return `${notice}<div class="chat-history-head">
-      <span>${esc(t("drawer.conversation_summary", { label: conversationLabel, count: conversation.length, activities: activities.length ? ` · ${t("drawer.activities", { count: activities.length })}` : "" }))}</span>
+      <span>${esc(t("drawer.turn_summary", { label: conversationLabel, count: turns.length, updates: progressCount ? ` · ${t("drawer.progress_updates", { count: progressCount })}` : "" }))}</span>
       <button type="button" data-scroll-latest>${esc(t("drawer.latest_conversation"))} ↓</button>
       </div>
-      <div class="chat-list">${rows}${emptyConversation}${activityHtml}<div class="chat-latest-anchor" aria-label="${esc(t("drawer.latest_conversation"))}">
+      <div class="chat-list">${rows}${emptyConversation}<div class="chat-latest-anchor" aria-label="${esc(t("drawer.latest_conversation"))}">
       </div>
       </div>`;
   }
@@ -153,12 +200,26 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
   }
 
   function subagentWorkMessages(session) {
-    const messages = [...(session.messages || [])];
+    const parent = session.parentId ? state.details.get(session.parentId) || snapshotSession(session.parentId) : null;
+    const delegation = session.delegation || {};
+    const startValue = delegation.startedAt || session.startedAt || "";
+    const startedAt = startValue ? Date.parse(startValue) : Number.NaN;
+    const normalizedText = value => String(value || "").replace(/\s+/g, " ").trim();
+    const messageKey = message => `${message.role || ""}:${normalizedText(message.text)}`;
+    const parentMessageIds = new Set((parent?.messages || []).map(message => String(message.id || "")).filter(Boolean));
+    const parentMessageKeys = new Set((parent?.messages || []).map(messageKey));
+    const messages = (session.messages || []).filter(message => {
+      if (!message || !["user", "assistant"].includes(message.role) || message.protected || !normalizedText(message.text)) return false;
+      const messageAt = message.timestamp ? Date.parse(message.timestamp) : Number.NaN;
+      if (Number.isFinite(startedAt) && startedAt > 0 && Number.isFinite(messageAt) && messageAt < startedAt - 2000) return false;
+      const inheritedId = message.id && parentMessageIds.has(String(message.id));
+      const inheritedText = parentMessageKeys.has(messageKey(message));
+      return !inheritedId && !inheritedText;
+    });
     const hasConversation = messages.some((message) =>
       (message.role === "user" || message.role === "assistant") && String(message.text || "").trim(),
     );
     if (hasConversation) return messages;
-    const delegation = session.delegation || {};
     if (delegation.assignmentObserved && !delegation.assignmentProtected && String(delegation.assignment || "").trim()) {
       messages.push({
         id: `${session.id}:delegation`, role: "user", text: delegation.assignment,
@@ -201,20 +262,77 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
   }
 
   function subagentConversationHtml(session) {
-    const messages = subagentWorkMessages(session);
+    const delegation = session.delegation || {};
+    const parent = session.parentId ? state.details.get(session.parentId) || snapshotSession(session.parentId) : null;
+    const assignmentEvent = subagentCoordinationEvents(session).find(event => event.kind === "assignment" && String(event.text || "").trim());
+    const assignment = String(delegation.assignment || assignmentEvent?.text || delegation.taskName || session.taskName || session.title || "").trim();
+    let assignmentRemoved = false;
+    const messages = subagentWorkMessages(session).filter(message => {
+      if (assignmentRemoved || message.role !== "user" || !assignment) return true;
+      if (String(message.text || "").replace(/\s+/g, " ").trim() !== assignment.replace(/\s+/g, " ").trim()) return true;
+      assignmentRemoved = true;
+      return false;
+    });
     const conversationCount = messages.filter((message) => message.role === "user" || message.role === "assistant").length;
     const workSession = { ...session, messages };
     const sourceCopy = session.source === "collaboration-history"
       ? t("drawer.subagent_history_reconstructed")
       : t("drawer.subagent_history_actual");
-    return `<section class="subagent-work-source" data-subagent-work-messages="${conversationCount}">
-      <b>${esc(t("drawer.subagent_work_history"))}</b><span>${esc(sourceCopy)}</span>
+    return `<section class="subagent-assignment-card" data-subagent-assignment="true">
+      <span aria-hidden="true">⌁</span><div><b>${esc(t("control.main_assignment"))}</b>${parent ? `<small>${esc(t("control.created_from"))} · ${esc(parent.title)}</small>` : ""}<p>${esc(assignment || t("management.signal_unavailable"))}</p></div>
+    </section><section class="subagent-work-source" data-subagent-work-messages="${conversationCount}" data-conversation-scope="subagent-only">
+      <b>${esc(t("control.subagent_conversation"))}</b><span>${esc(sourceCopy)}</span>
     </section>${chatHtml(workSession, {
-      userLabel: t("drawer.assignment"),
+      userLabel: t("drawer.user"),
       assistantLabel: session.agentName || t("drawer.sub_ai"),
       conversationLabel: t("drawer.work_history"),
+      synthesizeRequest: false,
     })}${subagentCoordinationHtml(session)}`;
   }
 
-  return { chatHtml, lifecycleHtml, tokensHtml, subagentCommunicationEvents, subagentCoordinationEvents, subagentTextPreview, subagentConversationHtml };
+  function executionActivityDetailHtml(session, activity) {
+    if (!activity) return `<div class="empty-state"><h3>${esc(t("drawer.execution_unavailable"))}</h3></div>`;
+    const purpose = inferredExecutionSummary(activity);
+    const ownerGoal = controlRoomAgentGoal(session, 180);
+    const runtime = activity.runtime || activity.tool || t("graph.runtime_unknown");
+    const handle = activity.backgroundId
+      ? `${activity.backgroundIdType || t("graph.execution_handle")} · ${activity.backgroundId}`
+      : "";
+    const command = String(activity.command || activity.label || purpose.full || "").trim();
+    const output = String(activity.output || "").trim();
+    const status = executionActivityStatus(activity);
+    const ownerLabel = session.parentId
+      ? `${t("control.subagent")} · ${session.agentName || session.taskName || providerInfo(session.provider).label}`
+      : `${t("control.main_agent")} · ${session.agentName || providerInfo(session.provider).label}`;
+    const timeline = [
+      activity.startedAt ? { label: t("drawer.execution_started"), value: activity.startedAt } : null,
+      activity.updatedAt ? { label: activity.status === "running" ? t("drawer.execution_latest_activity") : t("drawer.execution_finished"), value: activity.updatedAt } : null,
+    ].filter(Boolean);
+    return `<div class="execution-drawer" data-execution-detail="${esc(activity.id)}" data-conversation-scope="execution-only">
+      <section class="execution-purpose-card">
+        <span class="execution-purpose-icon" aria-hidden="true">${activity.kind === "shell" ? "›_" : "◌"}</span>
+        <div><small>${esc(t("drawer.execution_purpose"))}</small><b>${esc(purpose.text)}</b><p>${esc(t("drawer.execution_owner_context", { owner: ownerLabel, task: ownerGoal.text }))}</p></div>
+      </section>
+      <section class="execution-process-card">
+        <header><span><small>${esc(executionActivityLabel(activity))}</small><b>${esc(status)}</b></span><em class="${activity.status === "running" ? "is-running" : ""}"><i aria-hidden="true"></i>${esc(activity.statusDetail || status)}</em></header>
+        <dl>
+          <div><dt>${esc(t("graph.execution_runtime"))}</dt><dd>${esc(runtime)}</dd></div>
+          ${activity.cwd ? `<div><dt>${esc(t("graph.execution_workdir"))}</dt><dd title="${esc(activity.cwd)}">${esc(activity.cwd)}</dd></div>` : ""}
+          ${handle ? `<div><dt>${esc(t("graph.execution_handle"))}</dt><dd>${esc(handle)}</dd></div>` : ""}
+          ${activity.exitCode != null ? `<div><dt>${esc(t("drawer.execution_exit_code"))}</dt><dd>${esc(activity.exitCode)}</dd></div>` : ""}
+        </dl>
+      </section>
+      <section class="execution-code-card">
+        <header><span><small>${esc(t("drawer.execution_command_from", { owner: ownerLabel }))}</small><b>${esc(t("graph.execution_command"))}</b></span>${command ? `<button type="button" data-copy-text="${esc(command)}">${esc(t("graph.copy_command"))}</button>` : ""}</header>
+        ${command ? `<pre><code>${esc(command)}</code></pre>` : `<p>${esc(t("drawer.execution_command_unavailable"))}</p>`}
+      </section>
+      <section class="execution-code-card output-card">
+        <header><span><small>${esc(t("drawer.execution_output_help"))}</small><b>${esc(t("graph.execution_output"))}</b></span>${output ? `<button type="button" data-copy-text="${esc(output)}">${esc(t("graph.copy_output"))}</button>` : ""}</header>
+        ${output ? `<pre>${esc(output)}</pre>` : `<p>${esc(activity.status === "running" ? t("drawer.execution_waiting_output") : t("graph.execution_output_unavailable"))}</p>`}
+      </section>
+      ${timeline.length ? `<section class="execution-timeline" aria-label="${esc(t("drawer.execution_timeline"))}">${timeline.map((item, index) => `<div><i aria-hidden="true"></i><span><b>${esc(item.label)}</b><time title="${esc(item.value)}">${esc(new Date(item.value).toLocaleString(uiLocale()))}</time></span>${index === timeline.length - 1 && activity.status === "running" ? `<em>${esc(t("graph.execution_running"))}</em>` : ""}</div>`).join("")}</section>` : ""}
+    </div>`;
+  }
+
+  return { conversationTurns, chatHtml, lifecycleHtml, tokensHtml, subagentCommunicationEvents, subagentCoordinationEvents, subagentTextPreview, subagentConversationHtml, executionActivityDetailHtml };
 };

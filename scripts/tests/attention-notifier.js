@@ -24,6 +24,19 @@ function registerAttentionNotifierTests(context) {
 
   test('확인 대기 세션은 최초 실행 때 울리지 않고 새 전환마다 한 번만 알린다', () => {
     FakeNotification.created = [];
+    const disabledFallback = [];
+    const disabled = new AttentionNotifier({
+      enabled: false,
+      Notification: FakeNotification,
+      isSupported: () => true,
+      onFallback: session => disabledFallback.push(session.id),
+    });
+    assert.deepEqual(disabled.sync({ sessions: [] }), []);
+    assert.deepEqual(disabled.sync({ sessions: [{ id: 'waiting-disabled', status: 'waiting' }] }), []);
+    assert.equal(disabled.notify({ id: 'manual-disabled', status: 'waiting' }), null);
+    assert.equal(FakeNotification.created.length, 0);
+    assert.deepEqual(disabledFallback, []);
+
     const opened = [];
     const notifier = new AttentionNotifier({
       Notification: FakeNotification,

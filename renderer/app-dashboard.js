@@ -441,13 +441,40 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
     }
     if (state.sort === "tokens") sessions.sort((a, b) => Number((b.usage && b.usage.total) || 0) - Number((a.usage && a.usage.total) || 0));
     else if (state.sort === "context") sessions.sort((a, b) => Number((b.context && b.context.percent) || 0) - Number((a.context && a.context.percent) || 0));
-    else
-      sessions.sort((a, b) => {
-        const activeA = a.status === "running" || a.status === "starting" ? 1 : 0;
-        const activeB = b.status === "running" || b.status === "starting" ? 1 : 0;
-        return activeB - activeA || Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
-      });
+    else sessions = stableSessionSort(sessions);
     return sessions;
+  }
+
+  function ensureSessionOrder(sessions = []) {
+    if (!Array.isArray(state.sessionOrder)) state.sessionOrder = [];
+    const known = new Set(state.sessionOrder);
+    for (const session of sessions) {
+      const id = String(session?.id || "");
+      if (!id || known.has(id)) continue;
+      state.sessionOrder.push(id);
+      known.add(id);
+    }
+    return state.sessionOrder;
+  }
+
+  function stableSessionSort(sessions = []) {
+    const order = ensureSessionOrder(sessions);
+    const rank = new Map(order.map((id, index) => [id, index]));
+    return [...sessions].sort((a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+  }
+
+  function moveSessionOrder(sourceId, targetId, placeAfter = false) {
+    const source = String(sourceId || "");
+    const target = String(targetId || "");
+    if (!source || !target || source === target) return false;
+    const order = ensureSessionOrder(displaySessions());
+    const sourceIndex = order.indexOf(source);
+    if (sourceIndex < 0 || !order.includes(target)) return false;
+    order.splice(sourceIndex, 1);
+    const targetIndex = order.indexOf(target);
+    order.splice(targetIndex + (placeAfter ? 1 : 0), 0, source);
+    state.sessionOrder = order;
+    return true;
   }
 
   function graphFilteredSessions() {
@@ -462,7 +489,7 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
           .toLowerCase()
           .includes(query),
       );
-    return sessions;
+    return stableSessionSort(sessions);
   }
 
   function renderProviderVisibilitySettings() {
@@ -501,6 +528,8 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
     announceProviderFilter,
     filteredSessions,
     graphFilteredSessions,
+    stableSessionSort,
+    moveSessionOrder,
     renderProviderVisibilitySettings,
   };
 };

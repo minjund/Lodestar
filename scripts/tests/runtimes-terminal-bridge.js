@@ -10,11 +10,17 @@ const { parseArguments } = require('../../bin/loadtoagent');
 const { parseGeneric, buildSummary } = require('../../src/agentMonitor');
 const { AgentRunner, commandSpec } = require('../../src/agentRunner');
 const { BridgeServer, decodeBase64 } = require('../../src/bridgeServer');
-const { ProcessMonitor, processRows, posixProcessRows, providerFromPosixProcess, selectAgentProcesses, processSessionExternalId, bridgeLinkScore, applyRuntimePresence } = require('../../src/processMonitor');
+const { ProcessMonitor, processRows, powershellProcessRows, posixProcessRows, providerFromPosixProcess, selectAgentProcesses, processSessionExternalId, bridgeLinkScore, applyRuntimePresence } = require('../../src/processMonitor');
 const { TerminalManager, normalizeLaunchOptions, launchSpec, resolveWindowsCommand, resolvePosixShell } = require('../../src/terminalManager');
 const { TerminalHostServer, TerminalHostClient, resolveTerminalHostExecutable } = require('../../src/terminalHost');
 const { TmuxController, safeName, safeTarget } = require('../../src/tmuxController');
 const { TmuxMonitor, normalizeWslList, parseTmuxProbe, buildDistroTopology, linkAgentSessions, providerFromProcess } = require('../../src/tmuxMonitor');
+
+async function waitUntil(predicate, timeoutMs = 2_000, intervalMs = 10) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, intervalMs));
+  return predicate();
+}
 
 function registerTmuxAndProcessTests(context) {
   const { test } = context;
@@ -87,6 +93,26 @@ function registerTmuxAndProcessTests(context) {
     const processes = selectAgentProcesses(processRows(csv));
     assert.deepStrictEqual(processes.map(item => [item.provider, item.pid]), [['claude', 101], ['codex', 202]]);
     assert.equal(processes[0].startedAt, '2026-07-14T03:00:00.000Z');
+    const multiline = powershellProcessRows(JSON.stringify({
+      pid: 103, parentPid: 10, name: 'claude.exe',
+      commandLine: 'claude.exe -p "첫 줄\n둘째 줄"', startedAt: '2026-07-14T03:00:02.0000000Z',
+    }));
+    assert.equal(multiline[0].commandLine, 'claude.exe -p "첫 줄\n둘째 줄"');
+    assert.equal(multiline[0].startedAt, '2026-07-14T03:00:02.000Z');
+    const processCalls = [];
+    const windowsMonitor = new ProcessMonitor({
+      platform: 'win32', scanTtlMs: 0,
+      execFileSync: (file, args, options) => {
+        processCalls.push({ file, args, options });
+        return JSON.stringify(multiline);
+      },
+    });
+    const windowsSnapshot = windowsMonitor.scan(true);
+    assert.equal(windowsSnapshot.available, true);
+    assert.equal(windowsSnapshot.processes[0].pid, 103);
+    assert.equal(windowsSnapshot.processes[0].interactionMode, 'batch');
+    assert.equal(processCalls[0].file, 'powershell.exe');
+    assert.equal(processCalls[0].options.windowsHide, true);
 
     const base = {
       distros: [{ name: 'Ubuntu', sessions: [{ name: 'tmux-work', windows: [{ panes: [{ nativeId: '%1', index: 0, cwd: '/repo', agent: { provider: 'claude', pid: 301, linkedSessionId: 'claude:wsl', startedAt: '2026-07-14T03:00:00Z' } }] }] }] }],
@@ -116,10 +142,12 @@ function registerTmuxAndProcessTests(context) {
       { pid: 401, parentPid: 40, name: 'claude.exe', commandLine: 'C:\\Users\\dev\\.local\\bin\\claude.exe --resume session-1', startedAt: '2026-07-14T03:00:00Z' },
       { pid: 402, parentPid: 40, name: 'claude.exe', commandLine: 'C:\\Users\\dev\\.local\\bin\\claude.exe daemon run --json-path daemon.json', startedAt: '2026-07-14T03:00:00Z' },
       { pid: 403, parentPid: 40, name: 'claude.exe', commandLine: 'C:\\Users\\dev\\.local\\bin\\claude.exe -p Reply with exactly OK. Do not use tools.', startedAt: '2026-07-14T03:00:00Z' },
+      { pid: 404, parentPid: 40, name: 'claude.exe', commandLine: 'C:\\Users\\dev\\.local\\bin\\claude.exe -p --output-format json "/scheduled-run --tick seo; memory example: Reply with exactly OK. Do not use tools."', startedAt: '2026-07-14T03:00:20Z' },
     ];
     const processes = selectAgentProcesses(rows);
-    assert.deepStrictEqual(processes.map(item => [item.provider, item.pid, item.parentPid]), [['claude', 401, 40]]);
+    assert.deepStrictEqual(processes.map(item => [item.provider, item.pid, item.parentPid]), [['claude', 401, 40], ['claude', 404, 40]]);
     assert.equal(processes[0].externalId, 'session-1');
+    assert.equal(processes[1].interactionMode, 'batch');
     const runtime = applyRuntimePresence([], {}, { processes }, Date.parse('2026-07-14T03:01:00Z'));
     assert.deepStrictEqual(runtime, []);
 
@@ -133,6 +161,15 @@ function registerTmuxAndProcessTests(context) {
     assert.equal(linked[0].status, 'idle');
     assert.equal(linked[0].runtimePresence[0].pid, 401);
     assert.equal(linked[0].runtimePresence[0].linkScore, 'explicit-session-id');
+    const batch = applyRuntimePresence([{
+      id: 'claude:scheduled', externalId: 'scheduled', provider: 'claude', environment: { kind: 'windows' },
+      clientKind: 'claude-cli', status: 'waiting', statusDetail: '응답 또는 권한 확인 필요', title: '/scheduled-run --tick seo',
+      startedAt: '2026-07-14T03:00:20Z', updatedAt: '2026-07-14T03:00:50Z', childIds: [],
+    }], {}, { processes: [processes[1]] }, Date.parse('2026-07-14T03:01:00Z'));
+    assert.equal(batch[0].status, 'running');
+    assert.equal(batch[0].conversationStatus, 'waiting');
+    assert.match(batch[0].statusDetail, /백그라운드 자율 실행 중/);
+    assert.equal(batch[0].runtimePresence[0].pid, 404);
     const commandLine = 'claude.exe --session-id current-session --fork-session --resume C:\\Users\\dev\\.claude\\projects\\repo\\old-session.jsonl';
     assert.equal(processSessionExternalId({ commandLine }, 'claude'), 'current-session');
     assert.equal(processSessionExternalId({ commandLine: 'claude.exe --resume "C:\\Users\\dev\\.claude\\projects\\repo\\resumed-session.jsonl"' }, 'claude'), 'resumed-session');
@@ -341,6 +378,7 @@ function registerTerminalLifecycleTests(context) {
 
   test('PTY 터미널을 만들고 입력·명령·리사이즈·신호·재시작·종료를 제어한다', () => {
     const processes = [];
+    const spawnOptions = [];
     const storeFile = path.join(temp, 'terminal-sessions-lifecycle.json');
     class FakePty {
       constructor(pid) { this.pid = pid; this.writes = []; this.resizes = []; this.killed = false; }
@@ -351,9 +389,10 @@ function registerTerminalLifecycleTests(context) {
       clear() { this.cleared = true; }
       kill() { this.killed = true; }
     }
-    const managerOptions = { storeFile, killTree: handle => handle.kill(), ptyModule: { spawn: () => {
+    const managerOptions = { storeFile, killTree: handle => handle.kill(), ptyModule: { spawn: (...args) => {
       const processHandle = new FakePty(9000 + processes.length);
       processes.push(processHandle);
+      spawnOptions.push(args[2]);
       return processHandle;
     } } };
     let manager = new TerminalManager(managerOptions);
@@ -361,6 +400,7 @@ function registerTerminalLifecycleTests(context) {
     assert.equal(session.status, 'running');
     assert.equal(session.background, false);
     assert.equal(session.pid, 9000);
+    assert.notEqual(String(spawnOptions[0].env.TERM || '').toLowerCase(), 'dumb');
     manager.write(session.id, 'hello');
     manager.command(session.id, 'Get-Location');
     manager.resize(session.id, 140, 44);
@@ -398,6 +438,11 @@ function registerTerminalLifecycleTests(context) {
     manager.close(backgroundAgent.id);
     manager = new TerminalManager(managerOptions);
     assert.equal(manager.list().length, 0);
+    const transient = manager.create({ type: 'agent', provider: 'codex', cwd: root, transient: true, args: ['exec', 'resume', 'session-transient', 'relay'] });
+    assert.equal(transient.transient, true);
+    processes[3].exitCallback({ exitCode: 0, signal: 0 });
+    assert.equal(manager.get(transient.id), null);
+    assert.equal(fs.readFileSync(storeFile, 'utf8').includes(transient.id), false);
     assert.equal(normalizeLaunchOptions({ type: 'cmd', cwd: root }).type, 'cmd');
     assert.ok(launchSpec(normalizeLaunchOptions({ type: 'powershell', cwd: root })).args.includes('-NoLogo'));
     const macShell = normalizeLaunchOptions({ cwd: root }, 'darwin');
@@ -500,6 +545,8 @@ function registerTerminalLifecycleTests(context) {
     const beforeCrash = new TerminalManager(options);
     const created = beforeCrash.create({ type: 'agent', provider: 'codex', args: ['resume', 'session-123'], cwd: root, bridgeId: 'codex:session-123' });
     const freshAgent = beforeCrash.create({ type: 'agent', provider: 'codex', args: [], cwd: root, bridgeId: 'external-bridge' });
+    const stalledAgent = beforeCrash.create({ type: 'agent', provider: 'codex', args: ['resume', 'session-stalled'], cwd: root, bridgeId: 'codex:session-stalled' });
+    processes[2].dataCallback('WARNING: TERM is set to "dumb". Codex interactive mode may not work.\r\nContinue anyway? [y/N]:');
     beforeCrash.persistNow();
 
     const afterCrash = new TerminalManager(options);
@@ -509,11 +556,12 @@ function registerTerminalLifecycleTests(context) {
     assert.equal(recovered.length, 1);
     assert.equal(recovered[0].id, created.id);
     assert.equal(recovered[0].status, 'running');
-    assert.equal(recovered[0].pid, 15_002);
+    assert.equal(recovered[0].pid, 15_003);
     assert.equal(recovered[0].bridgeId, 'codex:session-123');
     assert.match(afterCrash.get(created.id, true).replay, /호스트 중단 뒤 새 프로세스로 복구/);
     assert.equal(afterCrash.get(freshAgent.id).status, 'exited');
     assert.match(afterCrash.get(freshAgent.id, true).replay, /새 AI 대화를 만들 수 있어 자동 재개하지 않았습니다/);
+    assert.equal(afterCrash.get(stalledAgent.id), null);
     afterCrash.dispose();
   });
 
@@ -640,7 +688,7 @@ function registerTerminalLifecycleTests(context) {
     const client = new TerminalHostClient({ discoveryFile: discovery });
     await client.connect();
     client.dispose();
-    await new Promise(resolve => setTimeout(resolve, 80));
+    await waitUntil(() => shutdowns === 1);
 
     assert.equal(shutdowns, 1);
     server.dispose();
@@ -667,7 +715,7 @@ function registerTerminalLifecycleTests(context) {
       onShutdown: () => { shutdowns += 1; },
     });
     await server.start();
-    await new Promise(resolve => setTimeout(resolve, 80));
+    await waitUntil(() => shutdowns === 1);
 
     assert.equal(shutdowns, 1);
     server.dispose();

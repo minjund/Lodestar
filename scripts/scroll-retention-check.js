@@ -157,7 +157,7 @@ async function checkDrawer(win) {
     app.renderDrawer();
     await new Promise(resolve => requestAnimationFrame(resolve));
     const results = {};
-    for (const [name, selector] of Object.entries({ roadmap: '.chat-roadmap', activities: '.chat-activities' })) {
+    for (const [name, selector] of Object.entries({ roadmap: '.chat-roadmap' })) {
       for (const expected of [true, false]) {
         let details = document.querySelector(selector);
         details.open = expected;
@@ -168,9 +168,11 @@ async function checkDrawer(win) {
         results[name + ':' + expected] = details?.open;
       }
     }
+    results.toolActivityVisible = Boolean(document.querySelector('.chat-activities:not(.subagent-coordination)'))
+      || document.querySelector('#drawerContent').innerText.includes('휠 상태 검사');
     return results;
   })()`);
-  if (!disclosures['roadmap:true'] || disclosures['roadmap:false'] || !disclosures['activities:true'] || disclosures['activities:false']) {
+  if (!disclosures['roadmap:true'] || disclosures['roadmap:false'] || disclosures.toolActivityVisible) {
     throw new Error(`최근 대화의 펼침 상태가 갱신 뒤 유지되지 않았습니다: ${JSON.stringify(disclosures)}`);
   }
   await auditWheelControls(win, 'recent-drawer');

@@ -4,7 +4,14 @@ window.LoadToAgentAppFactories = window.LoadToAgentAppFactories || {};
 
 window.LoadToAgentAppFactories.createManagement = function createManagement(context = {}) {
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
-  const { $, esc, state, providerInfo, timeAgo, readablePreview = value => ({ text: String(value || "") }) } = context;
+  const {
+    $, esc, state, providerInfo, timeAgo,
+    readablePreview = value => ({ text: String(value || "") }),
+    currentActivity = session => ({ title: session.statusDetail || "", detail: "" }),
+    latestWorkCopy = session => session.statusDetail || "",
+    isLiveSession = session => ["starting", "running"].includes(session && session.status),
+    agentRoleLabel = value => String(value || ""),
+  } = context;
 
   const attentionLabel = kind => t(`management.attention.${kind || "response"}`);
   const healthLabel = level => t(`management.health.${level || "unknown"}`);
@@ -14,6 +21,7 @@ window.LoadToAgentAppFactories.createManagement = function createManagement(cont
   const ALWAYS_VISIBLE_STATUSES = new Set(["starting", "running"]);
   const CURRENT_RISK_STATUSES = new Set(["starting", "running", "waiting", "paused", "failed"]);
   const RESPONSE_ATTENTION_KINDS = new Set(["approval", "decision", "input", "response"]);
+  const ACTIONABLE_RISK_SIGNALS = new Set(["run-failed", "run-paused", "stalled", "waiting-too-long", "repeated-failures"]);
   const needsUserResponse = session => Boolean(
     session.attention?.required && RESPONSE_ATTENTION_KINDS.has(session.attention.kind),
   );
@@ -29,10 +37,17 @@ window.LoadToAgentAppFactories.createManagement = function createManagement(cont
     const activityAt = sessionActivityTimestamp(session);
     return Boolean(activityAt && Math.max(0, Number(now) - activityAt) <= RECENT_SESSION_WINDOW_MS);
   };
+  const actionableRiskLevel = session => {
+    const signals = (session.health?.signals || []).filter(signal => ACTIONABLE_RISK_SIGNALS.has(signal.code));
+    const severities = signals.map(signal => signal.severity || session.health?.level || "");
+    if (severities.includes("critical")) return "critical";
+    if (severities.includes("warning")) return "warning";
+    return "";
+  };
   const hasCurrentRisk = (session, now = Date.now()) => Boolean(
     isRecentSession(session, now)
     && CURRENT_RISK_STATUSES.has(session.status)
-    && ["critical", "warning"].includes(session.health?.level),
+    && actionableRiskLevel(session),
   );
   const needsManagementReview = (session, now = Date.now()) => Boolean(
     isRecentSession(session, now) && (needsUserResponse(session) || hasCurrentRisk(session, now)),
@@ -63,18 +78,79 @@ window.LoadToAgentAppFactories.createManagement = function createManagement(cont
     const firstSentence = plain.match(/^.*?(?:[.!?。！？](?=\s|$)|$)/)?.[0]?.trim() || plain;
     return readablePreview(firstSentence || t("management.signal_unavailable"), 104).text;
   };
+  const flowExcerpt = (value, limit = 420) => {
+    const plain = String(value || "")
+      .replace(/```[\s\S]*?```/g, " ")
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/`([^`]*)`/g, "$1")
+      .replace(/^\s{0,3}(?:#{1,6}|>|[-*+]|\d+[.)])\s+/gm, "")
+      .replace(/\*\*|__|~~/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return readablePreview(plain || t("management.signal_unavailable"), limit).text;
+  };
+  const latestAgentReply = session => {
+    const message = [...(session.messages || [])].reverse()
+      .find(row => row && row.role === "assistant" && String(row.text || "").trim());
+    const communication = [...(session.collaboration?.communications || [])].reverse()
+      .find(row => row && row.kind === "result" && String(row.text || "").trim());
+    return flowExcerpt(message?.text
+      || communication?.text
+      || session.result
+      || session.outcome?.summary
+      || session.attention?.summary
+      || session.statusDetail);
+  };
+  const attentionFlow = session => {
+    const attention = session.attention || {};
+    const responseRequired = needsUserResponse(session);
+    const kind = responseRequired ? attention.kind : (session.status === "failed" ? "error" : session.status === "paused" ? "paused" : "risk");
+    const check = t(`management.flow_check_${kind}`);
+    const action = t(`management.flow_action_${kind}`);
+    const reply = t(`management.flow_reply_${kind}`);
+    const expected = t(`management.flow_expected_${kind}`);
+    const replySource = responseRequired
+      ? (attention.summary || session.statusDetail || latestAgentReply(session))
+      : ((session.health?.signals || []).map(signal => {
+        const label = signalLabel(signal.code);
+        return signal.detail ? `${label} · ${signal.detail}` : label;
+      }).join(" / ") || session.statusDetail || latestAgentReply(session));
+    return {
+      responseRequired,
+      kind,
+      agentReply: latestAgentReply(session),
+      reason: flowExcerpt(replySource, 260),
+      check,
+      action,
+      reply,
+      expected,
+    };
+  };
+  const supervisionFreshnessScore = (timestamp, now = Date.now()) => {
+    if (timestamp == null || timestamp === "") return -300;
+    const numericTimestamp = typeof timestamp === "number" ? timestamp : Date.parse(timestamp || 0);
+    if (!Number.isFinite(numericTimestamp) || numericTimestamp <= 0) return -300;
+    const age = Math.max(0, Number(now) - numericTimestamp);
+    if (age <= 60 * 1000) return 180;
+    if (age <= 5 * 60 * 1000) return 140;
+    if (age <= 15 * 60 * 1000) return 95;
+    if (age <= 60 * 60 * 1000) return 45;
+    if (age <= 6 * 60 * 60 * 1000) return 0;
+    return -260;
+  };
 
   function managementBucket(session, now = Date.now()) {
     if (!needsManagementReview(session, now)) return "healthy";
-    if (hasCurrentRisk(session, now) && session.health?.level === "critical") return "critical";
-    if (hasCurrentRisk(session, now) && session.health?.level === "warning") return "warning";
+    if (hasCurrentRisk(session, now) && actionableRiskLevel(session) === "critical") return "critical";
+    if (hasCurrentRisk(session, now) && actionableRiskLevel(session) === "warning") return "warning";
     if (needsUserResponse(session)) return "attention";
     return "healthy";
   }
 
   function matchesManagementFilter(session, filter, now = Date.now()) {
-    if (filter === "critical") return hasCurrentRisk(session, now) && session.health?.level === "critical";
-    if (filter === "warning") return hasCurrentRisk(session, now) && session.health?.level === "warning";
+    if (filter === "critical") return hasCurrentRisk(session, now) && actionableRiskLevel(session) === "critical";
+    if (filter === "warning") return hasCurrentRisk(session, now) && actionableRiskLevel(session) === "warning";
     if (filter === "attention") return isRecentSession(session, now) && needsUserResponse(session);
     return needsManagementReview(session, now);
   }
@@ -146,21 +222,24 @@ window.LoadToAgentAppFactories.createManagement = function createManagement(cont
     const health = session.health || { level: "unknown", signals: [] };
     const evidence = session.evidence || {};
     const cardLabel = attention.required ? attentionLabel(attention.kind) : healthLabel(health.level);
-    const statusSignals = (health.signals || []).map(signal => {
-      const label = signalLabel(signal.code);
-      return signal.detail ? `${label} · ${signal.detail}` : label;
-    }).join(" / ");
-    const reason = attention.required
-      ? (attention.summary || session.statusDetail || t("management.response_needed"))
-      : (statusSignals || session.statusDetail || t("management.signal_unavailable"));
+    const flow = attentionFlow(session);
+    const canDraft = Boolean(session.controlCapabilities?.sendInstruction && flow.kind !== "approval");
+    const draftAction = canDraft
+      ? `<button type="button" class="attention-draft-action" data-attention-session-id="${esc(session.id)}" data-attention-draft="${esc(flow.reply)}">${esc(t("management.flow_use_reply"))}</button>`
+      : "";
     return `<article class="attention-card ${esc(attention.kind || "response")}" data-management-session="${esc(session.id)}" style="--management-provider:${provider.accent}">
       <header><span class="provider-mark">${esc(provider.mark)}</span><div><small>${esc(provider.label)} · ${esc(cardLabel)}</small><h3>${esc(session.title)}</h3></div><em class="confidence ${esc(evidence.confidence || "low")}">${esc(evidenceLabel(evidence.confidence))}</em></header>
-      <div class="attention-reason"><span>${esc(t(attention.required ? "management.requested_action" : "management.health_title"))}</span><p>${esc(reason)}</p><small>${esc(attention.requestedAt ? timeAgo(attention.requestedAt) : health.lastActivityAt ? timeAgo(health.lastActivityAt) : t("management.signal_unavailable"))}</small></div>
-      ${progressHtml(session, true)}
-      ${healthHtml(session, true)}
+      <div class="attention-decision-flow" data-attention-flow="${esc(flow.kind)}" aria-label="${esc(t("management.flow_label"))}">
+        <section class="agent-reply"><span><i>1</i>${esc(t("management.flow_agent_reply"))}</span><blockquote>${esc(flow.agentReply)}</blockquote><small><b>${esc(t("management.flow_why_here"))}</b>${esc(flow.reason)}</small></section>
+        <i class="attention-flow-arrow" aria-hidden="true">→</i>
+        <section class="user-decision"><span><i>2</i>${esc(t("management.flow_my_check"))}</span><b>${esc(flow.check)}</b><p>${esc(flow.action)}</p></section>
+        <i class="attention-flow-arrow" aria-hidden="true">→</i>
+        <section class="agent-next"><span><i>3</i>${esc(t("management.flow_my_reply"))}</span><b>${esc(flow.reply)}</b><small><strong>${esc(t("management.flow_after_reply"))}</strong>${esc(flow.expected)}</small>${draftAction}</section>
+      </div>
       ${quickActionsHtml(session)}
       ${session.controlCapabilities?.sendInstruction ? context.agentCommandComposer(session) : ""}
       ${controlButtonsHtml(session)}
+      <details class="attention-evidence-details"><summary><span>${esc(t("management.flow_evidence"))}</span><small>${esc(t("management.flow_evidence_hint"))}</small><i aria-hidden="true">⌄</i></summary><div>${progressHtml(session, true)}${healthHtml(session, true)}</div></details>
     </article>`;
   }
 
@@ -186,40 +265,255 @@ window.LoadToAgentAppFactories.createManagement = function createManagement(cont
     return sessions.length;
   }
 
-  function renderOperationsOverview() {
-    const section = $("#operationsOverview");
-    if (!section) return;
+  function renderHomeAttention(section) {
     const sessions = typeof context.graphFilteredSessions === "function"
       ? context.graphFilteredSessions()
       : (state.snapshot?.sessions || []);
+    const candidates = sessions.filter(needsManagementReview);
+    const score = session => {
+      if (matchesManagementFilter(session, "critical")) return 3;
+      if (matchesManagementFilter(session, "attention")) return 2;
+      if (matchesManagementFilter(session, "warning")) return 1;
+      return 0;
+    };
+    const ordered = [...candidates].sort((a, b) =>
+      score(b) - score(a)
+      || Date.parse(b.attention?.requestedAt || b.updatedAt || 0) - Date.parse(a.attention?.requestedAt || a.updatedAt || 0),
+    );
+    if (!ordered.length) {
+      section.innerHTML = "";
+      section.classList.add("hidden");
+      section.setAttribute("aria-hidden", "true");
+      return 0;
+    }
+    section.classList.remove("hidden");
+    section.removeAttribute("aria-hidden");
+    const shown = ordered.slice(0, 3);
+    const item = session => {
+      const provider = providerInfo(session.provider);
+      const tone = matchesManagementFilter(session, "critical") ? "critical" : matchesManagementFilter(session, "attention") ? "attention" : "warning";
+      const label = session.attention?.required
+        ? attentionLabel(session.attention.kind)
+        : healthLabel(session.health?.level);
+      const summary = prioritySummary(session.attention?.summary || session.statusDetail || latestAgentReply(session));
+      return `<button type="button" class="home-attention-item ${tone}" data-open-session="${esc(session.id)}" style="--management-provider:${provider.accent}" aria-label="${esc(`${label}: ${session.title}. ${summary}`)}">
+        <span class="home-attention-dot" aria-hidden="true"></span>
+        <span><small>${esc(label)} · ${esc(provider.label)}</small><b>${esc(readablePreview(session.title, 54).text)}</b><em title="${esc(summary)}">${esc(summary)}</em></span>
+        <time>${esc(timeAgo(session.attention?.requestedAt || session.updatedAt))}</time><i aria-hidden="true">→</i>
+      </button>`;
+    };
+    const overflow = Math.max(0, ordered.length - shown.length);
+    const compactOverflow = Math.max(0, ordered.length - 1);
+    section.innerHTML = `<div class="home-attention-strip ${ordered.length ? "has-items" : "is-clear"}" data-home-attention="${ordered.length}">
+      <button type="button" class="home-attention-title" data-management-filter="all">
+        <span class="home-attention-signal" aria-hidden="true"><i>!</i></span>
+        <span><small>${esc(t("control.attention_eyebrow"))}</small><b>${esc(t("control.attention_title", { count: ordered.length }))}</b></span>
+        <strong>${ordered.length}</strong>
+      </button>
+      <div class="home-attention-list">${shown.map(item).join("")}</div>
+      ${overflow ? `<button type="button" class="home-attention-more" data-management-filter="all">${esc(t("control.attention_more", { count: overflow }))} →</button>` : compactOverflow ? `<button type="button" class="home-attention-more compact-only" data-management-filter="all">${esc(t("control.attention_more", { count: compactOverflow }))} →</button>` : ""}
+    </div>`;
+    return ordered.length;
+  }
+
+  function renderOperationsOverview() {
+    const section = $("#operationsOverview");
+    if (!section) return;
+    renderHomeAttention(section);
+    return;
+    const sessions = typeof context.graphFilteredSessions === "function"
+      ? context.graphFilteredSessions()
+      : (state.snapshot?.sessions || []);
+    const byId = new Map(sessions.map(session => [session.id, session]));
     const critical = sessions.filter(session => matchesManagementFilter(session, "critical"));
     const warning = sessions.filter(session => matchesManagementFilter(session, "warning"));
     const responses = sessions.filter(session => matchesManagementFilter(session, "attention"));
     const flaggedIds = new Set([...critical, ...warning, ...responses].map(session => session.id));
     const clear = sessions.filter(session => !flaggedIds.has(session.id));
-    const priority = [...new Map([...critical, ...warning, ...responses].map(session => [session.id, session])).values()].slice(0, 4);
     const reviewCount = flaggedIds.size;
+    const descendantCache = new Map();
+    const descendants = session => {
+      if (descendantCache.has(session.id)) return descendantCache.get(session.id);
+      const found = [];
+      const queue = [...(session.childIds || [])];
+      const visited = new Set();
+      while (queue.length) {
+        const id = queue.shift();
+        if (!id || visited.has(id)) continue;
+        visited.add(id);
+        const child = byId.get(id);
+        if (!child) continue;
+        found.push(child);
+        queue.push(...(child.childIds || []));
+      }
+      descendantCache.set(session.id, found);
+      return found;
+    };
+    const runningExecutions = session => (session.executions || []).filter(execution => execution.status === "running");
+    const supervisionCandidates = sessions.filter(session =>
+      isLiveSession(session)
+      || ["paused", "waiting"].includes(session.status)
+      || runningExecutions(session).length > 0,
+    );
+    const controlModeCache = new Map();
+    const controlMode = session => {
+      if (controlModeCache.has(session.id)) return controlModeCache.get(session.id);
+      const targets = typeof context.agentCommandTargets === "function" ? context.agentCommandTargets(session) : [];
+      const mode = typeof context.agentControlMode === "function" ? context.agentControlMode(session, targets) : "ended";
+      controlModeCache.set(session.id, mode);
+      return mode;
+    };
+    const directControl = mode => mode === "direct";
+    const recoverableControl = mode => ["handoff", "resume", "origin-resume"].includes(mode);
+    const controlTone = mode => directControl(mode) ? "ready" : recoverableControl(mode) ? "recover" : "observe";
+    const rankingNow = Date.now();
+    const operationTimestamp = session => Math.max(0, ...[
+      session.progress?.lastActivityAt,
+      session.health?.lastActivityAt,
+      session.updatedAt,
+      ...(session.executions || []).map(execution => execution.updatedAt || execution.startedAt),
+    ].map(value => Date.parse(value || 0)).filter(Number.isFinite));
+    const freshnessScore = session => supervisionFreshnessScore(operationTimestamp(session), rankingNow);
+    const rankScore = session => {
+      const children = descendants(session);
+      const activeChildren = children.filter(isLiveSession).length;
+      const executionCount = runningExecutions(session).length;
+      const mode = controlMode(session);
+      return freshnessScore(session)
+        + (isLiveSession(session) ? 260 : ["paused", "waiting"].includes(session.status) ? 160 : 0)
+        + (!session.parentId ? 30 : 0)
+        + activeChildren * 75
+        + children.length * 5
+        + executionCount * 90
+        + (directControl(mode) ? 40 : recoverableControl(mode) ? 15 : 0)
+        + ((session.runtimePresence || []).length ? 15 : 0);
+    };
+    const ordered = [...supervisionCandidates].sort((a, b) =>
+      rankScore(b) - rankScore(a)
+      || Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0)
+      || String(a.title || "").localeCompare(String(b.title || "")),
+    );
+    const selected = ordered.find(session => session.id === state.supervisionFocusId) || ordered[0] || null;
+    if (!state.supervisionFocusId && selected) state.supervisionFocusId = selected.id;
+    const selectedRank = selected ? ordered.findIndex(session => session.id === selected.id) + 1 : 0;
+    const selectedIsRecommended = selectedRank === 1;
+    const liveRoots = ordered.filter(session => !session.parentId && isLiveSession(session));
+    const liveHelpers = ordered.filter(session => session.parentId && isLiveSession(session));
+    const runningExecutionCount = ordered.reduce((sum, session) => sum + runningExecutions(session).length, 0);
+    const readyControlCount = ordered.filter(session => directControl(controlMode(session))).length;
+
+    const supervisionReason = session => {
+      const activeChildren = descendants(session).filter(isLiveSession).length;
+      const executionCount = runningExecutions(session).length;
+      const mode = controlMode(session);
+      const timestamp = operationTimestamp(session);
+      const factors = [t("management.supervision_factor_activity", { time: timestamp ? timeAgo(timestamp) : t("management.signal_unavailable") })];
+      if (activeChildren) factors.push(t("management.supervision_factor_helpers", { count: activeChildren }));
+      if (executionCount) factors.push(t("management.supervision_factor_executions", { count: executionCount }));
+      if (directControl(mode)) factors.push(t("management.supervision_factor_input"));
+      else if (recoverableControl(mode)) factors.push(t("management.supervision_factor_recover"));
+      if (session.parentId) factors.push(t("management.supervision_factor_delegated"));
+      return factors.join(" · ");
+    };
+    const statusLabel = status => ({
+      starting: t("ui.preparing"), running: t("ui.working"), paused: t("management.attention.paused"),
+      waiting: t("ui.waiting_for_review"), failed: t("ui.problem"), completed: t("ui.completed"),
+    })[status] || status;
+    const controlLabel = mode => t(`management.supervision_control_${mode}`);
+    const queue = ordered.map(session => {
+      const index = ordered.findIndex(candidate => candidate.id === session.id);
+      const provider = providerInfo(session.provider);
+      const activity = currentActivity(session);
+      const children = descendants(session).filter(isLiveSession).length;
+      const executions = runningExecutions(session).length;
+      const mode = controlMode(session);
+      const selectedClass = session.id === selected?.id ? "selected" : "";
+      return `<button type="button" class="supervision-queue-item ${selectedClass}" data-supervision-focus="${esc(session.id)}" aria-pressed="${session.id === selected?.id ? "true" : "false"}" style="--management-provider:${provider.accent}">
+        <span class="supervision-rank">${index + 1}</span>
+        <span class="provider-mark">${esc(provider.mark)}</span>
+        <span class="supervision-queue-copy"><small>${esc(session.parentId ? t("management.supervision_helper_agent") : t("management.supervision_main_agent"))} · ${esc(provider.label)}</small><b>${esc(readablePreview(session.agentName || session.title, 62).text)}</b><em>${esc(prioritySummary(activity.title || session.statusDetail))}</em><i>${esc(supervisionReason(session))}</i></span>
+        <span class="supervision-queue-meta"><b class="${controlTone(mode)}">${esc(controlLabel(mode))}</b><small>${children ? esc(t("management.supervision_live_helpers_short", { count: children })) : executions ? esc(t("management.supervision_executions_short", { count: executions })) : esc(timeAgo(session.updatedAt))}</small></span>
+      </button>`;
+    }).join("");
+
+    let primary = "";
+    if (selected) {
+      const provider = providerInfo(selected.provider);
+      const parent = selected.parentId ? byId.get(selected.parentId) : null;
+      const children = descendants(selected);
+      const activeChildren = children.filter(isLiveSession);
+      const executions = runningExecutions(selected);
+      const activity = currentActivity(selected);
+      const mode = controlMode(selected);
+      const delegation = selected.delegation || {};
+      const goal = selected.parentId
+        ? (delegation.assignment || delegation.taskName || selected.taskName || selected.title)
+        : (selected.sharedGoal || selected.title);
+      const downstream = activeChildren.length
+        ? t("management.supervision_downstream_helpers", { count: activeChildren.length, names: activeChildren.slice(0, 3).map(child => child.agentName || providerInfo(child.provider).label).join(" · ") })
+        : executions.length
+          ? t("management.supervision_downstream_executions", { count: executions.length, names: executions.slice(0, 3).map(execution => execution.label || execution.runtime || execution.tool).join(" · ") })
+          : t("management.supervision_downstream_none");
+      const role = selected.parentId
+        ? t("management.supervision_helper_role", { role: selected.agentRole ? agentRoleLabel(selected.agentRole) : t("ui.assistance") })
+        : t("management.supervision_owner_role");
+      const focusLabel = selectedIsRecommended
+        ? t("management.supervision_primary")
+        : t("management.supervision_selected", { rank: selectedRank });
+      const reasonLabel = selectedIsRecommended
+        ? t("management.supervision_why_first")
+        : t("management.supervision_why_selected", { rank: selectedRank });
+      primary = `<article class="supervision-primary" data-supervision-session="${esc(selected.id)}" style="--management-provider:${provider.accent}">
+        <header class="supervision-primary-head">
+          <span class="provider-mark">${esc(provider.mark)}</span>
+          <div><small data-supervision-focus-kind="${selectedIsRecommended ? "recommended" : "selected"}">${esc(focusLabel)} · ${esc(role)}</small><h3>${esc(readablePreview(selected.agentName || selected.title, 96).text)}</h3><p>${esc(provider.label)} · ${esc(selected.model || t("session.model_unknown"))}${parent ? ` · ${esc(t("management.supervision_parent", { parent: readablePreview(parent.agentName || parent.title, 46).text }))}` : ""}</p></div>
+          <span class="supervision-status ${esc(selected.status || "")}"><i aria-hidden="true"></i>${esc(statusLabel(selected.status))}</span>
+        </header>
+        <div class="supervision-mobile-now">
+          <div><span>${esc(t("management.supervision_current_behavior"))}</span><b>${esc(prioritySummary(activity.title || selected.statusDetail))}</b><small>${esc(prioritySummary(latestWorkCopy(selected) || activity.detail || selected.statusDetail))}</small></div>
+          <button type="button" data-supervision-intervention-open="${esc(selected.id)}">${esc(t("management.supervision_intervention_mobile"))}</button>
+        </div>
+        <div class="supervision-watch-reason"><span>${esc(reasonLabel)}</span><b>${esc(supervisionReason(selected))}</b><small>${esc(t("management.supervision_updated", { time: timeAgo(selected.updatedAt) }))}</small></div>
+        <div class="supervision-behavior" aria-label="${esc(t("management.supervision_behavior_trace"))}">
+          <section><span><i>1</i>${esc(t("management.supervision_goal"))}</span><b>${esc(prioritySummary(goal))}</b><small>${esc(role)}</small></section>
+          <i class="supervision-flow-arrow" aria-hidden="true">→</i>
+          <section class="current"><span><i>2</i>${esc(t("management.supervision_current_behavior"))}</span><b>${esc(prioritySummary(activity.title || selected.statusDetail))}</b><small>${esc(prioritySummary(latestWorkCopy(selected) || activity.detail || selected.statusDetail))}</small></section>
+          <i class="supervision-flow-arrow" aria-hidden="true">→</i>
+          <section><span><i>3</i>${esc(t("management.supervision_downstream"))}</span><b>${esc(downstream)}</b><small>${esc(t("management.supervision_downstream_counts", { helpers: activeChildren.length, executions: executions.length }))}</small></section>
+        </div>
+        <div class="supervision-control-strip">
+          <div><span>${esc(t("management.supervision_control_channel"))}</span><b class="${controlTone(mode)}"><i aria-hidden="true"></i>${esc(controlLabel(mode))}</b><small>${esc(t(`management.supervision_control_help_${mode}`))}</small></div>
+          <div class="supervision-control-actions">
+            <button type="button" data-graph-focus="${esc(selected.id)}">${esc(t("management.supervision_open_flow"))}</button>
+            <button type="button" data-open-session="${esc(selected.id)}">${esc(t("management.supervision_open_detail"))}</button>
+          </div>
+        </div>
+        ${controlButtonsHtml(selected)}
+        ${typeof context.agentCommandComposer === "function" ? `<details class="supervision-intervention" data-disclosure-key="supervision:command:${esc(selected.id)}"><summary><span><b>${esc(t("management.supervision_intervention"))}</b><small>${esc(t("management.supervision_intervention_hint"))}</small></span><i aria-hidden="true">⌄</i></summary>${context.agentCommandComposer(selected)}</details>` : ""}
+      </article>`;
+    }
+
     section.innerHTML = `<header>
       <div class="operations-heading">
-        <span class="operations-signal" aria-hidden="true">!</span>
-        <div class="operations-heading-copy"><p>${esc(t("management.operations_eyebrow"))}</p><h2>${esc(t("management.operations_title"))}</h2><span>${esc(t("management.operations_description"))}</span></div>
+        <span class="operations-signal" aria-hidden="true"><i></i><i></i><i></i></span>
+        <div class="operations-heading-copy"><p>${esc(t("management.supervision_eyebrow"))}</p><h2>${esc(t("management.supervision_title"))}</h2><span>${esc(t("management.supervision_description"))}</span></div>
       </div>
-      <div class="operations-review-total"><strong>${reviewCount}</strong><span>${esc(t("management.operations_review_count"))}</span></div>
-      </header>
-      <div class="operations-metrics" aria-label="${esc(t("management.operations_severity_buckets"))}">
-        <button type="button" data-management-filter="critical" data-management-metric="critical"><span>${esc(t("management.health.critical"))}</span><b>${critical.length}</b></button>
-        <button type="button" data-management-filter="warning" data-management-metric="warning"><span>${esc(t("management.health.warning"))}</span><b>${warning.length}</b></button>
-        <button type="button" data-management-filter="attention" data-management-metric="attention"><span>${esc(t("management.health.attention"))}</span><b>${responses.length}</b></button>
-        <div data-management-metric="clear"><span>${esc(t("management.recent_clear"))}</span><b>${clear.length}</b></div>
-      </div>
-      ${priority.length ? `<div class="operations-priority">${priority.map(session => {
-        const health = session.health || {};
-        const responseSummary = needsUserResponse(session) ? session.attention?.summary : "";
-        const summary = prioritySummary(responseSummary
-          || (health.signals || []).map(signal => signalLabel(signal.code)).join(" · ")
-          || t("management.signal_unavailable"));
-        return `<button type="button" data-open-session="${esc(session.id)}"><i class="${esc(managementBucket(session))}"></i><span><b>${esc(session.title)}</b><small>${esc(summary)}</small></span><em>${esc(timeAgo(health.lastActivityAt || session.updatedAt))}</em></button>`;
-      }).join("")}</div>${reviewCount > priority.length ? `<div class="operations-more"><button type="button" data-management-filter="all"><span>${esc(t("management.operations_view_all"))}</span><b>${reviewCount}</b><i aria-hidden="true">→</i></button></div>` : ""}` : `<p class="operations-clear">${esc(t("management.operations_clear"))}</p>`}`;
+      <button type="button" class="operations-review-total" data-management-filter="all"><strong>${reviewCount}</strong><span>${esc(t("management.supervision_attention_open"))}</span><i aria-hidden="true">→</i></button>
+    </header>
+    <div class="supervision-metrics" aria-label="${esc(t("management.supervision_metrics_label"))}">
+      <div><span>${esc(t("management.supervision_active_roots"))}</span><b>${liveRoots.length}</b></div>
+      <div><span>${esc(t("management.supervision_active_helpers"))}</span><b>${liveHelpers.length}</b></div>
+      <div><span>${esc(t("management.supervision_running_executions"))}</span><b>${runningExecutionCount}</b></div>
+      <div><span>${esc(t("management.supervision_control_ready"))}</span><b>${readyControlCount}</b></div>
+    </div>
+    ${selected ? `<div class="supervision-console"><aside class="supervision-queue"><header><div><span>${esc(t("management.supervision_queue"))}</span><b>${esc(t("management.supervision_queue_hint"))}</b></div><strong>${ordered.length}</strong></header><div>${queue}</div></aside>${primary}</div>` : `<div class="supervision-empty"><span aria-hidden="true">◎</span><b>${esc(t("management.supervision_empty"))}</b><small>${esc(t("management.supervision_empty_detail"))}</small></div>`}
+    <div class="supervision-attention-bar" aria-label="${esc(t("management.operations_severity_buckets"))}">
+      <span>${esc(t("management.supervision_attention_summary"))}</span>
+      <button type="button" data-management-filter="attention" data-management-metric="attention"><i></i>${esc(t("management.health.attention"))}<b>${responses.length}</b></button>
+      <button type="button" data-management-filter="critical" data-management-metric="critical"><i></i>${esc(t("management.health.critical"))}<b>${critical.length}</b></button>
+      <button type="button" data-management-filter="warning" data-management-metric="warning"><i></i>${esc(t("management.health.warning"))}<b>${warning.length}</b></button>
+      <span class="supervision-clear" data-management-metric="clear">${esc(t("management.recent_clear"))}<b>${clear.length}</b></span>
+    </div>`;
   }
 
   function outcomeHtml(session) {
@@ -253,5 +547,6 @@ window.LoadToAgentAppFactories.createManagement = function createManagement(cont
     progressHtml,
     renderAttentionInbox,
     renderOperationsOverview,
+    supervisionFreshnessScore,
   };
 };

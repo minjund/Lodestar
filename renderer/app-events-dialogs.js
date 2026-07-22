@@ -161,6 +161,13 @@ window.LoadToAgentAppFactories.createDialogEventBindings = function createDialog
       $(`.drawer-tab[data-tab="${state.drawerTab}"]`)?.focus();
     });
     $("#detailDrawer").addEventListener("click", async (event) => {
+      const route = event.target.closest("[data-agent-command-route]");
+      if (route) {
+        state.agentCommandRoutes.set(route.dataset.agentCommandSession, route.dataset.agentCommandRoute);
+        renderDrawer();
+        requestAnimationFrame(() => $("#detailDrawer")?.querySelector(`[data-agent-command-session="${CSS.escape(route.dataset.agentCommandSession)}"][data-agent-command-route="${CSS.escape(route.dataset.agentCommandRoute)}"]`)?.focus({ preventScroll: true }));
+        return;
+      }
       const copy = event.target.closest("[data-copy-text]");
       if (copy) {
         await copyText(copy.dataset.copyText);
@@ -225,7 +232,7 @@ window.LoadToAgentAppFactories.createDialogEventBindings = function createDialog
       if (!picker) return;
       if (picker.value) state.agentCommandTargets.set(picker.dataset.agentCommandTarget, picker.value);
       else state.agentCommandTargets.delete(picker.dataset.agentCommandTarget);
-      picker.closest("form")?.querySelectorAll("button").forEach(button => { button.disabled = !picker.value; });
+      picker.closest("form")?.querySelectorAll("[data-agent-terminal-open], button[type='submit']").forEach(button => { button.disabled = !picker.value; });
     });
     $("#detailDrawer").addEventListener("keydown", (event) => {
       const input = event.target.closest("[data-agent-command-draft]");

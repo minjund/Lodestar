@@ -3,7 +3,7 @@
 function registerTerminalIpc({ ipcMain, requireTrustedSender, trustedSender, manager, isProviderVisible = () => true, listWslDistros, sendError }) {
   ipcMain.handle('terminals:list', event => {
     requireTrustedSender(event);
-    return manager() ? manager().list().filter(session => session.type !== 'agent' || isProviderVisible(session.provider)) : [];
+    return manager() ? manager().list().filter(session => !session.transient && (session.type !== 'agent' || isProviderVisible(session.provider))) : [];
   });
   ipcMain.handle('wsl:list-distros', event => {
     requireTrustedSender(event);
@@ -12,7 +12,7 @@ function registerTerminalIpc({ ipcMain, requireTrustedSender, trustedSender, man
   ipcMain.handle('terminals:get', async (event, id) => {
     requireTrustedSender(event);
     const session = manager() ? await manager().get(id, true) : null;
-    return session && session.type === 'agent' && !isProviderVisible(session.provider) ? null : session;
+    return session && (session.transient || (session.type === 'agent' && !isProviderVisible(session.provider))) ? null : session;
   });
   ipcMain.handle('terminals:create', (event, options) => {
     requireTrustedSender(event);

@@ -5,6 +5,18 @@ const { blankUsage } = require('./providerRegistry');
 
 const DEFAULT_SCAN_TTL_MS = 12_000;
 const WMIC_QUERY = "Name='claude.exe' or Name='codex.exe' or Name='node.exe' or Name='gemini.exe' or Name='grok.exe'";
+const WINDOWS_PROCESS_SCRIPT = [
+  "$ProgressPreference = 'SilentlyContinue'",
+  "$ErrorActionPreference = 'Stop'",
+  '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
+  "$names = @('claude.exe','codex.exe','node.exe','gemini.exe','grok.exe')",
+  '$rows = Get-CimInstance Win32_Process | Where-Object { $names -contains $_.Name } | ForEach-Object {',
+  "  $started = if ($_.CreationDate) { $_.CreationDate.ToUniversalTime().ToString('o') } else { $null }",
+  '  [pscustomobject]@{ pid = [int]$_.ProcessId; parentPid = [int]$_.ParentProcessId; name = [string]$_.Name; commandLine = [string]$_.CommandLine; startedAt = $started }',
+  '}',
+  '@($rows) | ConvertTo-Json -Compress',
+].join('; ');
+const WINDOWS_PROCESS_SCRIPT_BASE64 = Buffer.from(WINDOWS_PROCESS_SCRIPT, 'utf16le').toString('base64');
 
 function parseCsvRows(value) {
   const text = Buffer.isBuffer(value) ? value.toString('utf8') : String(value || '');
@@ -131,6 +143,42 @@ function processRows(value) {
   })).filter(item => item.pid > 0);
 }
 
+function powershellProcessRows(value) {
+  const text = (Buffer.isBuffer(value) ? value.toString('utf8') : String(value || '')).replace(/^\uFEFF/, '').trim();
+  if (!text) return [];
+  const parsed = JSON.parse(text);
+  return (Array.isArray(parsed) ? parsed : [parsed]).map(row => {
+    const timestamp = Date.parse(row.startedAt || '');
+    return {
+      pid: Number(row.pid || 0),
+      parentPid: Number(row.parentPid || 0),
+      name: String(row.name || ''),
+      commandLine: String(row.commandLine || ''),
+      startedAt: Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null,
+    };
+  }).filter(item => item.pid > 0);
+}
+
+function windowsProcessRows(run = execFileSync) {
+  try {
+    const output = run('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', WINDOWS_PROCESS_SCRIPT_BASE64], {
+      encoding: 'utf8', windowsHide: true, timeout: 8_000, maxBuffer: 4 * 1024 * 1024,
+    });
+    return powershellProcessRows(output);
+  } catch (powershellError) {
+    try {
+      const output = run('wmic.exe', ['process', 'where', WMIC_QUERY, 'get', 'ProcessId,ParentProcessId,CreationDate,Name,CommandLine', '/format:csv'], {
+        encoding: 'utf8', windowsHide: true, timeout: 8_000, maxBuffer: 2 * 1024 * 1024,
+      });
+      return processRows(output);
+    } catch (wmicError) {
+      const error = new Error(`Windows 프로세스 조회 실패: ${powershellError.message || powershellError}; ${wmicError.message || wmicError}`);
+      error.cause = powershellError;
+      throw error;
+    }
+  }
+}
+
 function commandArgument(commandLine, name) {
   const escaped = String(name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = String(commandLine || '').match(new RegExp(`(?:^|\\s)${escaped}\\s+(?:"([^"]+)"|'([^']+)'|(\\S+))`, 'i'));
@@ -149,6 +197,14 @@ function processSessionExternalId(processInfo = {}, provider = '') {
     return pathlessSessionId(match && (match[1] || match[2] || match[3]));
   }
   return '';
+}
+
+function processInteractionMode(processInfo = {}, provider = '') {
+  const commandLine = String(processInfo.commandLine || processInfo.CommandLine || '');
+  if (provider === 'claude' && /(?:^|\s)(?:-p|--print)(?:\s|$)/i.test(commandLine)) return 'batch';
+  if (provider === 'codex' && /(?:^|\s)exec(?:\s|$)/i.test(commandLine)) return 'batch';
+  if (provider === 'gemini' && /(?:^|\s)(?:-p|--prompt)(?:\s|$)/i.test(commandLine)) return 'batch';
+  return 'interactive';
 }
 
 function pathlessSessionId(value) {
@@ -192,14 +248,13 @@ function selectAgentProcesses(rows, options = {}) {
     command: String(item.name || '').replace(/\.exe$/i, '').split(/[\\/]/).pop(),
     startedAt: item.startedAt,
     externalId: processSessionExternalId(item, item.provider),
+    interactionMode: processInteractionMode(item, item.provider),
   })).sort((a, b) => a.provider.localeCompare(b.provider) || a.pid - b.pid);
 }
 
 function utilityProcess(processInfo = {}) {
   const commandLine = String(processInfo.commandLine || processInfo.args || '');
-  return /Extract durable memory candidates from this Claude Code transcript tail/i.test(commandLine)
-    || /Reply with exactly OK\. Do not use tools\.?/i.test(commandLine)
-    || /You are a memory extraction/i.test(commandLine);
+  return /(?:^|\s)(?:-p|--print)\s+["']?(?:Extract durable memory candidates from this Claude Code transcript tail|Reply with exactly OK\. Do not use tools\.?|You are a memory extraction)/i.test(commandLine);
 }
 
 function utilitySession(session) {
@@ -230,6 +285,12 @@ function markRuntime(session, presence) {
   const existing = Array.isArray(session.runtimePresence) ? session.runtimePresence : [];
   if (!existing.some(item => item.id === presence.id)) existing.push(presence);
   session.runtimePresence = existing;
+  if (presence.interactionMode === 'batch') {
+    session.conversationStatus = session.status;
+    session.status = 'running';
+    session.statusDetail = `백그라운드 자율 실행 중 · PID ${presence.pid || '--'}`;
+    session.statusObserved = true;
+  }
   return session;
 }
 
@@ -417,10 +478,7 @@ class ProcessMonitor {
     try {
       let processes;
       if (this.platform === 'win32') {
-        const output = this.execFileSync('wmic.exe', ['process', 'where', WMIC_QUERY, 'get', 'ProcessId,ParentProcessId,CreationDate,Name,CommandLine', '/format:csv'], {
-          encoding: 'utf8', windowsHide: true, timeout: 8_000, maxBuffer: 2 * 1024 * 1024,
-        });
-        processes = selectAgentProcesses(processRows(output));
+        processes = selectAgentProcesses(windowsProcessRows(this.execFileSync));
       } else {
         const output = this.execFileSync('ps', ['-axo', 'pid=,ppid=,etime=,comm=,args='], { encoding: 'utf8', timeout: 8_000, maxBuffer: 2 * 1024 * 1024 });
         const environment = this.platform === 'darwin' ? 'macos' : 'linux';
@@ -438,6 +496,8 @@ module.exports = {
   ProcessMonitor,
   parseCsvRows,
   processRows,
+  powershellProcessRows,
+  windowsProcessRows,
   wmiDateToIso,
   providerFromWindowsProcess,
   providerFromPosixProcess,
@@ -445,6 +505,7 @@ module.exports = {
   elapsedSeconds,
   selectAgentProcesses,
   processSessionExternalId,
+  processInteractionMode,
   utilityProcess,
   runtimeLinkScore,
   bridgeLinkScore,

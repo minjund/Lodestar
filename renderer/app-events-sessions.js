@@ -4,12 +4,28 @@ window.LoadToAgentAppFactories = window.LoadToAgentAppFactories || {};
 
 window.LoadToAgentAppFactories.createSessionEventBindings = function createSessionEventBindings(context = {}) {
   const {
-    $, state, selectView, renderProviderOverview, renderProviderFilter, toggleProviderFilter, announceProviderFilter, renderSessions, renderTmuxMap, openDrawer, openSubagentConversation,
-    dispatchAgentCommand, openAgentTerminal, copyBridgeCommand, openSessionOrigin, saveDashboardPreferences = () => {},
+    $, state, selectView, renderProviderOverview, renderProviderFilter, toggleProviderFilter, announceProviderFilter, renderSessions, renderTmuxMap, openDrawer, openSubagentConversation, openExecutionActivity,
+    dispatchAgentCommand, openAgentTerminal, copyBridgeCommand, saveDashboardPreferences = () => {},
     controlManagedRun, quickRespond, prepareReassignment,
     copyText = async () => false,
     announce = () => {},
+    moveSessionOrder = () => false,
   } = context;
+
+  const moveVisibleSession = (button, container, selector) => {
+    const nodes = Array.from(container.querySelectorAll(selector));
+    const current = nodes.findIndex(node => (node.dataset.controlSession || node.dataset.sessionId) === button.dataset.sessionOrderMove);
+    const offset = Number(button.dataset.sessionOrderOffset || 0);
+    const target = nodes[current + offset];
+    const targetId = target && (target.dataset.controlSession || target.dataset.sessionId);
+    if (current < 0 || !targetId || !moveSessionOrder(button.dataset.sessionOrderMove, targetId, offset > 0)) return;
+    state.sort = "recent";
+    if ($("#sortSelect")) $("#sortSelect").value = "recent";
+    saveDashboardPreferences();
+    renderSessions("reorder");
+    announce(window.LoadToAgentI18n.t("session.position_changed"));
+    requestAnimationFrame(() => document.querySelector(`[data-session-order-move="${CSS.escape(button.dataset.sessionOrderMove)}"][data-session-order-offset="${offset}"]`)?.focus({ preventScroll: true }));
+  };
 
   const managementFilterLabel = value => value === "all" ? window.LoadToAgentI18n.t("management.filter_all") : window.LoadToAgentI18n.t(`management.health.${value}`);
   const announceManagementFilter = value => announce(window.LoadToAgentI18n.t("management.filter_results", {
@@ -18,15 +34,85 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
   }));
 
   function bindManagementEvents() {
-    $("#operationsOverview").addEventListener("click", (event) => {
+    $("#operationsOverview").addEventListener("click", async (event) => {
+      const route = event.target.closest("[data-agent-command-route]");
+      if (route) {
+        state.agentCommandRoutes.set(route.dataset.agentCommandSession, route.dataset.agentCommandRoute);
+        renderSessions("route");
+        return;
+      }
+      const intervention = event.target.closest("[data-supervision-intervention-open]");
+      if (intervention) {
+        const details = $("#operationsOverview")?.querySelector(`.supervision-intervention[data-disclosure-key="supervision:command:${CSS.escape(intervention.dataset.supervisionInterventionOpen)}"]`);
+        if (details) {
+          details.open = true;
+          details.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+        return;
+      }
+      const supervision = event.target.closest("[data-supervision-focus]");
+      if (supervision) {
+        state.supervisionFocusId = supervision.dataset.supervisionFocus;
+        renderSessions("focus");
+        requestAnimationFrame(() => $("#operationsOverview")?.querySelector(`[data-supervision-focus="${CSS.escape(state.supervisionFocusId)}"]`)?.focus({ preventScroll: true }));
+        return;
+      }
+      const graph = event.target.closest("[data-graph-focus]");
+      if (graph) {
+        state.graphFocusId = graph.dataset.graphFocus;
+        renderSessions("focus");
+        requestAnimationFrame(() => $("#liveSection")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+        return;
+      }
       const open = event.target.closest("[data-open-session]");
-      if (open) return openDrawer(open.dataset.openSession);
+      if (open) {
+        const session = (state.snapshot?.sessions || []).find(item => item.id === open.dataset.openSession);
+        return session?.parentId ? openSubagentConversation(session.id) : openDrawer(open.dataset.openSession);
+      }
+      const bridge = event.target.closest("[data-agent-bridge-copy]");
+      if (bridge) return copyBridgeCommand(bridge.dataset.agentBridgeCopy);
+      const terminal = event.target.closest("[data-agent-terminal-open]");
+      if (terminal) return openAgentTerminal(terminal.dataset.agentTerminalOpen);
+      const managed = event.target.closest("[data-managed-run-action]");
+      if (managed) return controlManagedRun(managed.dataset.managementSessionId, managed.dataset.managedRunAction);
+      const reassign = event.target.closest("[data-reassign-session]");
+      if (reassign) return prepareReassignment(reassign.dataset.reassignSession);
       const filter = event.target.closest("[data-management-filter]");
       if (!filter) return;
       selectView("waiting", { focusMain: true, managementFilter: filter.dataset.managementFilter });
       announceManagementFilter(filter.dataset.managementFilter);
     });
+    $("#operationsOverview").addEventListener("input", (event) => {
+      const input = event.target.closest("[data-agent-command-draft]");
+      if (input) state.agentCommandDrafts.set(input.dataset.agentCommandDraft, input.value);
+    });
+    $("#operationsOverview").addEventListener("change", (event) => {
+      const picker = event.target.closest("[data-agent-command-target]");
+      if (!picker) return;
+      if (picker.value) state.agentCommandTargets.set(picker.dataset.agentCommandTarget, picker.value);
+      else state.agentCommandTargets.delete(picker.dataset.agentCommandTarget);
+      const enabled = Boolean(picker.value);
+      picker.closest("form")?.querySelectorAll("[data-agent-terminal-open], button[type='submit']").forEach(button => { button.disabled = !enabled; });
+    });
+    $("#operationsOverview").addEventListener("keydown", (event) => {
+      const input = event.target.closest("[data-agent-command-draft]");
+      if (!input || event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+      event.preventDefault();
+      input.closest("form")?.requestSubmit();
+    });
+    $("#operationsOverview").addEventListener("submit", (event) => {
+      const form = event.target.closest("[data-agent-command-form]");
+      if (!form) return;
+      event.preventDefault();
+      dispatchAgentCommand(form.dataset.agentCommandForm, form);
+    });
     $("#attentionInbox").addEventListener("click", async (event) => {
+      const route = event.target.closest("[data-agent-command-route]");
+      if (route) {
+        state.agentCommandRoutes.set(route.dataset.agentCommandSession, route.dataset.agentCommandRoute);
+        renderSessions("route");
+        return;
+      }
       const filter = event.target.closest("[data-management-inbox-filter]");
       if (filter) {
         state.managementFilter = filter.dataset.managementInboxFilter;
@@ -35,8 +121,24 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
         requestAnimationFrame(() => $("#attentionInbox")?.querySelector(`[data-management-inbox-filter="${CSS.escape(state.managementFilter)}"]`)?.focus({ preventScroll: true }));
         return;
       }
+      const draft = event.target.closest("[data-attention-draft]");
+      if (draft) {
+        const sessionId = draft.dataset.attentionSessionId;
+        const value = draft.dataset.attentionDraft || "";
+        state.agentCommandDrafts.set(sessionId, value);
+        const input = $("#attentionInbox")?.querySelector(`[data-agent-command-draft="${CSS.escape(sessionId)}"]`);
+        if (input) {
+          input.value = value;
+          input.focus({ preventScroll: true });
+          input.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+        return;
+      }
       const open = event.target.closest("[data-open-session]");
-      if (open) return openDrawer(open.dataset.openSession);
+      if (open) {
+        const session = (state.snapshot?.sessions || []).find(item => item.id === open.dataset.openSession);
+        return session?.parentId ? openSubagentConversation(session.id) : openDrawer(open.dataset.openSession);
+      }
       const quick = event.target.closest("[data-attention-quick]");
       if (quick) return quickRespond(quick.dataset.attentionSessionId, quick.dataset.attentionQuick, $("#attentionInbox"));
       const managed = event.target.closest("[data-managed-run-action]");
@@ -53,7 +155,7 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
       if (!picker) return;
       if (picker.value) state.agentCommandTargets.set(picker.dataset.agentCommandTarget, picker.value);
       else state.agentCommandTargets.delete(picker.dataset.agentCommandTarget);
-      picker.closest("form")?.querySelectorAll("button").forEach(button => { button.disabled = !picker.value; });
+      picker.closest("form")?.querySelectorAll("[data-agent-terminal-open], button[type='submit']").forEach(button => { button.disabled = !picker.value; });
     });
     $("#attentionInbox").addEventListener("keydown", (event) => {
       const input = event.target.closest("[data-agent-command-draft]");
@@ -126,10 +228,17 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
       cards[next].focus();
     });
     $("#sessionGrid").addEventListener("click", (event) => {
+      const order = event.target.closest("[data-session-order-move]");
+      if (order) {
+        event.stopPropagation();
+        moveVisibleSession(order, $("#sessionGrid"), "[data-session-id]");
+        return;
+      }
       const card = event.target.closest("[data-session-id]");
       if (card) openDrawer(card.dataset.sessionId);
     });
     $("#sessionGrid").addEventListener("keydown", (event) => {
+      if (event.target.closest("button, input, select, textarea, [contenteditable='true']")) return;
       const card = event.target.closest("[data-session-id]");
       if (card && (event.key === "Enter" || event.key === " ")) {
         event.preventDefault();
@@ -140,6 +249,20 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
 
   function bindLiveAgentEvents() {
     $("#liveSessionGrid").addEventListener("click", async (event) => {
+      const order = event.target.closest("[data-session-order-move]");
+      if (order) {
+        event.stopPropagation();
+        moveVisibleSession(order, $("#liveSessionGrid"), "[data-control-session]");
+        return;
+      }
+      const route = event.target.closest("[data-agent-command-route]");
+      if (route) {
+        event.stopPropagation();
+        state.agentCommandRoutes.set(route.dataset.agentCommandSession, route.dataset.agentCommandRoute);
+        renderSessions("route");
+        requestAnimationFrame(() => $("#liveSessionGrid")?.querySelector(`[data-agent-command-session="${CSS.escape(route.dataset.agentCommandSession)}"][data-agent-command-route="${CSS.escape(route.dataset.agentCommandRoute)}"]`)?.focus({ preventScroll: true }));
+        return;
+      }
       const copy = event.target.closest("[data-copy-text]");
       if (copy) {
         event.stopPropagation();
@@ -171,12 +294,6 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
         copyBridgeCommand(bridge.dataset.agentBridgeCopy);
         return;
       }
-      const origin = event.target.closest("[data-agent-open-origin]");
-      if (origin) {
-        event.stopPropagation();
-        openSessionOrigin(origin.dataset.agentOpenOrigin);
-        return;
-      }
       const terminal = event.target.closest("[data-agent-terminal-open]");
       if (terminal) {
         event.stopPropagation();
@@ -201,6 +318,12 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
       if (less) {
         state.graphExpandedProviders.delete(less.dataset.graphProviderLess);
         renderSessions("expand");
+        return;
+      }
+      const execution = event.target.closest("[data-open-execution-id]");
+      if (execution) {
+        event.stopPropagation();
+        openExecutionActivity(execution.dataset.openExecutionOwner, execution.dataset.openExecutionId);
         return;
       }
       const open = event.target.closest("[data-open-session]");
@@ -235,7 +358,7 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
       const form = picker.closest("[data-agent-command-form]");
       const enabled = Boolean(picker.value);
       form &&
-        form.querySelectorAll("button").forEach((button) => {
+        form.querySelectorAll("[data-agent-terminal-open], button[type='submit']").forEach((button) => {
           button.disabled = !enabled;
         });
     });

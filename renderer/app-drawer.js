@@ -8,7 +8,8 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     $, $$, esc, state, motionPreference, motionState, STATUS, markGuideStep, rememberDialogTrigger, restoreDialogTrigger, setDialogOpenState,
     providerInfo, isLiveSession, subagentWorkState, subagentWorkLabel, isProjectlessSession, sessionOriginPath, sessionWorkspaceLabel,
     agentResumeSupport, originAppInfo, selectedSession, snapshotSession, loadSessionDetail, loadSubagentParentDetail,
-    chatHtml, lifecycleHtml, tokensHtml, outcomeHtml, subagentCoordinationEvents, subagentConversationHtml,
+    chatHtml, lifecycleHtml, tokensHtml, outcomeHtml, subagentCoordinationEvents, subagentConversationHtml, executionActivityDetailHtml,
+    agentCommandComposer,
     rememberDisclosureStates = () => {}, restoreDisclosureStates = () => {},
   } = context;
 
@@ -17,7 +18,8 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     markGuideStep("detail");
     state.selectedId = id;
     state.drawerMode = "session";
-    state.drawerTab = "summary";
+    state.drawerExecutionId = null;
+    state.drawerTab = "chat";
     state.drawerForceLatest = true;
     clearTimeout(motionState.drawerTimer);
     $("#drawerBackdrop").classList.remove("hidden");
@@ -36,7 +38,9 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     markGuideStep("detail");
     state.selectedId = id;
     state.drawerMode = "subagent";
+    state.drawerExecutionId = null;
     state.drawerTab = "chat";
+    state.agentCommandRoutes.delete(id);
     state.drawerForceLatest = true;
     clearTimeout(motionState.drawerTimer);
     $("#drawerBackdrop").classList.remove("hidden");
@@ -46,6 +50,27 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     renderDrawer();
     loadSessionDetail(id);
     loadSubagentParentDetail(child);
+    setTimeout(() => $("#closeDrawerBtn").focus({ preventScroll: true }), 0);
+  }
+
+  function openExecutionActivity(ownerId, executionId) {
+    const owner = snapshotSession(ownerId) || state.details.get(ownerId);
+    if (!owner) return;
+    rememberDialogTrigger();
+    markGuideStep("detail");
+    state.selectedId = ownerId;
+    state.drawerMode = "execution";
+    state.drawerExecutionId = executionId;
+    state.drawerTab = "chat";
+    state.drawerForceLatest = false;
+    clearTimeout(motionState.drawerTimer);
+    $("#drawerBackdrop").classList.remove("hidden");
+    $("#drawerBackdrop").classList.remove("closing");
+    $("#detailDrawer").classList.add("open");
+    setDialogOpenState($("#detailDrawer"), true);
+    renderDrawer();
+    loadSessionDetail(ownerId);
+    if (owner.parentId) loadSubagentParentDetail(owner);
     setTimeout(() => $("#closeDrawerBtn").focus({ preventScroll: true }), 0);
   }
 
@@ -73,14 +98,28 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     if (!session) return closeDrawer();
     const provider = providerInfo(session.provider);
     const subagentMode = state.drawerMode === "subagent" && Boolean(session.parentId);
-    const detailLoading = state.detailLoadingIds.has(state.selectedId);
+    const executionMode = state.drawerMode === "execution" && Boolean(state.drawerExecutionId);
+    const snapshot = snapshotSession(session.id);
+    const activity = executionMode
+      ? (session.executions || []).find(item => item.id === state.drawerExecutionId)
+        || (snapshot?.executions || []).find(item => item.id === state.drawerExecutionId)
+        || null
+      : null;
+    // Live sessions refresh frequently. Keep an already loaded conversation on
+    // screen while its newer detail is fetched instead of flashing the loader.
+    const detailLoading = state.detailLoadingIds.has(state.selectedId) && !state.details.has(state.selectedId);
+    $("#detailDrawer").dataset.mode = executionMode ? "execution" : subagentMode ? "subagent" : "session";
     $("#detailDrawer").style.setProperty("--drawer-provider", provider.accent);
     $("#drawerProviderMark").style.setProperty("--provider", provider.accent);
-    $("#drawerProviderMark").textContent = provider.mark;
-    $("#drawerProvider").textContent = subagentMode
-      ? t("drawer.subagent_title", { name: session.agentName || provider.label })
+    $("#drawerProviderMark").textContent = executionMode && activity?.kind === "shell" ? ">_" : provider.mark;
+    $("#drawerProvider").textContent = executionMode
+      ? `${activity?.runtime || activity?.tool || t("drawer.execution_unit")} · ${activity ? context.executionActivityStatus(activity) : t("drawer.unknown")}`
+      : subagentMode
+      ? `${t("control.subagent")} · ${STATUS[session.status] || session.status}`
       : `${provider.company} · ${STATUS[session.status] || session.status}`;
-    const drawerTitle = subagentMode ? session.taskName || (session.delegation && session.delegation.taskName) || session.title : session.title;
+    const drawerTitle = executionMode
+      ? context.inferredExecutionSummary(activity || {}).text
+      : subagentMode ? session.title || session.taskName || (session.delegation && session.delegation.taskName) : session.title;
     $("#drawerTitle").textContent = drawerTitle;
     $("#drawerTitle").title = drawerTitle;
     const stopping = session.runId && state.stopRequests.has(session.runId);
@@ -97,32 +136,23 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
           <b>${esc(t(originAppInfo(session) ? "drawer.continue_background_terminal" : "drawer.resume_in_terminal"))}</b>
         </button>`
         : "";
-    const communicationCount = subagentMode ? subagentCoordinationEvents(session).length : 0;
-    const subagentMessageCount = subagentMode
-      ? (session.messages || []).filter((message) => message.role === "user" || message.role === "assistant").length
-      : 0;
-    const taskId = String(session.externalId || session.id || "");
-    const copyTask = taskId
-      ? `<button type="button" class="meta-chip meta-copy" data-copy-text="${esc(taskId)}" aria-label="${esc(t("quality.copy_task_id"))}">${esc(t("quality.task_id"))} <b>${esc(taskId.slice(0, 12))}</b><span aria-hidden="true">⧉</span></button>`
-      : "";
     const originPath = sessionOriginPath(session);
     const copyWorkspace = !isProjectlessSession(session) && originPath
       ? `<button type="button" class="meta-chip meta-copy origin-project-meta" data-copy-text="${esc(originPath)}" aria-label="${esc(t("quality.copy_workspace"))}">${esc(t("project.origin"))} <b>${esc(sessionWorkspaceLabel(session))}</b><span aria-hidden="true">⧉</span></button>`
       : "";
-    $("#drawerMeta").innerHTML = subagentMode
+    $("#drawerMeta").innerHTML = executionMode
+      ? `<span class="meta-chip work-state ${activity?.status === "running" ? "working" : "resting"}"><b>${esc(activity ? context.executionActivityStatus(activity) : t("drawer.unknown"))}</b></span>
+        <span class="meta-chip">${esc(session.parentId ? t("control.subagent") : t("control.main_agent"))} <b>${esc(session.agentName || provider.label)}</b></span>
+        ${activity?.backgroundId ? `<span class="meta-chip">${esc(t("graph.execution_handle"))} <b>${esc(activity.backgroundId)}</b></span>` : ""}`
+      : subagentMode
       ? `<span class="meta-chip work-state ${subagentWorkState(session)}">
         <b>${esc(subagentWorkLabel(session))}</b>
         </span>
-        <span class="meta-chip">${esc(t("drawer.model"))} <b>${esc(session.model || t("drawer.unknown"))}</b>
-        </span>
-        <span class="meta-chip">${esc(t("drawer.work_history"))} <b>${esc(t("drawer.event_count", { count: subagentMessageCount }))}</b>
-        </span>
-        <span class="meta-chip">${esc(t("drawer.main_instructions_results"))} <b>${esc(t("drawer.event_count", { count: communicationCount }))}</b>
-        </span>${copyTask}${copyWorkspace}${resume}`
+        <span class="meta-chip">${esc(t("drawer.model"))} <b>${esc(session.model || t("drawer.unknown"))}</b></span>${resume}`
       : `<span class="meta-chip">${esc(t("drawer.model"))} <b>${esc(session.model || t("drawer.unknown"))}</b>
         </span>
         ${copyWorkspace || `<span class="meta-chip origin-project-meta">${esc(t("project.origin"))} <b>${esc(sessionWorkspaceLabel(session))}</b></span>`}
-        ${copyTask}${
+        ${
           session.parentId
             ? `<span class="meta-chip">⑂ <b>${esc(t("drawer.helper_ai"))}</b>
         </span>`
@@ -134,9 +164,9 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
             : ""
         }${resume}${stop}`;
     $$(".drawer-tab").forEach((tab) => {
-      const hidden = subagentMode && tab.dataset.tab !== "chat";
+      const hidden = (subagentMode || executionMode) && tab.dataset.tab !== "chat";
       tab.classList.toggle("hidden", hidden);
-      if (tab.dataset.tab === "chat") tab.textContent = subagentMode ? t("drawer.work_content") : t("ui.conversation");
+      if (tab.dataset.tab === "chat") tab.textContent = executionMode ? t("drawer.execution_process") : subagentMode ? t("drawer.work_content") : t("ui.conversation");
       const active = tab.dataset.tab === state.drawerTab;
       tab.classList.toggle("active", active);
       tab.setAttribute("aria-selected", active ? "true" : "false");
@@ -163,6 +193,8 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
         <span>${esc(detailError)}</span>
         <button type="button" data-retry-detail="${esc(state.selectedId)}">${esc(t("drawer.retry"))}</button>
         </div>`
+        : executionMode
+          ? executionActivityDetailHtml(session, activity)
         : subagentMode
           ? subagentConversationHtml(session)
           : state.drawerTab === "summary"
@@ -172,6 +204,10 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
             : state.drawerTab === "lifecycle"
               ? lifecycleHtml(session)
               : tokensHtml(session);
+    const composer = $("#drawerComposer");
+    const showComposer = !executionMode && !detailLoading && !detailError && state.drawerTab === "chat" && typeof agentCommandComposer === "function";
+    composer.classList.toggle("hidden", !showComposer);
+    composer.innerHTML = showComposer ? agentCommandComposer(session, { conversation: true }) : "";
     restoreDisclosureStates(content);
     content.classList.toggle("motion-content-in", shouldAnimateContent && !motionPreference.matches);
     clearTimeout(motionState.drawerContentTimer);
@@ -188,13 +224,16 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
           if (motionState.drawerScrollGeneration !== scrollGeneration) return;
           const forceLatest = state.drawerForceLatest;
           if (state.drawerTab === "chat" && forceLatest) {
-            const rows = [...content.querySelectorAll(".chat-row")];
-            const latest = rows[rows.length - 1];
-            if (latest && latest.offsetHeight > content.clientHeight - 90) {
-              const contentTop = content.getBoundingClientRect().top;
-              const stickyHeight = content.querySelector(".chat-history-head")?.getBoundingClientRect().height || 0;
-              content.scrollTop = Math.max(0, content.scrollTop + latest.getBoundingClientRect().top - contentTop - stickyHeight - 12);
-            } else content.scrollTop = content.scrollHeight;
+            if (subagentMode || executionMode) content.scrollTop = 0;
+            else {
+              const rows = [...content.querySelectorAll(".chat-row")];
+              const latest = rows[rows.length - 1];
+              if (latest && latest.offsetHeight > content.clientHeight - 90) {
+                const contentTop = content.getBoundingClientRect().top;
+                const stickyHeight = content.querySelector(".chat-history-head")?.getBoundingClientRect().height || 0;
+                content.scrollTop = Math.max(0, content.scrollTop + latest.getBoundingClientRect().top - contentTop - stickyHeight - 12);
+              } else content.scrollTop = content.scrollHeight;
+            }
           } else if (state.drawerTab === "chat" && wasAtBottom) content.scrollTop = content.scrollHeight;
           else content.scrollTop = Math.min(previousTop, Math.max(0, content.scrollHeight - content.clientHeight));
           state.drawerForceLatest = false;
@@ -203,5 +242,5 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     }
   }
 
-  return { openDrawer, openSubagentConversation, closeDrawer, renderDrawer };
+  return { openDrawer, openSubagentConversation, openExecutionActivity, closeDrawer, renderDrawer };
 };

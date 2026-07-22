@@ -173,7 +173,9 @@ app.whenReady().then(async () => {
       if (stage && target) stage.scrollTop = Math.max(0, target.offsetTop - 18);
       return true;
     })()`);
-    await waitFor(win, `!document.querySelector('#operationsOverview')?.classList.contains('hidden') && document.querySelector('#operationsOverview')?.innerText.includes('최근 24시간 응답과 실행 위험')`);
+    await waitFor(win, `!document.querySelector('#operationsOverview')?.classList.contains('hidden')
+      && Boolean(document.querySelector('[data-home-attention]'))
+      && Boolean(document.querySelector('[data-control-room-overview]'))`);
     // Chromium can return a stale first frame for a newly shown BrowserWindow.
     // Prime the compositor once so the checked artifact always reflects the DOM.
     await win.webContents.capturePage();
@@ -234,6 +236,27 @@ app.whenReady().then(async () => {
       window.LoadToAgentApp.syncViewChrome();
       window.LoadToAgentApp.renderSessions('view');
       document.querySelector('#beginnerGuide')?.classList.add('hidden');
+      const stage = document.querySelector('.main-stage');
+      const target = document.querySelector('#operationsOverview');
+      if (stage && target) stage.scrollTop = Math.max(0, target.offsetTop - 10);
+      return true;
+    })()`);
+    await waitFor(win, `(() => {
+      const section = document.querySelector('#operationsOverview');
+      const live = document.querySelector('#liveSection');
+      const stage = document.querySelector('.main-stage');
+      return Boolean(section && !section.classList.contains('hidden')
+        && section.scrollWidth <= section.clientWidth + 2
+        && stage.scrollWidth <= stage.clientWidth + 2
+        && section.querySelector('[data-home-attention]')
+        && live.querySelector('[data-control-room-overview]')
+        && live.querySelector('.control-room-main')
+        && live.querySelector('.helper-node')
+        && live.querySelector('.execution-node'));
+    })()`);
+    await capture(win, outputDir, 'loadtoagent-control-room-360.png', true);
+
+    await win.webContents.executeJavaScript(`(() => {
       document.querySelector('#mobileMoreBtn')?.click();
       const picker = document.querySelector('.mobile-project-picker');
       if (picker) picker.open = true;

@@ -288,55 +288,200 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     </article>`;
   }
 
+  function controlRoomDescendants(root, model) {
+    const found = [];
+    const queue = [...(root.childIds || [])];
+    const visited = new Set();
+    while (queue.length) {
+      const id = queue.shift();
+      if (!id || visited.has(id)) continue;
+      visited.add(id);
+      const child = model.byId.get(id);
+      if (!child) continue;
+      found.push(child);
+      queue.push(...(child.childIds || []));
+    }
+    return sortGraphNodes(found);
+  }
+
+  function controlRoomIntent(value) {
+    const text = String(value || "");
+    const loopCommand = ["w", "c", "c", "-loop"].join("");
+    const loop = text.match(new RegExp(`^/${loopCommand}\\s+--tick\\s+([^\\s]+)`, "i"));
+    if (loop) return t("control.summary_automatic_run", { name: loop[1] });
+    const rules = [
+      [/(?:서브\s*에이전트|helper|subagent).*(?:직접|direct).*(?:전달|메시지|message|개입)|(?:직접|direct).*(?:서브\s*에이전트|helper|subagent)/i, "control.summary_direct_helper"],
+      [/(?:메인|lead).*(?:서브\s*에이전트|helper|subagent).*(?:문구|요약|설명|summary)|(?:에이전트|agent).*(?:백그라운드|실행\s*작업|execution).*(?:문구|요약|설명|summary)/i, "control.summary_agent_work_copy"],
+      [/(?:전체|모든).*(?:대화|기록|메시지).*(?:생략|전체|불러|표시)|(?:full|entire).*(?:conversation|history|messages)/i, "control.summary_full_history"],
+      [/(?:관제|control\s*room|실행\s*구조|홈\s*화면).*(?:에이전트|agent|세션|session|흐름|flow)/i, "control.summary_control_room"],
+      [/(?:requirements?|요구사항).*(?:phase|단계).*(?:complete|완료|조건|contract)|(?:phase|단계).*(?:complete|완료).*(?:requirements?|요구사항)/i, "control.summary_phase_requirements"],
+      [/(?:build|package|빌드|패키징).*(?:restart|relaunch|다시\s*(?:실행|켜)|재실행)|(?:종료|stop).*(?:빌드|build).*(?:실행|start)/i, "control.summary_build_restart"],
+      [/(?:agentMonitor|snapshot\.sessions|세션\s*데이터).*(?:summary|요약|입력|확인|inspect)/i, "control.summary_session_data"],
+      [/(?:test|tests|testing|pytest|jest|vitest|테스트|회귀\s*검증).*(?:result|verify|pass|결과|확인|검증)|(?:검증|verify).*(?:기능|동작|화면|UI)/i, "control.work_test"],
+      [/(?:UI|화면|카드|문구|표시).*(?:가독성|읽기|요약|축약|정리|개선)/i, "control.summary_readability"],
+      [/(?:bug|error|failure|오류|버그|실패).*(?:fix|resolve|수정|해결|원인)/i, "control.summary_fix_problem"],
+      [/(?:review|audit|검토|감사).*(?:code|UI|화면|구조|변경|코드)/i, "control.summary_review"],
+      [/(?:read|inspect|analy[sz]e|search|확인|조사|분석|검색).*(?:file|code|config|log|파일|코드|설정|로그)/i, "control.work_inspect_code"],
+    ];
+    const matched = rules.find(([pattern]) => pattern.test(text));
+    return matched ? t(matched[1]) : text;
+  }
+
+  function controlRoomSummary(value, maxCharacters = 64) {
+    const cleaned = String(value || "")
+      .replace(/```[\s\S]*?```/g, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/^[\s>*#\-\d.)]+/, "")
+      .replace(/\*\*|__|`/g, "")
+      .replace(/^(?:now\s+)?(?:i(?:'ll|\s+will)|let\s+me|next,?)\s+/i, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!cleaned) return readablePreview(t("control.work_unknown"), maxCharacters);
+    const intent = controlRoomIntent(cleaned);
+    const sentence = intent === cleaned ? cleaned.match(/^(.{12,}?[.!?。！？])(?:\s|$)/)?.[1] || cleaned : intent;
+    return readablePreview(sentence, maxCharacters);
+  }
+
+  function controlRoomAgentGoal(session, maxCharacters = 64) {
+    const delegation = session.delegation || {};
+    const messages = session.messages || [];
+    const userGoal = [...messages].reverse().find(message => message.role === "user" && message.text && !/^\s*\/[\w-]+(?:\s|$)/.test(message.text));
+    const title = String(session.title || "");
+    const source = delegation.assignment || session.sharedGoal || title
+      || userGoal?.text || delegation.taskName || session.taskName || latestWorkCopy(session);
+    return controlRoomSummary(source, maxCharacters);
+  }
+
+  function looksLikeExecutionCommand(value) {
+    const text = String(value || "").trim();
+    return /(?:^|[;&|]\s*)(?:npm|pnpm|yarn|bun|npx|node|git|rg|grep|findstr|python|pytest|gradle|mvn|docker|curl|pwsh|powershell|cmd|start-process|get-content|select-string)\b/i.test(text)
+      || /(?:--[\w-]+|\\[^\s]+|\/[\w.-]+\.[a-z0-9]{1,8})/i.test(text);
+  }
+
+  function inferredExecutionSummary(activity) {
+    const command = String(activity.command || "").replace(/\s+/g, " ").trim();
+    const searchable = `${activity.description || ""} ${activity.label || ""} ${command}`.toLowerCase();
+    const patterns = [
+      [/(?:electron-builder|\bdist(?::win)?\b|\bpackage\b|\bportable\b|\bnsis\b)/, "control.work_package_app"],
+      [/(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|start|serve)\b|\bdev\s+server\b|개발\s*서버/, "control.work_dev_server"],
+      [/\b(?:test|tests|pytest|jest|vitest|playwright|cypress)\b|테스트|회귀\s*검증/, "control.work_test"],
+      [/\b(?:build|compile|tsc)\b|빌드|컴파일/, "control.work_build"],
+      [/\b(?:install|npm\s+ci|pnpm\s+i)\b|패키지\s*설치|의존성/, "control.work_install"],
+      [/\b(?:lint|eslint|stylelint)\b|정적\s*검사/, "control.work_lint"],
+      [/\b(?:format|prettier)\b|코드\s*정리/, "control.work_format"],
+      [/\bgit\s+(?:status|diff|show|log)\b|변경\s*(?:내용|사항).*확인/, "control.work_review_changes"],
+      [/\bgit\s+commit\b|커밋/, "control.work_save_changes"],
+      [/\bgit\s+push\b|업로드|배포/, "control.work_publish"],
+      [/(?:\brg\b|grep|findstr|select-string|get-content|read-file|코드.*확인|파일.*확인)/, "control.work_inspect_code"],
+      [/(?:start-process|loadtoagent\.exe|electron\s+\.)|프로그램\s*실행|앱\s*실행/, "control.work_launch_app"],
+      [/(?:index|인덱스).*(?:refresh|update|갱신)/, "control.work_refresh_index"],
+      [/(?:crawl|scrape|수집)/, "control.work_collect_data"],
+    ];
+    const matched = patterns.find(([pattern]) => pattern.test(searchable));
+    if (matched) return controlRoomSummary(t(matched[1]), 58);
+    const label = String(activity.description || activity.label || "").trim();
+    const generic = /^(?:shell|셸\s*명령|background|백그라운드\s*(?:작업|명령|실행)|foreground|포그라운드\s*(?:작업|명령|실행)|일반\s*명령\s*실행)$/i.test(label);
+    if (label && !generic && !looksLikeExecutionCommand(label)) return controlRoomSummary(label, 58);
+    if (command) return controlRoomSummary(command.replace(/^[^\s]+\s+/, ""), 58);
+    return controlRoomSummary(t("control.work_background"), 58);
+  }
+
+  function controlRoomChildNode(child) {
+    const provider = providerInfo(child.provider);
+    const delegation = child.delegation || {};
+    const assignment = delegation.assignment || delegation.taskName || child.taskName || child.title;
+    const current = controlRoomSummary(latestWorkCopy(child) || child.statusDetail || assignment, 72);
+    const assignmentPreview = controlRoomAgentGoal(child, 58);
+    const workState = subagentWorkState(child);
+    return `<button type="button" class="control-room-node helper-node is-${esc(workState)} ${child.status === "starting" ? "is-spawning" : ""}"
+      data-open-subagent-chat="${esc(child.id)}"
+      data-control-summary="${esc(assignmentPreview.text)}"
+      data-motion-key="control-helper:${esc(child.id)}"
+      data-motion-value="${esc(child.status || "")}:${esc(child.updatedAt || "")}"
+      style="${providerStyle(child.provider)}" aria-label="${esc(t("control.open_subagent", { task: assignment }))}">
+      <span class="control-node-icon">${esc(provider.mark)}</span>
+      <span class="control-node-copy"><small>${esc(t("control.subagent_work"))} · ${esc(provider.label)}</small><b title="${esc(assignmentPreview.full)}">${esc(assignmentPreview.text)}</b><em title="${esc(current.full)}">${esc(t("control.current_summary", { summary: current.text }))}</em></span>
+      <span class="control-node-state"><i aria-hidden="true"></i><b>${esc(subagentWorkLabel(child))}</b></span>
+    </button>`;
+  }
+
+  function controlRoomExecutionNode(item) {
+    const { activity, owner } = item;
+    const summary = inferredExecutionSummary(activity);
+    const command = controlRoomSummary(activity.command || activity.description || activity.label || summary.full, 76);
+    const runtime = activity.kind === "shell"
+      ? activity.runtime || state.platform?.localShellLabel || activity.tool || "PowerShell"
+      : activity.runtime || activity.tool || t("graph.background_task");
+    const executionKind = activity.mode === "background" || activity.status === "running"
+      ? t("control.background_work_kind")
+      : t("control.command_work_kind");
+    const executionLabel = t("control.runtime_work", { runtime, kind: executionKind });
+    const ownerGoal = controlRoomAgentGoal(owner, 52);
+    const running = activity.status === "running";
+    return `<button type="button" class="control-room-node execution-node ${running ? "is-running" : "is-complete"}"
+      data-open-execution-owner="${esc(owner.id)}"
+      data-open-execution-id="${esc(activity.id)}"
+      data-control-summary="${esc(summary.text)}"
+      data-motion-key="control-execution:${esc(activity.id)}"
+      data-motion-value="${esc(activity.status || "")}:${esc(activity.updatedAt || activity.startedAt || "")}"
+      aria-label="${esc(t("control.open_execution_detail", { task: summary.text }))}">
+      <span class="control-node-icon">${activity.kind === "shell" ? "›_" : "◌"}</span>
+      <span class="control-node-copy"><small title="${esc(runtime)}">${esc(executionLabel)}</small><b title="${esc(summary.full)}">${esc(summary.text)}</b><em title="${esc(command.full)}">${esc(t("control.execution_context", { task: ownerGoal.text }))}</em></span>
+      <span class="control-node-state"><i aria-hidden="true"></i><b>${esc(executionActivityStatus(activity))}</b></span>
+    </button>`;
+  }
+
+  function controlRoomSession(root, model) {
+    const provider = providerInfo(root.provider);
+    const descendants = controlRoomDescendants(root, model);
+    const actors = [root, ...descendants];
+    const executionItems = actors.flatMap(owner => (owner.executions || []).map(activity => ({ activity, owner })));
+    const activeChildren = descendants.filter(child => !["completed", "cancelled", "failed"].includes(child.status) && !child.completionObserved);
+    const completedChildren = descendants.filter(child => ["completed", "cancelled", "failed"].includes(child.status) || child.completionObserved);
+    const activeExecutions = executionItems.filter(item => item.activity.status === "running");
+    const completedExecutions = executionItems
+      .filter(item => item.activity.status !== "running")
+      .sort((a, b) => Date.parse(b.activity.updatedAt || b.activity.startedAt || 0) - Date.parse(a.activity.updatedAt || a.activity.startedAt || 0));
+    const activeUnits = [...activeChildren.map(child => ({ kind: "child", child })), ...activeExecutions.map(item => ({ kind: "execution", item }))];
+    const completedUnits = [
+      ...completedChildren.map(child => ({ kind: "child", child, timestamp: child.completedAt || child.updatedAt })),
+      ...completedExecutions.map(item => ({ kind: "execution", item, timestamp: item.activity.updatedAt || item.activity.startedAt })),
+    ].sort((a, b) => Date.parse(b.timestamp || 0) - Date.parse(a.timestamp || 0)).slice(0, 3);
+    const current = controlRoomSummary(latestWorkCopy(root) || root.statusDetail || root.title, 74);
+    const title = controlRoomAgentGoal(root, 64);
+    const unitCount = activeUnits.length;
+    const main = `<button type="button" class="control-room-main" data-open-session="${esc(root.id)}"
+      data-control-summary="${esc(title.text)}"
+      data-motion-key="control-main:${esc(root.id)}" data-motion-value="${esc(root.updatedAt || "")}:${esc(root.status || "")}"
+      style="${providerStyle(root.provider)}">
+      <span class="control-main-top"><span class="provider-mark">${esc(provider.mark)}</span><span><small>${esc(t("control.main_agent"))}</small><b>${esc(provider.label)} · ${esc(root.model || t("session.model_unknown"))}</b></span><em><i aria-hidden="true"></i>${esc(statusLabel(root.status))}</em></span>
+      <strong title="${esc(title.full)}">${esc(title.text)}</strong>
+      <span class="control-main-now"><small>${esc(t("graph.current_work"))}</small><b title="${esc(current.full)}">${esc(current.text)}</b></span>
+      <span class="control-main-meta"><small>${esc(t("control.unit_counts", { helpers: activeChildren.length, executions: activeExecutions.length }))}</small><b>${esc(t("graph.view_conversation"))} →</b></span>
+    </button>`;
+    const shownActiveUnits = activeUnits.slice(0, 6);
+    const hiddenActiveUnits = Math.max(0, activeUnits.length - shownActiveUnits.length);
+    const active = activeUnits.length
+      ? `${shownActiveUnits.map(unit => unit.kind === "child" ? controlRoomChildNode(unit.child) : controlRoomExecutionNode(unit.item)).join("")}${hiddenActiveUnits ? `<button type="button" class="control-room-node overflow-node" data-graph-focus="${esc(root.id)}"><span class="control-node-icon">+${hiddenActiveUnits}</span><span class="control-node-copy"><small>${esc(t("control.more_live_units"))}</small><b>${esc(t("control.open_remaining_units", { count: hiddenActiveUnits }))}</b><em>${esc(t("control.open_full_flow"))}</em></span><span class="control-node-state"><b>→</b></span></button>` : ""}`
+      : `<div class="control-room-running-empty"><span>○</span><small>${esc(t("control.running_empty"))}</small></div>`;
+    const completed = completedUnits.length
+      ? completedUnits.map(unit => unit.kind === "child" ? controlRoomChildNode(unit.child) : controlRoomExecutionNode(unit.item)).join("")
+      : `<div class="control-room-complete-empty"><span>✓</span><small>${esc(t("control.completed_empty"))}</small></div>`;
+    return `<article class="control-room-session" data-control-session="${esc(root.id)}" style="${providerStyle(root.provider)}">
+      <header><div><span class="control-session-live"><i></i>${esc(t("control.live_session"))}</span><b>${esc(title.text)}</b></div><span class="session-order-actions control-session-order" role="group" aria-label="${esc(t("session.change_position"))}"><button type="button" data-session-order-move="${esc(root.id)}" data-session-order-offset="-1" title="${esc(t("session.move_up"))}" aria-label="${esc(t("session.move_up"))}">↑</button><button type="button" data-session-order-move="${esc(root.id)}" data-session-order-offset="1" title="${esc(t("session.move_down"))}" aria-label="${esc(t("session.move_down"))}">↓</button></span><button type="button" data-graph-focus="${esc(root.id)}">${esc(t("control.open_full_flow"))} ↗</button></header>
+      <div class="control-room-flow">
+        <section class="control-room-column main-column"><span class="control-column-label">${esc(t("control.main_work_column"))}</span>${main}</section>
+        <span class="control-flow-link live" aria-hidden="true"><i></i></span>
+        <section class="control-room-column activity-column"><span class="control-column-label">${esc(t("control.running_work_column"))}<b>${unitCount}</b></span><div class="control-room-node-list">${active}</div></section>
+        <span class="control-flow-link complete" aria-hidden="true"><i></i></span>
+        <section class="control-room-column completed-column"><span class="control-column-label">${esc(t("control.completed_work_column"))}<b>${completedUnits.length}</b></span><div class="control-room-node-list completed-list">${completed}</div></section>
+      </div>
+    </article>`;
+  }
+
   function runtimeSeparatedOverview(roots, model) {
-    const tmuxEntries = liveTmuxEntries(state.snapshot && state.snapshot.tmux);
-    const tmuxLinkedIds = new Set(tmuxEntries.map((entry) => String(entry.agent && entry.agent.linkedSessionId || "")).filter(Boolean));
-    const workflowUsesTmux = root => {
-      const queue = [...(root.childIds || [])];
-      const visited = new Set();
-      while (queue.length) {
-        const id = queue.shift();
-        if (!id || visited.has(id)) continue;
-        visited.add(id);
-        const child = model.byId.get(id);
-        if (!child) continue;
-        if (agentExecutionMode(child).kind === "tmux" || tmuxLinkedIds.has(child.id)) return true;
-        queue.push(...(child.childIds || []));
-      }
-      return false;
-    };
-    const tmuxRoots = roots.filter((root) => agentExecutionMode(root).kind === "tmux" || tmuxLinkedIds.has(root.id) || workflowUsesTmux(root));
-    const tmuxRootIds = new Set(tmuxRoots.map((root) => root.id));
-    const standardRoots = roots.filter((root) => !tmuxRootIds.has(root.id));
-    const providerOrder = [...new Set([...visibleProviders().map((item) => item.id), ...roots.map((item) => item.provider).filter(isProviderVisible)])];
-    const lanesFor = (items) =>
-      providerOrder.map((providerId) => ({ providerId, roots: items.filter((root) => root.provider === providerId) })).filter((item) => item.roots.length);
-    const standardLanes = lanesFor(standardRoots);
-    const tmuxLanes = lanesFor(tmuxRoots);
-    const standardHtml = standardLanes.length
-      ? `<div class="agent-flow-overview">${standardLanes.map((item) => providerFlowLane(item.providerId, item.roots, model)).join("")}</div>`
-      : `<div class="runtime-segment-empty"><b>${esc(t("graph.no_standard_ai"))}</b><span>${esc(t("graph.all_detected_in_tmux"))}</span></div>`;
-    const tmuxSection = tmuxLanes.length
-      ? `<section class="runtime-segment tmux-runtime" data-runtime-segment="tmux">
-        <header>
-          <span class="runtime-segment-icon">▦</span>
-          <span><small>${esc(t("graph.tmux_only"))}</small><b>${esc(t("graph.tmux_sessions"))}</b><em>${esc(t("graph.tmux_runtime_description"))}</em></span>
-          <strong>${esc(t("common.count", { count: tmuxRoots.length }))}</strong>
-          <button type="button" class="live-tmux-overview-open">${esc(t("graph.open_tmux_overview"))}</button>
-        </header>
-        <div class="agent-flow-overview">${tmuxLanes.map((item) => providerFlowLane(item.providerId, item.roots, model)).join("")}</div>
-      </section>`
-      : "";
-    return `<div class="agent-runtime-split" data-runtime-split="true">
-      ${tmuxSection}
-      <section class="runtime-segment standard-runtime" data-runtime-segment="standard">
-        <header>
-          <span class="runtime-segment-icon">›_</span>
-          <span><small>${esc(t("graph.without_tmux"))}</small><b>${esc(t("graph.standard_sessions"))}</b><em>${esc(t("graph.standard_runtime_description"))}</em></span>
-          <strong>${esc(t("common.count", { count: standardRoots.length }))}</strong>
-        </header>
-        ${standardHtml}
-      </section>
+    return `<div class="control-room-overview" data-control-room-overview="true">
+      ${sortGraphNodes(roots).map(root => controlRoomSession(root, model)).join("")}
     </div>`;
   }
 
@@ -654,6 +799,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
 
   return {
     graphNode, compactGraphNode, providerFlowLane, workflowCompactNode, liveTmuxEntries, liveTmuxPaneCard, runtimeSeparatedOverview,
+    controlRoomIntent, controlRoomSummary, controlRoomAgentGoal, inferredExecutionSummary,
     workflowMetrics, workflowChildrenSummary, splitSubagents, completedSubagentDisclosure, agentPathTaskName, communicationEndpoint,
     workflowCommunicationPanel, executionActivityLabel, executionActivityStatus, executionActivityCard, executionActivityPanel, focusedGraph,
   };

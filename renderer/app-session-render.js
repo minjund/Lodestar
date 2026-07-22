@@ -64,106 +64,42 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
 
   function sessionCard(session, opts = {}) {
     const provider = providerInfo(session.provider);
-    const usage = session.usage || {};
-    const context = session.context || {};
     const activity = currentActivity(session);
-    const running = session.status === "running" || session.status === "starting";
-    const children = session.childIds || [];
-    const model = session.model || t("session.model_unknown");
-    const contextPercent = Math.max(0, Math.min(100, Number(context.percent || 0)));
-    const remaining = context.window ? Math.max(0, Number(context.window) - Number(context.used || 0)) : 0;
-    const gaugeTone = contextPercent >= 90 ? "critical" : contextPercent >= 75 ? "warning" : "safe";
     const conversation = recentConversation(session);
-    const runtime = session.runtimePresence || [];
     const titlePreview = readablePreview(session.title, 96);
-    const activityCopy = latestWorkCopy(session) || window.LoadToAgentI18n.observedText(session.statusDetail) || t("session.waiting_for_new_event");
-    const activityPreview = readablePreview(activityCopy, 116);
+    const latest = conversation[conversation.length - 1];
+    const activityCopy = latest?.text || latestWorkCopy(session) || window.LoadToAgentI18n.observedText(session.statusDetail) || t("session.waiting_for_new_event");
+    const activityPreview = readablePreview(activityCopy, 138);
     const accessibleId = `session-${String(session.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
     const originPath = sessionOriginPath(session);
     const originLabel = sessionWorkspaceLabel(session);
-    return `<article class="session-card ${opts.live ? "live-card" : ""} ${statusClass(session.status)} ${session.parentId ? "subagent" : ""}"
+    return `<article class="session-card session-record ${opts.live ? "live-card" : ""} ${statusClass(session.status)} ${session.parentId ? "subagent" : ""}"
       data-session-id="${esc(session.id)}"
       data-motion-key="session:${esc(session.id)}"
-      data-motion-value="${esc(session.updatedAt || "")}:${usage.total || 0}:${esc(session.status || "")}"
+      data-motion-value="${esc(session.updatedAt || "")}:${esc(session.status || "")}"
       style="${providerStyle(session.provider)}"
       role="button" tabindex="0"
       aria-labelledby="${accessibleId}-title" aria-describedby="${accessibleId}-summary">
       <div class="card-head">
         <span class="provider-mark">${esc(provider.mark)}</span>
-        <div class="card-head-main"><div class="card-provider-line"><b>${esc(provider.label)}</b><span>${esc(provider.company)}</span></div></div>
-        ${executionModeBadge(session, true)}
+        <div class="card-head-main"><div class="card-provider-line"><b>${esc(provider.label)}</b><span>${esc(session.model || t("session.model_unknown"))}</span></div></div>
         <span class="status-pill ${statusClass(session.status)}">${esc(STATUS[session.status] || session.status)}</span>
       </div>
       <h3 id="${accessibleId}-title" class="card-title" title="${esc(titlePreview.full)}">${esc(titlePreview.text)}</h3>
-      <div class="card-subtitle">
-        <span>${esc(model)}</span>
-        <i>
-        </i>
-        <span class="origin-project" title="${esc(isProjectlessSession(session) ? window.LoadToAgentI18n.t("ui.session_not_linked_to_a_specific_project") : originPath)}"
+      <div class="card-subtitle"><span class="origin-project" title="${esc(isProjectlessSession(session) ? window.LoadToAgentI18n.t("ui.session_not_linked_to_a_specific_project") : originPath)}"
           aria-label="${esc(t("project.origin_named", { name: originLabel }))}">
-          <small>${esc(t("project.origin"))}</small><b>${esc(originLabel)}</b>
-        </span>${
-          session.agentName
-            ? `<i>
-        </i>
-        <span>${esc(session.agentName)}</span>`
-            : ""
-        }</div>
-      <div id="${accessibleId}-summary" class="now-strip ${running ? "is-live" : ""}">
+          <small>${esc(t("project.origin"))}</small><b>${esc(originLabel)}</b></span></div>
+      <div id="${accessibleId}-summary" class="now-strip">
         <span class="now-strip-icon">${statusIcon(activity.type)}</span>
-        <div><b>${running ? `${esc(t("session.now"))}: ` : ""}${esc(activity.title)}</b><span title="${esc(activityPreview.full)}">${esc(activityPreview.text)}</span></div>
-        ${running ? '<span class="activity-wave"><i></i><i></i><i></i><i></i><i></i></span>' : ""}
+        <div><b>${esc(latest?.label || activity.title)}</b><span title="${esc(activityPreview.full)}">${esc(activityPreview.text)}</span></div>
       </div>
-      ${progressHtml(session, true)}
-      ${healthHtml(session, true)}
-      ${
-        runtime.length
-          ? `<div class="runtime-strip">
-        <span class="runtime-pulse">
-        </span>
-        <b>${esc(t("session.running_programs", { count: runtime.length }))}</b>
-        <span>${esc(runtime.map((item) => item.label || t("session.program_pid", { pid: item.pid })).join(" · "))}</span>
-        </div>`
-          : ""
-      }
-      <div class="conversation-preview">
-        ${conversation.map((row) => `<div class="preview-line ${row.tone}"><b>${esc(row.label)}</b><span>${esc(row.text)}</span></div>`).join("")}
-      </div>
-      <div class="context-meter ${gaugeTone}">
-        <div class="context-meter-head">
-          <div>
-          <span>${esc(t("session.context_usage"))}</span>
-          <strong>${context.window ? `${fullNumber(context.used)} / ${fullNumber(context.window)}` : `${fullNumber(context.used)} / --`}</strong>
-          </div>
-          <b>${context.window ? `${contextPercent.toFixed(1)}%` : "--"}</b>
-          </div>
-        <div class="context-meter-track"><span style="width:${contextPercent}%"></span><i style="left:75%"></i><i style="left:90%"></i></div>
-        <div class="context-meter-foot">
-          <span>${esc(context.window ? t("session.context_remaining", { count: compact(remaining) }) : t("session.context_size_unknown"))}</span>
-          <span>${esc(t("session.tokens_used_so_far", { count: compact(usage.total) }))}</span>
-          </div>
-      </div>
-      <div class="token-row">
-        <div><span>${esc(t("session.input_tokens"))}</span><b>${compact(usage.input)}</b></div>
-        <div><span>${esc(t("session.output_tokens"))}</span><b>${compact(usage.output)}</b></div>
-        <div><span>${esc(t("session.cached_tokens"))}</span><b>${compact(usage.cachedInput)}</b></div>
-        <div class="total"><span>${esc(t("session.total_tokens"))}</span><b>${compact(usage.total)}</b></div>
-      </div>
-      ${
-        children.length
-          ? `<div class="child-row">
-        <b>⑂</b>
-        <span>${esc(t("session.subagents_created", { count: children.length }))}</span>
-        <span class="child-dots">${children
-          .slice(0, 4)
-          .map(() => "<i></i>")
-          .join("")}</span>
-        </div>`
-          : ""
-      }
       <footer class="card-footer">
-        <span class="source-tag">${esc(window.LoadToAgentI18n.observedText(session.sourceLabel || t("session.local_history")))}</span>
         <span>${esc(timeAgo(session.updatedAt))}</span>
+        <span class="session-order-actions" role="group" aria-label="${esc(t("session.change_position"))}">
+          <button type="button" data-session-order-move="${esc(session.id)}" data-session-order-offset="-1" title="${esc(t("session.move_up"))}" aria-label="${esc(t("session.move_up"))}">↑</button>
+          <button type="button" data-session-order-move="${esc(session.id)}" data-session-order-offset="1" title="${esc(t("session.move_down"))}" aria-label="${esc(t("session.move_down"))}">↓</button>
+        </span>
+        <strong>${esc(t("graph.view_conversation"))}<i aria-hidden="true">→</i></strong>
       </footer>
     </article>`;
   }
@@ -177,13 +113,14 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
     const settingsView = state.view === "settings";
     const runtimeView = state.view === "runtime";
     const attentionView = state.view === "waiting";
-    const operationsView = state.view === "all" || state.view === "active";
+    const homeView = state.view === "all";
+    const operationsView = homeView;
     const focusedToolView = tmuxView || terminalView || settingsView || runtimeView;
     $("#terminalSection").classList.toggle("hidden", !terminalView);
     $("#tmuxSection").classList.toggle("hidden", !tmuxView);
     $("#settingsSection").classList.toggle("hidden", !settingsView);
-    $("#globalStats").classList.toggle("hidden", focusedToolView);
-    $("#providerOverview").classList.toggle("hidden", focusedToolView || state.view !== "all");
+    $("#globalStats").classList.toggle("hidden", focusedToolView || homeView || state.view === "active" || attentionView);
+    $("#providerOverview").classList.add("hidden");
     $("#sessionSection").classList.toggle("hidden", focusedToolView || state.view === "active" || attentionView);
     $("#operationsOverview").classList.toggle("hidden", !operationsView);
     $("#attentionInbox").classList.toggle("hidden", !attentionView);
@@ -236,7 +173,7 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
     const activeEmpty = state.view === "active" && graphLiveCount === 0;
     $("#activeEmptyState").classList.toggle("hidden", !activeEmpty);
     $("#liveSection").classList.toggle("hidden", attentionView || (graphLiveCount === 0 && state.view !== "active"));
-    $("#viewTitle").textContent = VIEW_TITLES[state.view] || window.LoadToAgentI18n.t("ui.recent_conversations_and_tasks");
+    $("#viewTitle").textContent = homeView ? t("control.other_sessions") : VIEW_TITLES[state.view] || window.LoadToAgentI18n.t("ui.recent_conversations_and_tasks");
     $("#sessionGrid").innerHTML = visible.map((session) => sessionCard(session)).join("");
     $("#sessionGrid").classList.toggle("hidden", visible.length === 0);
     $("#loadMoreBtn").classList.toggle("hidden", regular.length <= state.visibleLimit);

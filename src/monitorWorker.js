@@ -317,7 +317,7 @@ parentPort.on('message', message => {
   }
   if (message.type === 'detail') {
     const runtime = lastPublishedSessions.find(item => item.id === message.sessionId) || null;
-    const stored = (monitor.lastSnapshot.sessions || []).find(item => item.id === message.sessionId) || null;
+    const stored = monitor.detailSession(message.sessionId);
     const merged = stored && runtime
       ? { ...stored, status: runtime.status, statusDetail: runtime.statusDetail, statusObserved: runtime.statusObserved, runtimePresence: runtime.runtimePresence || [] }
       : (stored || runtime);

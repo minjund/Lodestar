@@ -35,7 +35,7 @@
   ].forEach(install);
   window.LoadToAgentApp = app;
 
-  const { $, esc, state, loadGuideState, loadQualityState = () => {}, loadProviderVisibility, projectVisibleSnapshot, visibleSnapshot, isProviderVisible, bindEvents, render, timeOnly, loadSessionDetail, renderUpdateSettings, syncViewChrome, selectView, openDrawer, openSubagentConversation, toast } = app;
+  const { $, esc, state, loadGuideState, loadQualityState = () => {}, saveDashboardPreferences = () => {}, loadProviderVisibility, projectVisibleSnapshot, visibleSnapshot, isProviderVisible, bindEvents, render, timeOnly, loadSessionDetail, renderUpdateSettings, syncViewChrome, selectView, openDrawer, openSubagentConversation, toast } = app;
 
   let initializationError = "";
   const showInitializationError = (message) => {
@@ -91,6 +91,7 @@
     if (window.loadtoagent.onAttentionRequested) window.loadtoagent.onAttentionRequested(handleAttentionRequested);
     bindEvents();
     render();
+    saveDashboardPreferences();
     $("#appConnectionState")?.classList.remove("connection-error");
     $("#appErrorBanner").classList.add("hidden");
     app.initialized = true;
@@ -101,6 +102,7 @@
       if (window.LoadToAgentTerminal) window.LoadToAgentTerminal.updateSnapshot(visibleSnapshot(), state.workspaces);
       $("#lastSync").textContent = timeOnly(snapshot.generatedAt);
       render();
+      saveDashboardPreferences();
       if (state.selectedId && $("#detailDrawer").classList.contains("open") && !state.detailLoadingIds.has(state.selectedId)) {
         const card = (snapshot.sessions || []).find((session) => session.id === state.selectedId);
         const detail = state.details.get(state.selectedId);

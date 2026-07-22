@@ -56,7 +56,7 @@ function timestamp(value, fallback = null) {
 }
 
 function addMessage(session, message) {
-  const text = compactText(message.text, message.type === 'tool' ? 1600 : 6000);
+  const text = compactText(message.text, session.fullHistory ? Number.MAX_SAFE_INTEGER : (message.type === 'tool' ? 1600 : 6000));
   if (!text && message.type !== 'tool') return;
   const row = {
     id: String(message.id || `${session.id}:m:${session.messages.length}`),
@@ -353,6 +353,13 @@ function contextInfo(used, windowInfo) {
 }
 
 function trimSession(session) {
+  if (session.fullHistory) {
+    session.omittedMessages = 0;
+    session.omittedLifecycle = 0;
+    session.truncated = false;
+    if (!session.messages.length) addMessage(session, { id: `${session.id}:empty`, role: 'system', text: '표시할 대화 메시지가 아직 없습니다.', timestamp: session.updatedAt });
+    return;
+  }
   session.omittedMessages = Math.max(0, session.messages.length - MAX_MESSAGES);
   session.omittedLifecycle = Math.max(0, session.lifecycle.length - MAX_LIFECYCLE);
   session.messages = session.messages.slice(-MAX_MESSAGES);
@@ -360,7 +367,7 @@ function trimSession(session) {
   if (!session.messages.length) addMessage(session, { id: `${session.id}:empty`, role: 'system', text: '표시할 대화 메시지가 아직 없습니다.', timestamp: session.updatedAt });
 }
 
-function parseManagedSession(runDir) {
+function parseManagedSession(runDir, options = {}) {
   const meta = readJson(path.join(runDir, 'meta.json'));
   const live = readJson(path.join(runDir, 'session.json'));
   if (!meta || !live) return null;
@@ -373,6 +380,7 @@ function parseManagedSession(runDir) {
     source: 'loadtoagent',
     sourceLabel: 'LoadToAgent 실행',
     statusObserved: true,
+    fullHistory: Boolean(options.fullHistory),
   };
   session.originCwd = session.originCwd || meta.cwd || session.cwd || '';
   session.usage = finalizeUsage(session.usage);
@@ -482,8 +490,8 @@ class AgentMonitor extends EventEmitter {
     }).filter(Boolean).sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, max);
   }
 
-  parseFile(info, parser) {
-    const key = `${info.file}|${info.mtimeMs}|${info.size}`;
+  parseFile(info, parser, variant = '') {
+    const key = `${info.file}|${info.mtimeMs}|${info.size}|${variant}`;
     const cached = this.parseCache.get(key);
     if (cached) return cached;
     const value = parser(info);
@@ -493,6 +501,38 @@ class AgentMonitor extends EventEmitter {
       this.parseCache = new Map(keep);
     }
     return value;
+  }
+
+  detailSession(sessionId) {
+    const stored = (this.lastSnapshot.sessions || []).find(session => session.id === String(sessionId || '')) || null;
+    if (!stored) return null;
+    let detailed = null;
+    if (stored.source === 'loadtoagent' && stored.runId && this.runsDir) {
+      detailed = parseManagedSession(path.join(this.runsDir, stored.runId), { fullHistory: true });
+    } else if (stored.file) {
+      const stat = safeStat(stored.file);
+      if (stat && stat.isFile()) {
+        const info = { file: stored.file, mtimeMs: stat.mtimeMs, size: stat.size };
+        const parser = stored.provider === 'claude'
+          ? item => parseClaude(item, { fullHistory: true })
+          : stored.provider === 'codex'
+            ? item => parseCodex(item, { fullHistory: true })
+            : item => parseGeneric(item, stored.provider, { fullHistory: true });
+        detailed = this.parseFile(info, parser, 'full-history');
+      }
+    }
+    if (!detailed) return stored;
+    return {
+      ...stored,
+      ...detailed,
+      environment: stored.environment,
+      delegation: stored.delegation || detailed.delegation,
+      childIds: stored.childIds || detailed.childIds || [],
+      fullHistory: true,
+      truncated: false,
+      omittedMessages: 0,
+      omittedLifecycle: 0,
+    };
   }
 
   hintedFiles(paths, max) {

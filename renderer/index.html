@@ -28,6 +28,7 @@
   <link rel="stylesheet" href="styles-responsive-product.css" />
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
   <link rel="stylesheet" href="styles-readability.css" />
+  <link rel="stylesheet" href="styles-control-room.css" />
 </head>
 <body>
   <div id="appShell" class="app-shell">
@@ -75,9 +76,9 @@
     <main id="mainContent" class="main-stage" tabindex="-1">
       <header class="topbar">
         <div>
-          <p id="pageEyebrow" class="eyebrow" data-i18n="ui.ai_work_overview">AI 작업 현황</p>
-          <h1 id="pageTitle" data-i18n="ui.see_all_ai_work_at_a_glance">AI 작업을 한눈에 확인하세요.</h1>
-          <p id="pageSubtitle" class="subtitle" data-i18n="ui.active_work_and_items_needing_your_review_appear_first_find">진행 중인 일과 내 응답·상태 확인이 필요한 일을 먼저 보여주고, 나머지 기록은 아래에서 찾을 수 있습니다.</p>
+          <p id="pageEyebrow" class="eyebrow" data-i18n="ui.ai_work_overview">세션 관제</p>
+          <h1 id="pageTitle" data-i18n="ui.see_all_ai_work_at_a_glance">에이전트가 일하는 흐름을 실시간으로 확인하세요.</h1>
+          <p id="pageSubtitle" class="subtitle" data-i18n="ui.active_work_and_items_needing_your_review_appear_first_find">실행 구조는 항상 보이고, 세션을 누르면 대화를 확인하거나 바로 참여할 수 있습니다.</p>
         </div>
         <div class="top-actions">
           <button id="shortcutHelpBtn" class="top-icon-action" type="button" aria-label="키보드 단축키 보기" data-i18n-aria-label="quality.shortcuts.open" aria-keyshortcuts="?" aria-controls="shortcutHelpModal"><span aria-hidden="true">⌨</span></button>
@@ -299,9 +300,9 @@
 
       <section id="liveSection" class="live-section hidden" aria-label="현재 진행 중인 AI 작업" data-i18n-aria-label="ui.ai_work_currently_in_progress">
         <div class="live-section-head">
-          <div class="live-section-title"><span class="live-beacon"></span><div><p class="eyebrow" data-i18n="ui.active_now">지금 진행 중</p><h2 data-i18n="ui.work_assigned_to_ai">AI들이 맡은 일</h2></div></div>
+          <div class="live-section-title"><span class="live-beacon"></span><div><p class="eyebrow" data-i18n="ui.active_now">지금 진행 중</p><h2 data-i18n="ui.work_assigned_to_ai">전체 에이전트 작동 지도</h2></div></div>
           <div class="live-section-tools">
-            <p class="live-section-description" data-i18n="ui.open_a_task_to_see_who_started_it_and_what">일을 누르면 누가 시작했고, 다른 AI에게 어떤 도움을 맡겼는지 쉽게 볼 수 있습니다.</p>
+            <p class="live-section-description" data-i18n="ui.open_a_task_to_see_who_started_it_and_what">관제 콘솔에서 고른 에이전트의 부모·도움 AI·실행 명령 흐름을 여기서 끝까지 추적합니다.</p>
             <button id="openTmuxFromAgentWork" class="live-tmux-shortcut" type="button" aria-label="tmux 터미널 관리 · 세션 0개" data-i18n-aria-label="graph.open_tmux_workspace_count" data-i18n-params='{"count":0}' title="tmux 터미널 관리" data-i18n-title="graph.open_tmux_workspace">
               <span class="live-tmux-shortcut-icon" aria-hidden="true">▦</span>
               <span data-i18n="graph.open_tmux_workspace">tmux 터미널 관리</span>
@@ -331,7 +332,7 @@
             <label class="search-box"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" maxlength="240" aria-label="작업 검색" data-i18n-aria-label="ui.search_tasks" aria-keyshortcuts="/" placeholder="작업 이름, AI, 폴더 찾기" data-i18n-placeholder="ui.find_task_ai_or_folder" autocomplete="off" /><button id="searchClearBtn" class="search-clear hidden" type="button" aria-label="검색어 지우기" data-i18n-aria-label="filter.clear_search" title="검색어 지우기" data-i18n-title="filter.clear_search">×</button></label>
             <div id="providerFilter" class="provider-filter" role="toolbar" aria-label="AI 제공사 필터" data-i18n-aria-label="ui.ai_provider_filter"></div>
             <p id="providerFilterStatus" class="sr-only" role="status" aria-live="polite"></p>
-            <select id="sortSelect" aria-label="정렬" data-i18n-aria-label="ui.sort"><option value="recent" data-i18n="ui.most_recently_active">최근에 움직인 순서</option><option value="tokens" data-i18n="ui.highest_usage">많이 사용한 순서</option><option value="context" data-i18n="ui.highest_context_usage">기억 공간을 많이 쓴 순서</option></select>
+            <select id="sortSelect" aria-label="정렬" data-i18n-aria-label="ui.sort"><option value="recent" data-i18n="ui.most_recently_active">고정 순서 · 직접 변경</option><option value="tokens" data-i18n="ui.highest_usage">많이 사용한 순서</option><option value="context" data-i18n="ui.highest_context_usage">기억 공간을 많이 쓴 순서</option></select>
             <button id="resetFiltersBtn" class="filter-reset hidden" type="button" data-i18n="filter.reset_all">필터 초기화</button>
           </div>
         </div>
@@ -355,6 +356,7 @@
       <summary><i aria-hidden="true">□</i><span><b data-i18n="ui.workspaces">프로젝트 폴더 필터</b><small id="mobileWorkspaceSummary" data-i18n="project.all">모든 프로젝트 폴더</small></span><em aria-hidden="true">⌄</em></summary>
       <div class="mobile-project-picker-body"><div id="mobileWorkspaceList" class="workspace-list" role="group" aria-label="작업 시작 폴더별 AI 세션 필터" data-i18n-aria-label="quality.workspace_filter"></div><button id="mobileAddWorkspaceBtn" type="button" data-i18n="ui.add_workspace">폴더 필터 추가</button></div>
     </details>
+    <button type="button" data-mobile-guide data-guide-action="mobile"><i aria-hidden="true">?</i><span><b data-i18n="ui.10_minute_quick_start">10분 시작 가이드</b><small data-i18n="ui.try_each_step_to_explore_the_app">하나씩 눌러 직접 둘러보세요.</small></span></button>
     <button type="button" data-mobile-view="runtime"><i aria-hidden="true">↻</i><span><b data-i18n="runtime.title">예약·실행 단계</b><small data-i18n="runtime.description">실제 예약 작업과 현재 AI의 추정 실행 단계를 나눠서 확인합니다.</small></span></button>
     <button type="button" data-mobile-view="terminal"><i aria-hidden="true">›_</i><span><b data-i18n="app.nav.session_terminal">AI 세션 터미널</b><small data-i18n="ui.continue_an_existing_ai_conversation_directly">기존 AI 대화를 직접 이어서 입력</small></span></button>
     <button type="button" data-mobile-view="tmux"><i aria-hidden="true">▦</i><span><b data-i18n="app.nav.tmux">tmux 터미널 관리</b><small data-i18n="ui.manage_multiple_terminals_together">tmux 세션·창·분할 칸 관리</small></span></button>
@@ -376,6 +378,7 @@
       <button id="drawerTabTokens" class="drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawerContent" tabindex="-1" data-tab="tokens" data-i18n="ui.usage">사용량</button>
     </div>
     <div id="drawerContent" class="drawer-content" role="tabpanel" aria-labelledby="drawerTabChat" tabindex="0"></div>
+    <div id="drawerComposer" class="drawer-composer hidden" aria-label="대화 참여"></div>
   </aside>
 
   <div id="runModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="runModalTitle" aria-describedby="runModalDescription" aria-hidden="true" inert>

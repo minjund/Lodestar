@@ -45,27 +45,94 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
     return null;
   }
 
+  function agentCommandRouteOptions(session) {
+    if (!session?.parentId) return [];
+    let parent = snapshotSession(session.parentId) || state.details.get(session.parentId) || null;
+    const visited = new Set([session.id]);
+    while (parent?.parentId && !visited.has(parent.id)) {
+      visited.add(parent.id);
+      parent = snapshotSession(parent.parentId) || state.details.get(parent.parentId) || parent;
+    }
+    const directTargets = isLiveSession(session) ? agentCommandTargets(session) : [];
+    const parentTargets = parent ? agentCommandTargets(parent) : [];
+    return [
+      { id: "direct", label: t("agent.route_direct"), available: directTargets.length > 0, targetSession: session, targets: directTargets },
+      { id: "parent", label: t("agent.route_parent"), available: Boolean(parent && (parentTargets.length || agentResumeSupport(parent).supported)), targetSession: parent, targets: parentTargets },
+    ];
+  }
+
+  function selectedAgentCommandRoute(session) {
+    if (!session?.parentId) return "direct";
+    const options = agentCommandRouteOptions(session);
+    const saved = state.agentCommandRoutes.get(session.id);
+    if (options.some(option => option.id === saved && option.available)) return saved;
+    const selected = options.find(option => option.id === "direct" && option.available)
+      || options.find(option => option.id === "parent" && option.available)
+      || options.find(option => option.id === "direct");
+    const route = selected?.id || "direct";
+    state.agentCommandRoutes.set(session.id, route);
+    return route;
+  }
+
+  function routedAgentCommandContext(session, requestedRoute = "") {
+    const route = requestedRoute || selectedAgentCommandRoute(session);
+    const options = agentCommandRouteOptions(session);
+    const selected = options.find(option => option.id === route) || null;
+    return {
+      route,
+      options,
+      targetSession: selected?.targetSession || session,
+      targets: selected?.targets || agentCommandTargets(session),
+      available: session?.parentId ? Boolean(selected?.available) : true,
+    };
+  }
+
+  function agentCommandTargetKey(session, route = "direct") {
+    return session?.parentId ? `${session.id}:${route}` : session.id;
+  }
+
   function agentControlMode(session, targets) {
-    if (targets.length) return "direct";
-    if (originAppInfo(session)) return !isLiveSession(session) && agentResumeSupport(session).supported ? "origin-resume" : "origin";
-    if (agentResumeSupport(session).supported) return isLiveSession(session) ? "handoff" : "resume";
+    if (targets.length && isLiveSession(session)) return "direct";
+    const resume = agentResumeSupport(session);
+    if (resume.supported) {
+      if (originAppInfo(session)) return "origin-resume";
+      return isLiveSession(session) ? "handoff" : "resume";
+    }
     if (isLiveSession(session)) return "connect";
     return "ended";
   }
 
-  function agentCommandComposer(session) {
-    const targets = agentCommandTargets(session);
-    const mode = agentControlMode(session, targets);
-    const savedTarget = state.agentCommandTargets.get(session.id) || "";
-    const targetId = targets.some((target) => target.id === savedTarget) ? savedTarget : targets.length === 1 ? targets[0].id : "";
-    if (targetId) state.agentCommandTargets.set(session.id, targetId);
+  function agentCommandComposer(session, options = {}) {
+    const routingEnabled = Boolean(options.conversation && session.parentId);
+    const routeContext = routingEnabled
+      ? routedAgentCommandContext(session)
+      : {
+          route: "direct",
+          options: [],
+          targetSession: session,
+          targets: agentCommandTargets(session),
+          available: true,
+        };
+    const { route, targetSession, targets, available: routeAvailable } = routeContext;
+    const mode = routingEnabled && !routeAvailable ? "ended" : agentControlMode(targetSession, targets);
+    const relayed = routingEnabled && route === "parent" && routeAvailable;
+    const targetKey = agentCommandTargetKey(session, route);
+    const savedTarget = state.agentCommandTargets.get(targetKey) || "";
+    const relayTarget = relayed ? targets.find((target) => target.kind === "terminal") || targets[0] || null : null;
+    const targetId = targets.some((target) => target.id === savedTarget)
+      ? savedTarget
+      : targets.length === 1
+        ? targets[0].id
+        : relayTarget?.id || "";
+    if (targetId) state.agentCommandTargets.set(targetKey, targetId);
     const target = targets.find((item) => item.id === targetId) || null;
     const draft = state.agentCommandDrafts.get(session.id) || "";
     const sending = state.agentCommandSending.has(session.id);
     const canSend = ((mode === "direct" && Boolean(target)) || ["resume", "handoff", "origin-resume"].includes(mode)) && !sending;
-    const origin = originAppInfo(session);
-    const status =
-      mode === "direct"
+    const origin = originAppInfo(targetSession);
+    const status = relayed
+      ? t("agent.route_parent_status")
+      : mode === "direct"
         ? t("agent.direct_status", { target: targets.length === 1 ? target.label : t("agent.choose_terminal_count", { count: targets.length }) })
         : mode === "handoff"
           ? t("agent.handoff_status")
@@ -75,11 +142,10 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
               ? t("agent.origin_resume_status")
               : mode === "connect"
                 ? t("agent.connect_status")
-                : mode === "origin"
-                  ? t("agent.origin_status")
-                  : window.LoadToAgentI18n.t("ui.ended_session");
-    const help =
-      mode === "direct"
+                : window.LoadToAgentI18n.t("ui.ended_session");
+    const help = relayed
+      ? t("agent.route_parent_inline_help")
+      : mode === "direct"
         ? t("agent.direct_help")
         : mode === "handoff"
           ? t("agent.handoff_help")
@@ -88,23 +154,31 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
             : mode === "origin-resume"
               ? t("agent.origin_resume_help", { provider: (origin && origin.provider) || t("agent.desktop") })
               : mode === "connect"
-                ? t("agent.connect_help", { provider: session.provider })
-                : mode === "origin"
-                  ? t("agent.origin_help", { app: (origin && origin.label) || t("agent.desktop_app", { provider: "" }).trim() })
-                  : agentResumeSupport(session).reason || t("agent.resume_method_unknown");
+                ? t("agent.connect_help", { provider: targetSession.provider })
+                : agentResumeSupport(targetSession).reason || t("agent.resume_method_unknown");
+    const routePicker = routingEnabled
+      ? `<div class="agent-command-route" role="group" aria-label="${esc(t("agent.route_label"))}">
+        <span>${esc(t("agent.route_label"))}</span>
+        <div>${routeContext.options.map(option => `<button type="button" data-agent-command-session="${esc(session.id)}" data-agent-command-route="${esc(option.id)}"
+          aria-pressed="${option.id === route ? "true" : "false"}" ${option.available ? "" : "disabled"}>${esc(option.label)}</button>`).join("")}</div>
+        <small class="${routeAvailable ? "available" : "unavailable"}">${esc(t(routeAvailable
+          ? route === "direct" ? "agent.route_direct_available" : "agent.route_parent_available"
+          : route === "direct" ? "agent.route_direct_unavailable" : "agent.route_parent_unavailable"))}</small>
+      </div>`
+      : "";
     const picker =
-      targets.length > 1
+      targets.length > 1 && !relayed
         ? `<label class="agent-command-target">
       <span>${esc(t("agent.target_terminal"))}</span>
-      <select data-agent-command-target="${esc(session.id)}">
+      <select data-agent-command-target="${esc(targetKey)}">
       <option value="">${esc(t("agent.choose_terminal"))}</option>
       ${targets.map((item) => `<option value="${esc(item.id)}" ${item.id === targetId ? "selected" : ""}>${esc(item.label)}</option>`).join("")}
       </select>
       </label>`
         : "";
-    const originAction = `<button type="button" data-agent-open-origin="${esc(session.id)}">${esc(t("agent.continue_in_origin", { provider: (origin && origin.provider) || t("agent.desktop") }))}</button>`;
-    const actions =
-      mode === "direct"
+    const actions = relayed
+      ? `<button type="submit" ${canSend ? "" : "disabled"}>${esc(t(sending ? "agent.sending" : "agent.send_via_parent"))}</button>`
+      : mode === "direct"
         ? `<button type="button" data-agent-terminal-open="${esc(session.id)}" ${canSend ? "" : "disabled"}>${esc(t("agent.open_terminal"))}</button>
       <button type="submit" ${canSend ? "" : "disabled"}>${esc(t(sending ? "agent.sending" : "agent.send_now"))}</button>`
         : mode === "resume"
@@ -112,26 +186,25 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
           : mode === "handoff"
             ? `<button type="submit" ${canSend ? "" : "disabled"}>${esc(t(sending ? "agent.handing_off" : "agent.handoff_and_send"))}</button>`
             : mode === "origin-resume"
-              ? `${originAction}<button type="submit" ${canSend ? "" : "disabled"}>${esc(t(sending ? "agent.connecting" : "agent.background_and_send"))}</button>`
+              ? `<button type="submit" ${canSend ? "" : "disabled"}>${esc(t(sending ? "agent.connecting" : "agent.background_and_send"))}</button>`
               : mode === "connect"
-                ? `<button type="button" data-agent-bridge-copy="${esc(session.provider)}">${esc(t("agent.copy_bridge"))}</button>`
-                : mode === "origin"
-                  ? originAction
-                  : "";
-    const editable = ["direct", "resume", "handoff", "origin-resume"].includes(mode);
-    const placeholder = editable ? t("agent.command_example") : status;
+              ? `<button type="button" data-agent-bridge-copy="${esc(targetSession.provider)}">${esc(t("agent.copy_bridge"))}</button>`
+                : "";
+    const editable = relayed || ["direct", "resume", "handoff", "origin-resume"].includes(mode);
+    const placeholder = editable ? t(options.conversation ? "agent.conversation_placeholder" : "agent.command_example") : status;
     const availabilityClass = mode === "direct" ? "connected" : ["resume", "handoff", "origin-resume"].includes(mode) ? "resume-ready" : "unavailable";
-    return `<form class="agent-command-panel ${availabilityClass} control-${mode}"
-      data-agent-command-form="${esc(session.id)}">
+    return `<form class="agent-command-panel ${availabilityClass} control-${mode} ${options.conversation ? "conversation-composer" : ""}"
+      data-agent-command-form="${esc(session.id)}" data-agent-command-route-selected="${esc(route)}" data-agent-command-routing="${routingEnabled ? "conversation" : "session"}">
       <header>
         <span class="agent-command-icon" aria-hidden="true">›_</span>
-        <span><b>${esc(t("agent.command_title"))}</b><small>${esc(status)}</small></span>
+        <span><b>${esc(t(options.conversation ? "agent.conversation_title" : "agent.command_title"))}</b><small>${esc(status)}</small></span>
         <i class="${mode === "direct" ? "connected" : ""}" aria-hidden="true"></i>
       </header>
+      ${routePicker}
       ${picker}
       <label class="agent-command-input">
         <span class="sr-only">${esc(t("agent.command_sr"))}</span>
-        <textarea data-agent-command-draft="${esc(session.id)}" maxlength="8000" rows="3"
+        <textarea data-agent-command-draft="${esc(session.id)}" maxlength="8000" rows="${options.conversation ? "2" : "3"}"
           placeholder="${esc(placeholder)}" ${editable ? "" : "disabled"}>${editable ? esc(draft) : ""}</textarea>
       </label>
       <div class="agent-command-actions"><small aria-live="polite">${esc(help)}</small>${actions}</div>
@@ -148,9 +221,10 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
     return ((state.snapshot && state.snapshot.sessions) || []).find((session) => session.id === id) || null;
   }
 
-  function chosenAgentCommandTarget(session) {
-    const targets = agentCommandTargets(session);
-    const saved = state.agentCommandTargets.get(session.id) || "";
+  function chosenAgentCommandTarget(session, requestedRoute = "") {
+    const routeContext = routedAgentCommandContext(session, requestedRoute);
+    const targets = routeContext.targets;
+    const saved = state.agentCommandTargets.get(agentCommandTargetKey(session, routeContext.route)) || "";
     if (saved) return targets.find((target) => target.id === saved) || null;
     return targets.length === 1 ? targets[0] : null;
   }
@@ -181,16 +255,54 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
     if (state.agentCommandSending.has(sessionId)) return;
     const session = snapshotSession(sessionId);
     if (!session || !window.LoadToAgentTerminal) return context.toast(t("agent.latest_not_found"));
-    const mode = agentControlMode(session, agentCommandTargets(session));
-    if (mode === "resume" || mode === "handoff" || mode === "origin-resume") {
-      const input = form.querySelector("[data-agent-command-draft]");
-      if (input) state.agentCommandDrafts.set(sessionId, input.value);
-      if (!String((input && input.value) || "").trim()) return context.toast(t("agent.enter_command"));
-      return resumeAgentTerminal(sessionId, true);
-    }
-    const target = chosenAgentCommandTarget(session);
+    const routingEnabled = form?.dataset.agentCommandRouting === "conversation" && Boolean(session.parentId);
+    const requestedRoute = routingEnabled ? form?.dataset.agentCommandRouteSelected || selectedAgentCommandRoute(session) : "direct";
+    const routeContext = routingEnabled
+      ? routedAgentCommandContext(session, requestedRoute)
+      : { route: "direct", targetSession: session, targets: agentCommandTargets(session), available: true };
+    const targetSession = routeContext.targetSession;
+    const mode = routingEnabled && !routeContext.available ? "ended" : agentControlMode(targetSession, routeContext.targets);
+    if (routingEnabled && !["direct", "resume", "handoff", "origin-resume"].includes(mode)) return context.toast(t("agent.route_unavailable"));
     const input = form.querySelector("[data-agent-command-draft]");
     const command = String((input && input.value) || "").trim();
+    const routedCommand = routingEnabled && routeContext.route === "parent"
+      ? t("agent.route_via_parent_prompt", {
+          task: session.delegation?.taskName || session.taskName || session.agentName || session.title,
+          message: command,
+        })
+      : command;
+    if (mode === "resume" || mode === "handoff" || mode === "origin-resume") {
+      if (input) state.agentCommandDrafts.set(sessionId, input.value);
+      if (!command) return context.toast(t("agent.enter_command"));
+      if (routingEnabled && routeContext.route === "parent") {
+        state.agentCommandSending.add(sessionId);
+        const submit = form.querySelector('[type="submit"]');
+        if (submit) {
+          submit.disabled = true;
+          submit.textContent = t("agent.sending");
+        }
+        try {
+          await window.LoadToAgentTerminal.resumeForAgent(targetSession, routedCommand, true, { focus: false });
+          state.agentCommandDrafts.delete(sessionId);
+          if (input) input.value = "";
+          context.toast(t("agent.command_routed_via_parent"));
+        } catch (error) {
+          context.toast(errorText(error, "agent.send_failed"));
+        } finally {
+          state.agentCommandSending.delete(sessionId);
+          if (submit && submit.isConnected) {
+            submit.disabled = false;
+            submit.textContent = t("agent.send_via_parent");
+          }
+        }
+        return;
+      }
+      return resumeAgentTerminal(sessionId, true);
+    }
+    const savedTarget = state.agentCommandTargets.get(agentCommandTargetKey(session, routeContext.route)) || "";
+    const target = savedTarget
+      ? routeContext.targets.find((item) => item.id === savedTarget) || null
+      : routeContext.targets.length === 1 ? routeContext.targets[0] : null;
     if (!target)
       return context.toast(t(agentCommandTargets(session).length ? "agent.select_target_first" : "agent.no_writable_terminal"));
     if (!command) return context.toast(t("agent.enter_command"));
@@ -201,11 +313,15 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
       submit.textContent = t("agent.sending");
     }
     try {
-      await window.LoadToAgentTerminal.dispatchAgentCommand(session, command, target.id);
+      await window.LoadToAgentTerminal.dispatchAgentCommand(targetSession, routedCommand, target.id);
       state.agentCommandDrafts.delete(sessionId);
       if (input) input.value = "";
-      context.toast(t("agent.command_sent", { target: target.label }));
+      context.toast(t(routingEnabled && routeContext.route === "parent" ? "agent.command_routed_via_parent" : "agent.command_sent", { target: target.label }));
     } catch (error) {
+      if (session.parentId) {
+        context.toast(errorText(error, "agent.send_failed"));
+        return;
+      }
       const latest = snapshotSession(sessionId) || session;
       const support = agentResumeSupport(latest);
       if (!agentCommandTargets(latest).length && support.supported) {
@@ -224,7 +340,7 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
       state.agentCommandSending.delete(sessionId);
       if (submit && submit.isConnected) {
         submit.disabled = false;
-        submit.textContent = t("agent.send_now");
+        submit.textContent = t(routingEnabled && routeContext.route === "parent" ? "agent.send_via_parent" : "agent.send_now");
       }
     }
   }
@@ -232,12 +348,13 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
   async function openAgentTerminal(sessionId) {
     const session = snapshotSession(sessionId);
     if (!session || !window.LoadToAgentTerminal) return context.toast(t("agent.terminal_info_not_found"));
-    const target = chosenAgentCommandTarget(session);
+    const routeContext = routedAgentCommandContext(session);
+    const target = chosenAgentCommandTarget(session, routeContext.route);
     if (!target)
-      return context.toast(t(agentCommandTargets(session).length ? "agent.select_open_target" : "agent.no_writable_terminal"));
+      return context.toast(t(routeContext.targets.length ? "agent.select_open_target" : "agent.no_writable_terminal"));
     selectView(target.kind === "tmux" ? "tmux" : "terminal");
     try {
-      await window.LoadToAgentTerminal.openForAgent(session, target.id, state.agentCommandDrafts.get(sessionId) || "");
+      await window.LoadToAgentTerminal.openForAgent(routeContext.targetSession, target.id, state.agentCommandDrafts.get(sessionId) || "");
       document.querySelector(".main-stage")?.scrollTo({ top: 0, behavior: "auto" });
     } catch (error) {
       context.toast(errorText(error, "agent.open_terminal_failed"));
@@ -253,19 +370,6 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
       context.toast(t("agent.command_copied", { command }));
     } catch (error) {
       context.toast(errorText(error, "agent.bridge_copy_failed"));
-    }
-  }
-
-  async function openSessionOrigin(sessionId) {
-    const session = snapshotSession(sessionId);
-    const origin = originAppInfo(session);
-    if (!session || !origin) return context.toast(t("agent.origin_not_found"));
-    try {
-      const result = await window.loadtoagent.openSessionOrigin(session);
-      if (!result || !result.ok) return context.toast(t("agent.origin_cannot_open", { app: origin.label }));
-      context.toast(t("agent.origin_opened", { provider: origin.provider }));
-    } catch (error) {
-      context.toast(errorText(error, "agent.origin_open_failed", { app: origin.label }));
     }
   }
 
@@ -341,6 +445,9 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
     agentResumeSupport,
     originAppInfo,
     agentControlMode,
+    agentCommandRouteOptions,
+    selectedAgentCommandRoute,
+    routedAgentCommandContext,
     agentCommandComposer,
     selectedSession,
     snapshotSession,
@@ -349,7 +456,6 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
     dispatchAgentCommand,
     openAgentTerminal,
     copyBridgeCommand,
-    openSessionOrigin,
     controlManagedRun,
     quickRespond,
     prepareReassignment,

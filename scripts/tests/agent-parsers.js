@@ -45,6 +45,32 @@ function registerClaudeParserTests(context) {
     assert.equal(waiting.statusDetail, '답변 또는 선택 대기');
   });
 
+  test('세션 상세 조회는 카드 제한과 달리 Claude 전체 대화를 다시 읽는다', () => {
+    const home = path.join(temp, 'full-history-home');
+    const file = path.join(home, '.claude', 'projects', 'full-history-project', 'full-history-session.jsonl');
+    const rows = Array.from({ length: 240 }, (_, index) => ({
+      type: index % 2 ? 'assistant' : 'user',
+      uuid: `full-${index}`,
+      timestamp: new Date(Date.parse('2026-07-14T01:00:00Z') + index * 1000).toISOString(),
+      message: {
+        role: index % 2 ? 'assistant' : 'user',
+        content: index === 239 ? [{ type: 'text', text: `마지막 긴 답변 ${'가'.repeat(7000)}` }] : `전체 기록 ${index}`,
+      },
+    }));
+    jsonl(file, rows);
+    const monitor = new AgentMonitor({ home });
+    const snapshot = monitor.scanNow();
+    const card = snapshot.sessions.find(session => session.id === 'claude:full-history-session');
+    assert.equal(card.messages.length, 180);
+    assert.equal(card.omittedMessages, 60);
+
+    const detail = monitor.detailSession(card.id);
+    assert.equal(detail.messages.length, 240);
+    assert.equal(detail.omittedMessages, 0);
+    assert.equal(detail.truncated, false);
+    assert.equal(detail.messages.at(-1).text.length, '마지막 긴 답변 '.length + 7000);
+  });
+
   test('Claude 데스크톱 기록과 터미널 CLI 기록을 구분한다', () => {
     const desktopFile = path.join(temp, 'claude', 'desktop', '22222222-2222-2222-2222-222222222222.jsonl');
     const desktop = parseClaude(jsonl(desktopFile, [
@@ -62,11 +88,12 @@ function registerClaudeParserTests(context) {
     const scheduled = parseClaude(jsonl(path.join(temp, 'claude', 'desktop', 'scheduled.jsonl'), [
       { type: 'queue-operation', operation: 'enqueue', timestamp: '2026-07-14T01:10:00Z', sessionId: 'scheduled', content: '/scheduled-run --tick order-verify\n\nThis is an unattended scheduled wake-up.' },
       { type: 'queue-operation', operation: 'dequeue', timestamp: '2026-07-14T01:10:01Z', sessionId: 'scheduled' },
+      { type: 'attachment', entrypoint: 'sdk-cli', timestamp: '2026-07-14T01:10:01Z', sessionId: 'scheduled' },
       { type: 'last-prompt', timestamp: '2026-07-14T01:10:02Z', sessionId: 'scheduled', lastPrompt: '/scheduled-run --tick order-verify…' },
       { type: 'assistant', uuid: 'scheduled-a', timestamp: '2026-07-14T01:10:03Z', message: { role: 'assistant', content: [{ type: 'text', text: '예약 작업을 실행 중입니다.' }] } },
     ]));
     assert.equal(scheduled.title, '/scheduled-run --tick order-verify');
-    assert.equal(scheduled.clientKind, 'claude-desktop');
+    assert.equal(scheduled.clientKind, 'claude-cli');
   });
 
   test('Claude 서브에이전트를 부모 세션에 연결한다', () => {

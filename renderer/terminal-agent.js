@@ -24,6 +24,10 @@ window.LoadToAgentTerminalAgentActions = function createModule(context) {
     if (!agentSession || !agentSession.id) return [];
     const targets = [];
     const presence = Array.isArray(agentSession.runtimePresence) ? agentSession.runtimePresence : [];
+    const blockedTerminalIds = new Set(state.sessions
+      .filter(terminal => agentSession.parentId && (terminal.type === 'agent'
+        || /sub-agent is controlled by its parent|direct input is disabled/i.test(String(terminal.replay || ''))))
+      .map(terminal => terminal.id));
     const tmuxPresence = presence.filter(item => item.kind === 'tmux');
     for (const row of tmuxRows()) {
       const pane = row.pane || {};
@@ -44,9 +48,12 @@ window.LoadToAgentTerminalAgentActions = function createModule(context) {
     }
     for (const terminal of state.sessions) {
       if (terminal.status !== 'running') continue;
-      const matched = terminal.bridgeId === agentSession.id || presence.some(item => item.terminalId === terminal.id
-        || Number(item.pid || 0) === Number(terminal.pid || -1)
+      if (blockedTerminalIds.has(terminal.id)) continue;
+      const exactBridge = terminal.bridgeId === agentSession.id;
+      const exactPresence = presence.some(item => item.terminalId === terminal.id);
+      const processPresence = !agentSession.parentId && presence.some(item => Number(item.pid || 0) === Number(terminal.pid || -1)
         || Number(item.parentPid || 0) === Number(terminal.pid || -1));
+      const matched = exactBridge || exactPresence || processPresence;
       if (!matched) continue;
       targets.push({
         id: terminal.id,
@@ -54,6 +61,21 @@ window.LoadToAgentTerminalAgentActions = function createModule(context) {
         label: terminal.title,
         detail: `${String(terminal.type || '').toUpperCase()} · PID ${terminal.pid || '--'}`,
         terminalId: terminal.id,
+      });
+    }
+    // The control-room composer is available before the terminal workbench has
+    // necessarily loaded its own session list. Runtime presence already carries
+    // the stable terminal id, so keep direct participation available from home.
+    for (const item of presence.filter(entry => entry.kind === 'terminal' && entry.terminalId && !blockedTerminalIds.has(entry.terminalId)
+      && (!agentSession.parentId || state.sessions.some(terminal => terminal.id === entry.terminalId && terminal.type !== 'agent')))) {
+      if (targets.some(target => target.id === item.terminalId)) continue;
+      const runtime = String(item.runtime || item.shell || 'PowerShell');
+      targets.push({
+        id: item.terminalId,
+        kind: 'terminal',
+        label: String(item.label || runtime),
+        detail: `${runtime.toUpperCase()} · PID ${item.pid || '--'}`,
+        terminalId: item.terminalId,
       });
     }
     return [...new Map(targets.map(target => [target.id, target])).values()];
@@ -104,7 +126,7 @@ window.LoadToAgentTerminalAgentActions = function createModule(context) {
     return target;
   }
 
-  async function resumeForAgent(agentSession, draft = '', sendDraft = false) {
+  async function resumeForAgent(agentSession, draft = '', sendDraft = false, options = {}) {
     await init();
     const support = resumeSupport(agentSession);
     if (!support.supported) throw new Error(support.reason);
@@ -118,18 +140,16 @@ window.LoadToAgentTerminalAgentActions = function createModule(context) {
     const created = await window.loadtoagent.terminalCreate({
       type: 'agent',
       provider: support.provider,
-      args: resumeLaunchArgs(support, sendDraft ? prompt : ''),
+      args: resumeLaunchArgs(support, sendDraft ? prompt : '', { background: options.focus === false }),
       cwd,
       bridgeId: agentSession.id,
       title,
+      transient: options.focus === false,
       cols: 120,
       rows: 32,
     });
     if (!created || !created.id) throw new Error(t('terminal.agent.resume_terminal_failed'));
-    state.mode = 'general';
-    moveWorkbench('general');
     await refreshSessions();
-    await selectSession(created.id);
     const target = {
       id: created.id,
       kind: 'terminal',
@@ -137,6 +157,10 @@ window.LoadToAgentTerminalAgentActions = function createModule(context) {
       detail: `${String(created.type || 'agent').toUpperCase()} · PID ${created.pid || '--'}`,
       terminalId: created.id,
     };
+    if (options.focus === false) return { ...target, promptSent: Boolean(sendDraft && prompt), background: true };
+    state.mode = 'general';
+    moveWorkbench('general');
+    await selectSession(created.id);
     bindAgent(agentSession, target);
     queueHistoryRefresh(agentSession);
     renderTarget();

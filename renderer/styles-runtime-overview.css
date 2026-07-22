@@ -279,6 +279,26 @@ body[data-current-view="runtime"] .automation-overview { max-width: 1640px; marg
   .runtime-loop-footer dl { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
 }
 
+@media (max-width:480px) {
+  .runtime-loop-lane-head,
+  .runtime-loop-lane-head > div,
+  .runtime-loop-detail > header,
+  .runtime-loop-detail > header > div,
+  .runtime-current-signal,
+  .runtime-current-signal > div { min-width: 0; max-width: 100%; }
+  .runtime-loop-lane-head > div > small { white-space: normal; overflow-wrap: anywhere; }
+  .runtime-loop-tabs { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); width: 100%; overflow: visible; }
+  .runtime-loop-tab { grid-template-columns: 26px minmax(0,1fr) 5px; min-width: 0; padding-inline: 7px; }
+  .runtime-loop-tab-mark { width: 26px; height: 26px; }
+  .runtime-loop-detail > header { flex-direction: column; }
+  .runtime-loop-detail h3 { white-space: normal; overflow-wrap: anywhere; }
+  .runtime-loop-header-actions { width: 100%; align-items: stretch; }
+  .runtime-open-task,
+  .runtime-active-phase { min-width: 0; width: 100%; }
+  .runtime-current-signal b,
+  .runtime-current-signal p { max-width: 100%; }
+}
+
 @media (prefers-reduced-motion:reduce) {
   .runtime-loop-kicker i { animation: none; }
   .runtime-schedule-card { transition: none; }

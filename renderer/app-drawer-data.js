@@ -10,7 +10,11 @@ window.LoadToAgentAppFactories.createDrawerData = function createDrawerData(cont
 
   async function loadSessionDetail(id, force = false) {
     if (!force && state.details.has(id)) return state.details.get(id);
-    if (!force && detailRequests.has(id)) return detailRequests.get(id).promise;
+    // A live snapshot can advance again while the previous detail request is
+    // still running. Share that request instead of stacking more full-history
+    // reads for the same session.
+    if (detailRequests.has(id)) return detailRequests.get(id).promise;
+    const hadCachedDetail = state.details.has(id);
     const generation = ++detailRequestGeneration;
     state.detailErrors.delete(id);
     state.detailLoadingIds.add(id);
@@ -29,7 +33,7 @@ window.LoadToAgentAppFactories.createDrawerData = function createDrawerData(cont
           detailRequests.delete(id);
           state.detailLoadingIds.delete(id);
           if (state.selectedId === id) {
-            state.drawerForceLatest = state.drawerTab === "chat";
+            if (!hadCachedDetail) state.drawerForceLatest = state.drawerTab === "chat";
             context.renderDrawer();
           }
         }
@@ -44,7 +48,7 @@ window.LoadToAgentAppFactories.createDrawerData = function createDrawerData(cont
     try {
       const detail = await window.loadtoagent.sessionDetail(child.parentId);
       if (detail) state.details.set(child.parentId, detail);
-      if (state.drawerMode === "subagent" && state.selectedId === child.id) context.renderDrawer();
+      if ((state.drawerMode === "subagent" || state.drawerMode === "execution") && state.selectedId === child.id) context.renderDrawer();
     } catch (error) {
       reportRecoverableError("subagent-parent-detail", error);
     }

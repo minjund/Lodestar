@@ -51,24 +51,13 @@ window.LoadToAgentAppFactories.createGraphOrchestration = function createGraphOr
       scheduleAgentWorkflowConnections();
     } else {
       const runtime = runtimeAgentSummary(model, liveTmuxEntries(state.snapshot && state.snapshot.tmux));
-      $("#liveSessionGrid").innerHTML = `<details class="runtime-disclosure" data-disclosure-key="home:runtime-overview" open>
-        <summary>
-        <span>
-        <b>${esc(t("graph.ai_working_count", { count: runtime.activeCount }))}</b>
-        <small>${esc(t("graph.runtime_count_explanation", { standard: runtime.standardCount, tmux: runtime.tmuxCount, helpers: runtime.activeHelperCount }))}${runtime.runningExecutionCount ? ` · ${esc(t("graph.runtime_execution_count", { shell: runtime.shellExecutionCount, background: runtime.backgroundExecutionCount }))}` : ""}</small>
-        </span>
-        <em>${esc(t("graph.view_detailed_flow"))} <i aria-hidden="true">↓</i>
-        </em>
-        </summary>${runtimeSeparatedOverview(roots, model)}</details>`;
-      $("#graphBreadcrumbs").innerHTML =
-        `<span class="map-hint">
-          ${esc(t("graph.standard_ai"))} <b>${runtime.standardCount}</b> ·
-          ${esc(t("graph.tmux_ai"))} <b>${runtime.tmuxCount}</b> ·
-          ${esc(t("graph.active_helper_ai"))} <b>${runtime.activeHelperCount}</b> ·
-          ${esc(t("graph.helper_ai_history"))} <b>${runtime.helperRecordCount}</b> ·
-          ${esc(t("graph.running_shell"))} <b>${runtime.shellExecutionCount}</b> ·
-          ${esc(t("graph.running_background"))} <b>${runtime.backgroundExecutionCount}</b>
-        </span>`;
+      $("#liveSessionGrid").innerHTML = runtimeSeparatedOverview(roots, model);
+      $("#graphBreadcrumbs").innerHTML = `<span class="control-room-legend">
+        <span><i class="spawn"></i>${esc(t("control.legend_spawn"))}</span>
+        <span><i class="running"></i>${esc(t("control.legend_running"))}</span>
+        <span><i class="done"></i>${esc(t("control.legend_completed"))}</span>
+        <b>${esc(t("control.live_summary", { sessions: runtime.rootCount, helpers: runtime.activeHelperCount, executions: runtime.runningExecutionCount }))}</b>
+      </span>`;
       $("#graphResetBtn").classList.add("hidden");
       return runtime.activeCount;
     }
