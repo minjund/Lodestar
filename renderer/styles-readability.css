@@ -474,14 +474,7 @@ body :is(input, textarea)::placeholder {
 }
 
 .terminal-session-row {
-  grid-template-columns: minmax(0, 1fr) 44px;
-  gap: 7px;
-}
-
-.terminal-reorder-actions button {
-  min-width: 44px;
-  min-height: 44px;
-  font-size: 16px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .terminal-font-controls {
@@ -914,7 +907,6 @@ body :is(
   .terminal-workspace-actions,
   .terminal-key-actions,
   .terminal-tmux-tools,
-  .terminal-reorder-actions,
   .tmux-section-actions,
   .tmux-pane-actions,
   .run-modal-actions,

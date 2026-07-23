@@ -261,7 +261,9 @@ const MANAGEMENT_SEMANTIC_CONTRACTS = [
   'sessionOrder',
   'function stableSessionSort',
   'function moveSessionOrder',
-  'data-session-order-move',
+  'bindSortableSessionList',
+  'data-session-sortable',
+  'data-session-drop-edge',
   'saveDashboardPreferences();',
 ];
 
@@ -909,6 +911,8 @@ function registerUiContractTests(context) {
     assert.equal(app.includes('Number(health.score'), false, '검증되지 않은 건강 점수를 UI에 표시하면 안 됩니다.');
     assert.equal(app.includes('agent-focus-layout'), false);
     assert.equal(app.includes("state.view === 'subagents'"), false);
+    assert.equal(app.includes('data-session-order-move'), false, '세션 위치 변경용 화살표 버튼 계약이 남아 있습니다.');
+    assert.equal(app.includes('data-session-move='), false, '터미널 위치 변경용 화살표 버튼 계약이 남아 있습니다.');
     const styles = STYLE_FILES
       .map(file => fs.readFileSync(path.join(root, 'renderer', file), 'utf8'))
       .join('\n');

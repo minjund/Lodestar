@@ -421,35 +421,8 @@
 
 .terminal-session-row {
   display: grid;
-  grid-template-columns: minmax(0,1fr) 26px;
+  grid-template-columns: minmax(0,1fr);
   align-items: stretch;
-  gap: 4px;
-}
-
-.terminal-reorder-actions {
-  display: grid;
-  gap: 4px;
-}
-
-.terminal-reorder-actions button {
-  min-width: 26px;
-  padding: 0;
-  border: 1px solid #243946;
-  border-radius: 7px;
-  background: #101a24;
-  color: #7f91a3;
-  cursor: pointer;
-}
-
-.terminal-reorder-actions button:hover:not(:disabled),
-.terminal-reorder-actions button:focus-visible {
-  border-color: #397766;
-  color: #70e6bd;
-}
-
-.terminal-reorder-actions button:disabled {
-  opacity: .3;
-  cursor: default;
 }
 
 .terminal-session-item:hover {
@@ -1395,7 +1368,7 @@
   cursor: grab;
   position: relative;
   display: grid;
-  grid-template-columns: 38px minmax(0,1fr) 8px;
+  grid-template-columns: 12px 38px minmax(0,1fr) auto;
   gap: 10px;
   min-height: 72px;
   padding: 10px 9px;
@@ -1404,6 +1377,23 @@
   background: #0c141c;
   transform: none!important;
   transition: transform var(--motion-fast) var(--motion-ease),background-color var(--motion-fast) ease,border-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-medium) ease,opacity var(--motion-fast) ease;
+}
+
+.terminal-session-drag-handle {
+  width: 3px;
+  height: 3px;
+  justify-self: center;
+  border-radius: 50%;
+  background: #607281;
+  box-shadow: 0 -5px #607281,0 5px #607281;
+  transition: background-color var(--motion-fast) ease,box-shadow var(--motion-fast) ease;
+}
+
+.terminal-session-item:hover .terminal-session-drag-handle,
+.terminal-session-item:focus-visible .terminal-session-drag-handle,
+.terminal-session-item.dragging .terminal-session-drag-handle {
+  background: #68dcb6;
+  box-shadow: 0 -5px #68dcb6,0 5px #68dcb6;
 }
 
 .terminal-session-item.dragging {
@@ -1468,10 +1458,10 @@ body[data-current-view="terminal"] .topbar h1 {
 .terminal-resource-head>div span { margin-top: 5px; color: #93a6b2; font-size: 12px; }
 .terminal-resource-live { font-size: 12px; }
 .terminal-session-list { gap: 9px; padding: 12px; }
-.terminal-session-row { grid-template-columns: minmax(0,1fr) 28px; gap: 5px; }
+.terminal-session-row { grid-template-columns: minmax(0,1fr); }
 
 .terminal-session-item {
-  grid-template-columns: 42px minmax(0,1fr) auto;
+  grid-template-columns: 12px 42px minmax(0,1fr) auto;
   gap: 11px;
   min-height: 86px;
   padding: 11px 10px;

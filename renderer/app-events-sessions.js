@@ -12,19 +12,107 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
     moveSessionOrder = () => false,
   } = context;
 
-  const moveVisibleSession = (button, container, selector) => {
-    const nodes = Array.from(container.querySelectorAll(selector));
-    const current = nodes.findIndex(node => (node.dataset.controlSession || node.dataset.sessionId) === button.dataset.sessionOrderMove);
-    const offset = Number(button.dataset.sessionOrderOffset || 0);
-    const target = nodes[current + offset];
-    const targetId = target && (target.dataset.controlSession || target.dataset.sessionId);
-    if (current < 0 || !targetId || !moveSessionOrder(button.dataset.sessionOrderMove, targetId, offset > 0)) return;
+  let sessionDragJustEnded = false;
+
+  const sortableSessionId = node => String(node?.dataset.sessionSortable || "");
+  const clearSessionDropState = container => {
+    container.querySelectorAll("[data-session-sortable]").forEach(node => {
+      node.classList.remove("session-sort-dragging");
+      node.removeAttribute("data-session-drop-edge");
+      node.setAttribute("aria-grabbed", "false");
+    });
+  };
+  const sessionDropPlacement = (target, event) => {
+    const bounds = target.getBoundingClientRect();
+    const layout = window.getComputedStyle(target.parentElement || target);
+    const columns = String(layout.gridTemplateColumns || "none").trim().split(/\s+/).filter(value => value && value !== "none");
+    const horizontal = columns.length > 1;
+    const placeAfter = horizontal
+      ? event.clientX > bounds.left + bounds.width / 2
+      : event.clientY > bounds.top + bounds.height / 2;
+    return {
+      placeAfter,
+      edge: horizontal ? (placeAfter ? "right" : "left") : (placeAfter ? "bottom" : "top"),
+    };
+  };
+  const commitSessionPosition = (container, sourceId, targetId, placeAfter, focusSource = false) => {
+    if (!moveSessionOrder(sourceId, targetId, placeAfter)) return false;
     state.sort = "recent";
     if ($("#sortSelect")) $("#sortSelect").value = "recent";
     saveDashboardPreferences();
     renderSessions("reorder");
     announce(window.LoadToAgentI18n.t("session.position_changed"));
-    requestAnimationFrame(() => document.querySelector(`[data-session-order-move="${CSS.escape(button.dataset.sessionOrderMove)}"][data-session-order-offset="${offset}"]`)?.focus({ preventScroll: true }));
+    if (focusSource) requestAnimationFrame(() => container.querySelector(`[data-session-sortable="${CSS.escape(sourceId)}"]`)?.focus({ preventScroll: true }));
+    return true;
+  };
+  const bindSortableSessionList = (container, selector) => {
+    let draggedSessionId = "";
+    const finishDrag = () => {
+      clearSessionDropState(container);
+      draggedSessionId = "";
+      sessionDragJustEnded = true;
+      setTimeout(() => { sessionDragJustEnded = false; }, 0);
+    };
+    container.addEventListener("dragstart", (event) => {
+      const item = event.target.closest(selector);
+      if (!item) return;
+      if (event.target !== item && event.target.closest("button, a, input, select, textarea, summary, [contenteditable='true']")) {
+        event.preventDefault();
+        return;
+      }
+      draggedSessionId = sortableSessionId(item);
+      if (!draggedSessionId) {
+        event.preventDefault();
+        return;
+      }
+      item.classList.add("session-sort-dragging");
+      item.setAttribute("aria-grabbed", "true");
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", draggedSessionId);
+        event.dataTransfer.setData("application/x-loadtoagent-session-list", container.id);
+        const dragImage = item.querySelector(":scope > header, .card-head") || item;
+        event.dataTransfer.setDragImage(dragImage, 20, 20);
+      }
+    });
+    container.addEventListener("dragover", (event) => {
+      const target = event.target.closest(selector);
+      const sourceId = draggedSessionId || event.dataTransfer?.getData("text/plain");
+      const sourceList = event.dataTransfer?.getData("application/x-loadtoagent-session-list");
+      if (!target || !sourceId || (!draggedSessionId && sourceList !== container.id) || sortableSessionId(target) === sourceId) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      container.querySelectorAll("[data-session-drop-edge]").forEach(node => node.removeAttribute("data-session-drop-edge"));
+      target.dataset.sessionDropEdge = sessionDropPlacement(target, event).edge;
+    });
+    container.addEventListener("drop", (event) => {
+      const target = event.target.closest(selector);
+      const sourceId = draggedSessionId || event.dataTransfer?.getData("text/plain");
+      const sourceList = event.dataTransfer?.getData("application/x-loadtoagent-session-list");
+      if (!target || !sourceId || (!draggedSessionId && sourceList !== container.id) || sortableSessionId(target) === sourceId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const placement = sessionDropPlacement(target, event);
+      const changed = commitSessionPosition(container, sourceId, sortableSessionId(target), placement.placeAfter);
+      finishDrag();
+      if (!changed) clearSessionDropState(container);
+    });
+    container.addEventListener("dragend", finishDrag);
+    container.addEventListener("dragleave", (event) => {
+      if (!container.contains(event.relatedTarget)) clearSessionDropState(container);
+    });
+    container.addEventListener("keydown", (event) => {
+      const item = event.target.closest(selector);
+      if (!item || event.target !== item || !event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+      const nodes = Array.from(container.querySelectorAll(selector));
+      const current = nodes.indexOf(item);
+      const offset = event.key === "ArrowUp" ? -1 : 1;
+      const target = nodes[current + offset];
+      if (current < 0 || !target) return;
+      event.preventDefault();
+      event.stopPropagation();
+      commitSessionPosition(container, sortableSessionId(item), sortableSessionId(target), offset > 0, true);
+    });
   };
 
   const managementFilterLabel = value => value === "all" ? window.LoadToAgentI18n.t("management.filter_all") : window.LoadToAgentI18n.t(`management.health.${value}`);
@@ -172,6 +260,7 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
   }
 
   function bindSessionListEvents() {
+    bindSortableSessionList($("#sessionGrid"), "[data-session-id][data-session-sortable]");
     $("#automationOverview").addEventListener("click", (event) => {
       const loopSelect = event.target.closest("[data-loop-select]");
       if (loopSelect) {
@@ -228,12 +317,7 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
       cards[next].focus();
     });
     $("#sessionGrid").addEventListener("click", (event) => {
-      const order = event.target.closest("[data-session-order-move]");
-      if (order) {
-        event.stopPropagation();
-        moveVisibleSession(order, $("#sessionGrid"), "[data-session-id]");
-        return;
-      }
+      if (sessionDragJustEnded) return;
       const card = event.target.closest("[data-session-id]");
       if (card) openDrawer(card.dataset.sessionId);
     });
@@ -248,13 +332,9 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
   }
 
   function bindLiveAgentEvents() {
+    bindSortableSessionList($("#liveSessionGrid"), "[data-control-session][data-session-sortable]");
     $("#liveSessionGrid").addEventListener("click", async (event) => {
-      const order = event.target.closest("[data-session-order-move]");
-      if (order) {
-        event.stopPropagation();
-        moveVisibleSession(order, $("#liveSessionGrid"), "[data-control-session]");
-        return;
-      }
+      if (sessionDragJustEnded) return;
       const route = event.target.closest("[data-agent-command-route]");
       if (route) {
         event.stopPropagation();

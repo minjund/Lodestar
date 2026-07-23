@@ -467,8 +467,10 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     const completed = completedUnits.length
       ? completedUnits.map(unit => unit.kind === "child" ? controlRoomChildNode(unit.child) : controlRoomExecutionNode(unit.item)).join("")
       : `<div class="control-room-complete-empty"><span>✓</span><small>${esc(t("control.completed_empty"))}</small></div>`;
-    return `<article class="control-room-session" data-control-session="${esc(root.id)}" style="${providerStyle(root.provider)}">
-      <header><div><span class="control-session-live"><i></i>${esc(t("control.live_session"))}</span><b>${esc(title.text)}</b></div><span class="session-order-actions control-session-order" role="group" aria-label="${esc(t("session.change_position"))}"><button type="button" data-session-order-move="${esc(root.id)}" data-session-order-offset="-1" title="${esc(t("session.move_up"))}" aria-label="${esc(t("session.move_up"))}">↑</button><button type="button" data-session-order-move="${esc(root.id)}" data-session-order-offset="1" title="${esc(t("session.move_down"))}" aria-label="${esc(t("session.move_down"))}">↓</button></span><button type="button" data-graph-focus="${esc(root.id)}">${esc(t("control.open_full_flow"))} ↗</button></header>
+    return `<article class="control-room-session" data-control-session="${esc(root.id)}" data-session-sortable="${esc(root.id)}"
+      style="${providerStyle(root.provider)}" role="group" tabindex="0" draggable="true" aria-grabbed="false"
+      aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" aria-label="${esc(t("session.drag_label", { title: title.text }))}" aria-describedby="sessionReorderHelp">
+      <header><div><span class="control-session-live"><i></i>${esc(t("control.live_session"))}</span><b>${esc(title.text)}</b></div><span class="session-drag-handle" aria-hidden="true" title="${esc(t("session.reorder_hint"))}"></span><button type="button" data-graph-focus="${esc(root.id)}">${esc(t("control.open_full_flow"))} ↗</button></header>
       <div class="control-room-flow">
         <section class="control-room-column main-column"><span class="control-column-label">${esc(t("control.main_work_column"))}</span>${main}</section>
         <span class="control-flow-link live" aria-hidden="true"><i></i></span>

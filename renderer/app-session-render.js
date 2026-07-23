@@ -75,11 +75,13 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
     const originLabel = sessionWorkspaceLabel(session);
     return `<article class="session-card session-record ${opts.live ? "live-card" : ""} ${statusClass(session.status)} ${session.parentId ? "subagent" : ""}"
       data-session-id="${esc(session.id)}"
+      data-session-sortable="${esc(session.id)}"
       data-motion-key="session:${esc(session.id)}"
       data-motion-value="${esc(session.updatedAt || "")}:${esc(session.status || "")}"
       style="${providerStyle(session.provider)}"
-      role="button" tabindex="0"
-      aria-labelledby="${accessibleId}-title" aria-describedby="${accessibleId}-summary">
+      role="button" tabindex="0" draggable="true" aria-grabbed="false"
+      aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+      aria-labelledby="${accessibleId}-title" aria-describedby="${accessibleId}-summary sessionReorderHelp">
       <div class="card-head">
         <span class="provider-mark">${esc(provider.mark)}</span>
         <div class="card-head-main"><div class="card-provider-line"><b>${esc(provider.label)}</b><span>${esc(session.model || t("session.model_unknown"))}</span></div></div>
@@ -95,10 +97,7 @@ window.LoadToAgentAppFactories.createSessionRenderer = function createSessionRen
       </div>
       <footer class="card-footer">
         <span>${esc(timeAgo(session.updatedAt))}</span>
-        <span class="session-order-actions" role="group" aria-label="${esc(t("session.change_position"))}">
-          <button type="button" data-session-order-move="${esc(session.id)}" data-session-order-offset="-1" title="${esc(t("session.move_up"))}" aria-label="${esc(t("session.move_up"))}">↑</button>
-          <button type="button" data-session-order-move="${esc(session.id)}" data-session-order-offset="1" title="${esc(t("session.move_down"))}" aria-label="${esc(t("session.move_down"))}">↓</button>
-        </span>
+        <span class="session-drag-handle" aria-hidden="true" title="${esc(t("session.reorder_hint"))}"></span>
         <strong>${esc(t("graph.view_conversation"))}<i aria-hidden="true">→</i></strong>
       </footer>
     </article>`;

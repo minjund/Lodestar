@@ -178,14 +178,11 @@ window.LoadToAgentTerminalWorkbench = function createModule(context) {
           aria-grabbed="false"
           aria-describedby="terminalReorderHelp"
           title="${esc(session.cwd || window.LoadToAgentI18n.t('terminal.reorder_hint'))}">
+          <span class="terminal-session-drag-handle" aria-hidden="true"></span>
           <span class="terminal-session-icon">${esc(terminalTypeMark(session))}</span>
           <span><b>${esc(session.title)}</b><small>${esc(terminalTypeLabel(session))}${session.background ? ` · ${t('terminal.background_kept')}` : ''}${session.recoveredAfterHostRestart ? ` · ${t('terminal.recovered_after_host_restart')}` : ''}</small><em>${esc(session.cwd || session.distro || `PID ${session.pid || '--'}`)}</em><span class="sr-only">${index + 1}/${general.length}</span></span>
           <span class="terminal-session-status" data-status="${esc(presentation.tone)}"><i></i>${esc(presentation.label)}</span>
         </button>
-        <span class="terminal-reorder-actions" aria-label="${esc(window.LoadToAgentI18n.t('terminal.reorder_group', { title: session.title }))}">
-          <button type="button" data-session-move="-1" data-session-move-id="${esc(session.id)}" aria-label="${esc(window.LoadToAgentI18n.t('terminal.move_up', { title: session.title }))}" ${index === 0 ? 'disabled' : ''}>↑</button>
-          <button type="button" data-session-move="1" data-session-move-id="${esc(session.id)}" aria-label="${esc(window.LoadToAgentI18n.t('terminal.move_down', { title: session.title }))}" ${index === general.length - 1 ? 'disabled' : ''}>↓</button>
-        </span>
       </div>`;
     }).join('') : `<div class="terminal-resource-empty">${t('terminal.empty.general')}</div>`;
   }

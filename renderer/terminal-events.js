@@ -93,19 +93,6 @@ window.LoadToAgentTerminalEvents = function bindTerminalEvents(context) {
       });
     };
     sessionList.addEventListener('click', event => {
-      const move = event.target.closest('[data-session-move][data-session-move-id]');
-      if (move) {
-        const changed = moveSessionByOffset(move.dataset.sessionMoveId, Number(move.dataset.sessionMove));
-        if (!changed) return;
-        renderAll();
-        requestAnimationFrame(() => {
-          const next = sessionList.querySelector(`[data-session-move-id="${CSS.escape(move.dataset.sessionMoveId)}"][data-session-move="${CSS.escape(move.dataset.sessionMove)}"]`);
-          if (next && !next.disabled) next.focus();
-          else sessionList.querySelector(`[data-terminal-id="${CSS.escape(move.dataset.sessionMoveId)}"]`)?.focus();
-        });
-        notice(window.LoadToAgentI18n.t('terminal.reordered'), 'success');
-        return;
-      }
       if (state.sessionDragJustEnded) return;
       const item = event.target.closest('[data-terminal-id]');
       if (item) selectSession(item.dataset.terminalId);

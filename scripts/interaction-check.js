@@ -56,7 +56,7 @@ const ACTION_MANIFEST = [
   { selector: '#terminalCommandForm', action: 'terminal:failure-submit' },
   { selector: '#terminalCommandForm button[type="submit"]', action: 'terminal:failure-submit' },
   { selector: '[data-terminal-id]', action: 'terminal:select-session' },
-  { selector: '[data-session-move]', action: 'terminal:reorder-button' },
+  { selector: '#terminalSessionList [data-terminal-id][draggable="true"]', action: 'terminal:reorder-drag' },
   { selector: '[data-tmux-distro][data-tmux-pane]', action: 'tmux:select-resource' },
   ...['rename-session', 'new-window', 'split-horizontal', 'split-vertical', 'kill-pane', 'kill-window', 'kill-session'].map(name => ({ selector: `[data-tmux-manage="${name}"]`, action: `tmux:${name}` })),
   { selector: '#terminalTmuxLayout', action: 'tmux:layout' },
@@ -109,7 +109,7 @@ const ACTION_MANIFEST = [
   { selector: '[data-provider-card]', action: 'filter:provider-card' },
   { selector: '[data-workspace]', action: 'workspace:select' },
   { selector: '[data-remove-workspace]', action: 'workspace:remove' },
-  { selector: '[data-session-order-move]', action: 'session:reorder' },
+  { selector: '[data-session-sortable][draggable="true"]', action: 'session:reorder-drag' },
   { selector: '[data-session-id]', action: 'drawer:open-card' },
   { selector: '[data-loop-select]', action: 'runtime:select-loop' },
   { selector: '[data-loop-open]', action: 'runtime:open-loop' },
@@ -564,12 +564,66 @@ async function exerciseManagementControls(win, round) {
 
   const controlOrderBefore = await win.webContents.executeJavaScript(`Array.from(document.querySelectorAll('#liveSessionGrid [data-control-session]'), node => node.dataset.controlSession)`);
   assert(controlOrderBefore.length >= 2, '세션 위치 변경을 검증할 실행 중 세션이 부족합니다.');
-  const movedSessionId = controlOrderBefore[1];
-  await click(win, `[data-session-order-move="${movedSessionId}"][data-session-order-offset="-1"]`, 'session:reorder');
-  await waitFor(win, `document.querySelector('#liveSessionGrid [data-control-session]')?.dataset.controlSession === ${JSON.stringify(movedSessionId)}`, '위로 이동한 세션의 위치가 반영되지 않았습니다.');
-  await click(win, `[data-session-order-move="${movedSessionId}"][data-session-order-offset="1"]`, 'session:reorder');
-  await waitFor(win, `Array.from(document.querySelectorAll('#liveSessionGrid [data-control-session]'), node => node.dataset.controlSession).join(',') === ${JSON.stringify(controlOrderBefore.join(','))}`, '세션 위치를 원래 순서로 되돌리지 못했습니다.');
-  round.observed.fixedSessionOrder = { activityDoesNotReorder: true, manualMoveWorks: true };
+  const controlDrag = await win.webContents.executeJavaScript(`(() => {
+    const items = [...document.querySelectorAll('#liveSessionGrid [data-control-session][data-session-sortable]')];
+    const source = items[1];
+    const target = items[0];
+    if (!source || !target || !source.draggable) return { ok: false, reason: 'draggable live sessions missing' };
+    const transfer = new DataTransfer();
+    source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    const bounds = target.getBoundingClientRect();
+    target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, clientX: bounds.left + bounds.width / 2, clientY: bounds.top + 1, dataTransfer: transfer }));
+    target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, clientX: bounds.left + bounds.width / 2, clientY: bounds.top + 1, dataTransfer: transfer }));
+    const after = [...document.querySelectorAll('#liveSessionGrid [data-control-session]')].map(node => node.dataset.controlSession);
+    const saved = JSON.parse(localStorage.getItem('loadtoagent:dashboard-preferences:v2') || '{}').sessionOrder || [];
+    const rooms = document.querySelectorAll('#liveSessionGrid [data-control-session]').length;
+    const handles = document.querySelectorAll('#liveSessionGrid [data-control-session] .session-drag-handle').length;
+    const grid = document.querySelector('#liveSessionGrid');
+    return { ok: after[0] === source.dataset.controlSession && saved.indexOf(after[0]) < saved.indexOf(after[1]), after, rooms, handles, noHorizontalOverflow: grid.scrollWidth <= grid.clientWidth + 2, arrowButtons: document.querySelectorAll('[data-session-order-move]').length };
+  })()`);
+  assert(controlDrag.ok && controlDrag.rooms === controlDrag.handles && controlDrag.noHorizontalOverflow && controlDrag.arrowButtons === 0, `실행 중 세션 드래그 위치 변경 실패: ${JSON.stringify(controlDrag)}`);
+  mark('session:reorder-drag');
+  await win.webContents.executeJavaScript(`(() => {
+    const items = [...document.querySelectorAll('#liveSessionGrid [data-control-session][data-session-sortable]')];
+    const source = items[0];
+    const target = items[1];
+    const transfer = new DataTransfer();
+    source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    const bounds = target.getBoundingClientRect();
+    target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, clientX: bounds.left + bounds.width / 2, clientY: bounds.bottom - 1, dataTransfer: transfer }));
+    target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, clientX: bounds.left + bounds.width / 2, clientY: bounds.bottom - 1, dataTransfer: transfer }));
+  })()`);
+  await waitFor(win, `Array.from(document.querySelectorAll('#liveSessionGrid [data-control-session]'), node => node.dataset.controlSession).join(',') === ${JSON.stringify(controlOrderBefore.join(','))}`, '실행 중 세션 드래그로 원래 순서를 복원하지 못했습니다.');
+  const historyDrag = await win.webContents.executeJavaScript(`(() => {
+    const items = [...document.querySelectorAll('#sessionGrid [data-session-id][data-session-sortable]')];
+    const source = items[1];
+    const target = items[0];
+    if (!source || !target || !source.draggable) return { ok: false, reason: 'draggable history sessions missing' };
+    const before = items.map(node => node.dataset.sessionId);
+    const transfer = new DataTransfer();
+    source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    const bounds = target.getBoundingClientRect();
+    target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, clientX: bounds.left + 1, clientY: bounds.top + bounds.height / 2, dataTransfer: transfer }));
+    target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, clientX: bounds.left + 1, clientY: bounds.top + bounds.height / 2, dataTransfer: transfer }));
+    const after = [...document.querySelectorAll('#sessionGrid [data-session-id]')].map(node => node.dataset.sessionId);
+    const cards = document.querySelectorAll('#sessionGrid [data-session-id]').length;
+    const handles = document.querySelectorAll('#sessionGrid [data-session-id] .session-drag-handle').length;
+    const grid = document.querySelector('#sessionGrid');
+    return { ok: after[0] === before[1], before, after, cards, handles, noHorizontalOverflow: grid.scrollWidth <= grid.clientWidth + 2 };
+  })()`);
+  assert(historyDrag.ok && historyDrag.cards === historyDrag.handles && historyDrag.noHorizontalOverflow, `최근 세션 카드 드래그 위치 변경 실패: ${JSON.stringify(historyDrag)}`);
+  await win.webContents.executeJavaScript(`(() => {
+    const items = [...document.querySelectorAll('#sessionGrid [data-session-id][data-session-sortable]')];
+    const source = items[0];
+    const target = items[1];
+    const transfer = new DataTransfer();
+    source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    const bounds = target.getBoundingClientRect();
+    target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, clientX: bounds.right - 1, clientY: bounds.bottom - 1, dataTransfer: transfer }));
+    target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, clientX: bounds.right - 1, clientY: bounds.bottom - 1, dataTransfer: transfer }));
+  })()`);
+  await waitFor(win, `Array.from(document.querySelectorAll('#sessionGrid [data-session-id]'), node => node.dataset.sessionId).join(',') === ${JSON.stringify(historyDrag.before.join(','))}`, '최근 세션 카드 드래그로 원래 순서를 복원하지 못했습니다.');
+  round.observed.fixedSessionOrder = { activityDoesNotReorder: true, liveDrag: true, historyDrag: true, arrowsRemoved: true };
 
   await click(win, '[data-open-subagent-chat="fixture-child"]', 'control-room:open-subagent');
   await waitFor(win, `document.querySelector('#detailDrawer')?.classList.contains('open')
@@ -641,9 +695,15 @@ async function exerciseManagementControls(win, round) {
     && Boolean(document.querySelector('[data-management-session="fixture-failed"] [data-attention-draft]'))`, '확인함의 답변→내 판단→다음 지시 흐름과 빠른 제어가 준비되지 않았습니다.');
   await recordManifest(win);
 
-  await click(win, '[data-management-session="fixture-failed"] [data-attention-draft]', 'management:reply-template');
-  await waitFor(win, `document.querySelector('[data-management-session="fixture-failed"] [data-agent-command-draft]')?.value.includes('실패 원인을 확인해 수정하고')
-    && document.activeElement === document.querySelector('[data-management-session="fixture-failed"] [data-agent-command-draft]')`, '추천 답변·지시 틀이 해당 에이전트 입력칸에 준비되지 않았습니다.');
+  const replyTemplate = await win.webContents.executeJavaScript(`(() => {
+    const button = document.querySelector('[data-management-session="fixture-failed"] [data-attention-draft]');
+    button?.click();
+    const input = document.querySelector('[data-management-session="fixture-failed"] [data-agent-command-draft]');
+    return { value: input?.value || '', focused: document.activeElement === input };
+  })()`);
+  assert(replyTemplate.value.includes('실패 원인을 확인해 수정하고') && replyTemplate.focused, `추천 답변·지시 틀이 해당 에이전트 입력칸에 준비되지 않았습니다: ${JSON.stringify(replyTemplate)}`);
+  mark('management:reply-template');
+  await recordManifest(win);
 
   await clearCalls(win);
   await click(win, '[data-management-session="fixture-failed"] [data-managed-run-action="retry"]', 'management:run-control');
@@ -1547,6 +1607,8 @@ async function exerciseAgentControls(win, round) {
     && !document.querySelector('[data-agent-command-form="fixture-child"] button[type="submit"]')?.disabled
     && window.LoadToAgentTerminal.agentTargets(window.LoadToAgentApp.state.snapshot.sessions.find(session => session.id === 'fixture-child')).length === 0
     && Boolean(document.querySelector('[data-agent-command-form="fixture-child"]'))`, '부모 관리 서브에이전트의 인라인 메인 경유 경로가 표시되지 않았습니다.');
+  await click(win, '#detailDrawer [data-agent-command-route="parent"]', 'control-room:command-route');
+  await waitFor(win, `document.querySelector('#detailDrawer [data-agent-command-route="parent"]')?.getAttribute('aria-pressed') === 'true'`, '메인 에이전트 경유 전달 경로 선택을 유지하지 못했습니다.');
   await click(win, '#closeDrawerBtn', 'drawer:close');
   await waitFor(win, `document.querySelector('#drawerBackdrop').classList.contains('hidden')`, '서브에이전트 상세 drawer가 닫히지 않았습니다.');
 
@@ -1631,6 +1693,10 @@ async function exerciseAgentControls(win, round) {
 }
 
 async function exerciseTerminal(win, round) {
+  if (!await win.webContents.executeJavaScript(`document.querySelector('#drawerBackdrop')?.classList.contains('hidden')`)) {
+    await click(win, '#closeDrawerBtn', 'drawer:close');
+    await waitFor(win, `document.querySelector('#drawerBackdrop')?.classList.contains('hidden')`, '터미널 검증 전에 열린 상세 창을 닫지 못했습니다.');
+  }
   await click(win, '[data-view="terminal"]', 'nav:terminal');
   await waitFor(win, `Boolean(document.querySelector('[data-terminal-id="terminal-main"]'))`, '터미널 목록 로드 실패');
   await click(win, '.terminal-session-tools > summary', 'terminal:session-controls');
@@ -1647,15 +1713,23 @@ async function exerciseTerminal(win, round) {
   const terminalListSemantics = await win.webContents.executeJavaScript(`(() => ({
     role: document.querySelector('#terminalSessionList')?.getAttribute('role'),
     options: document.querySelectorAll('#terminalSessionList [role="option"]').length,
+    handles: document.querySelectorAll('#terminalSessionList .terminal-session-drag-handle').length,
     tabStops: document.querySelectorAll('#terminalSessionList [data-terminal-id][tabindex="0"]').length,
     selected: document.querySelectorAll('#terminalSessionList [data-terminal-id][aria-selected="true"]').length,
+    noHorizontalOverflow: document.querySelector('#terminalSessionList').scrollWidth <= document.querySelector('#terminalSessionList').clientWidth + 2,
   }))()`);
-  assert(terminalListSemantics.role === 'listbox' && terminalListSemantics.options > 1 && terminalListSemantics.tabStops === 1 && terminalListSemantics.selected <= 1, `터미널 세션 목록 ARIA 계약 실패: ${JSON.stringify(terminalListSemantics)}`);
+  assert(terminalListSemantics.role === 'listbox' && terminalListSemantics.options > 1 && terminalListSemantics.handles === terminalListSemantics.options && terminalListSemantics.tabStops === 1 && terminalListSemantics.selected <= 1 && terminalListSemantics.noHorizontalOverflow, `터미널 세션 목록 ARIA·드래그 레이아웃 계약 실패: ${JSON.stringify(terminalListSemantics)}`);
   assert(await win.webContents.executeJavaScript(`Boolean(document.querySelector('[data-terminal-id="terminal-ended"]') && document.querySelector('[data-terminal-id="terminal-failed"]'))`), '직접 닫지 않은 종료·실패 터미널이 세션 터미널 목록에서 사라졌습니다.');
   const initialOrder = await win.webContents.executeJavaScript(`[...document.querySelectorAll('#terminalSessionList [data-terminal-id]')].map(item => item.dataset.terminalId)`);
   if (round.index > 1) assert(initialOrder[0] === expectedTerminalFirstAfterReload, `저장된 터미널 순서가 재로드 후 복원되지 않았습니다: ${JSON.stringify(initialOrder)}`);
-  await win.webContents.executeJavaScript(`(() => { const first = document.querySelector('#terminalSessionList [data-terminal-id]'); first.focus(); first.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })); })()`);
-  await waitFor(win, `document.activeElement === document.querySelector('#terminalSessionList [data-terminal-id]:last-of-type') || document.activeElement?.dataset.terminalId === [...document.querySelectorAll('#terminalSessionList [data-terminal-id]')].at(-1)?.dataset.terminalId`, '터미널 세션 End 키 이동 실패');
+  const terminalEndKey = await win.webContents.executeJavaScript(`(() => {
+    const items = [...document.querySelectorAll('#terminalSessionList [data-terminal-id]')];
+    const first = items[0];
+    first.focus();
+    const accepted = first.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
+    return { accepted, active: document.activeElement?.dataset.terminalId || document.activeElement?.id || document.activeElement?.tagName, expected: items.at(-1)?.dataset.terminalId, tabStops: items.filter(item => item.tabIndex === 0).map(item => item.dataset.terminalId) };
+  })()`);
+  assert(terminalEndKey.active === terminalEndKey.expected && terminalEndKey.tabStops.length === 1 && terminalEndKey.tabStops[0] === terminalEndKey.expected, `터미널 세션 End 키 이동 실패: ${JSON.stringify(terminalEndKey)}`);
   mark('terminal:keyboard-roaming');
   const reordered = await win.webContents.executeJavaScript(`(() => {
     const items = [...document.querySelectorAll('#terminalSessionList [data-terminal-id]')];
@@ -1672,9 +1746,10 @@ async function exerciseTerminal(win, round) {
     return { ok: after[0] === before[1], before, after, stored: JSON.parse(localStorage.getItem('loadtoagent:terminal-session-order:v1') || '[]') };
   })()`);
   assert(reordered.ok && reordered.stored[0] === reordered.after[0], `터미널 세션 드래그 순서 변경 실패: ${JSON.stringify(reordered)}`);
-  mark('terminal:reorder');
-  await click(win, `[data-session-move-id="${reordered.after[0]}"][data-session-move="1"]`, 'terminal:reorder-button');
-  await waitFor(win, `JSON.stringify(${JSON.stringify(reordered.before)}) === JSON.stringify([...document.querySelectorAll('#terminalSessionList [data-terminal-id]')].map(item => item.dataset.terminalId))`, '터미널 위아래 버튼으로 세션 순서를 변경하지 못했습니다.');
+  mark('terminal:reorder-drag');
+  assert(await win.webContents.executeJavaScript(`document.querySelectorAll('[data-session-move], [data-session-order-move]').length === 0`), '위치 변경용 화살표 버튼이 남아 있습니다.');
+  await win.webContents.executeJavaScript(`document.querySelector('[data-terminal-id="${reordered.after[0]}"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true, cancelable: true }))`);
+  await waitFor(win, `JSON.stringify(${JSON.stringify(reordered.before)}) === JSON.stringify([...document.querySelectorAll('#terminalSessionList [data-terminal-id]')].map(item => item.dataset.terminalId))`, 'Alt+아래 키로 드래그 이전 터미널 순서를 복원하지 못했습니다.');
   await win.webContents.executeJavaScript(`(() => {
     const item = document.querySelector('#terminalSessionList [data-terminal-id]');
     item.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true, cancelable: true }));
@@ -1683,7 +1758,7 @@ async function exerciseTerminal(win, round) {
   await win.webContents.executeJavaScript(`document.querySelector('[data-terminal-id="${reordered.before[0]}"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true, cancelable: true }))`);
   await waitFor(win, `JSON.stringify(${JSON.stringify(reordered.before)}) === JSON.stringify([...document.querySelectorAll('#terminalSessionList [data-terminal-id]')].map(item => item.dataset.terminalId))`, 'Alt+위 키로 터미널 세션 순서를 복원하지 못했습니다.');
   expectedTerminalFirstAfterReload = reordered.before.find(id => id !== 'terminal-main') || '';
-  round.observed.terminalReorder = { drag: true, buttons: true, keyboard: true, persisted: round.index > 1 };
+  round.observed.terminalReorder = { drag: true, keyboard: true, arrowsRemoved: true, persisted: round.index > 1 };
   await clearCalls(win);
   await win.webContents.executeJavaScript(`(() => { const button = document.querySelector('#newPowerShellBtn'); button.click(); button.click(); })()`);
   mark('terminal:create-windows');
@@ -1868,6 +1943,10 @@ async function verifyOneCall(win, actionName, selector, apiName) {
 }
 
 async function exerciseTmux(win, round) {
+  if (!await win.webContents.executeJavaScript(`document.querySelector('#drawerBackdrop')?.classList.contains('hidden')`)) {
+    await click(win, '#closeDrawerBtn', 'drawer:close');
+    await waitFor(win, `document.querySelector('#drawerBackdrop')?.classList.contains('hidden')`, 'tmux 검증 전에 열린 상세 창을 닫지 못했습니다.');
+  }
   await click(win, '[data-view="tmux"]', 'nav:tmux');
   await waitFor(win, `window.LoadToAgentApp.state.view === 'tmux' && document.querySelector('[data-control-tmux="tmux-pane-id"]')`, 'tmux 화면 로드 실패', 120);
   const tmuxProjection = await win.webContents.executeJavaScript(`(() => ({
@@ -1894,8 +1973,14 @@ async function exerciseTmux(win, round) {
     tabStops: document.querySelectorAll('#tmuxMap [data-tmux-type][data-tmux-id][tabindex="0"]').length,
   }))()`);
   assert(tmuxMapSemantics.nodes >= 4 && tmuxMapSemantics.tabStops === 1, `tmux 자원 지도 roving tabindex 계약 실패: ${JSON.stringify(tmuxMapSemantics)}`);
-  await win.webContents.executeJavaScript(`(() => { const node = document.querySelector('#tmuxMap [data-tmux-type][data-tmux-id][tabindex="0"]'); node.focus(); node.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })); })()`);
-  await waitFor(win, `document.activeElement === [...document.querySelectorAll('#tmuxMap [data-tmux-type][data-tmux-id]')].at(-1) && document.activeElement.tabIndex === 0 && document.querySelectorAll('#tmuxMap [data-tmux-type][data-tmux-id][tabindex="0"]').length === 1`, 'tmux 자원 지도 End 키 이동 실패');
+  const tmuxEndKey = await win.webContents.executeJavaScript(`(() => {
+    const items = [...document.querySelectorAll('#tmuxMap [data-tmux-type][data-tmux-id]')];
+    const node = items.find(item => item.tabIndex === 0);
+    node.focus();
+    const accepted = node.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
+    return { accepted, active: document.activeElement?.dataset.tmuxId || document.activeElement?.id || document.activeElement?.tagName, expected: items.at(-1)?.dataset.tmuxId, tabStops: items.filter(item => item.tabIndex === 0).map(item => item.dataset.tmuxId) };
+  })()`);
+  assert(tmuxEndKey.active === tmuxEndKey.expected && tmuxEndKey.tabStops.length === 1 && tmuxEndKey.tabStops[0] === tmuxEndKey.expected, `tmux 자원 지도 End 키 이동 실패: ${JSON.stringify(tmuxEndKey)}`);
   mark('quality:tmux-map-keyboard');
   await click(win, '.tmux-distro-node', 'tmux:focus-node');
   await waitFor(win, `document.querySelector('#tmuxBreadcrumbs [aria-current="location"]') && document.querySelectorAll('#tmuxBreadcrumbs [tabindex="0"]').length === 1 && document.activeElement?.classList.contains('tmux-distro-node')`, 'tmux 이동 경로 현재 위치와 단일 탭 정지가 표시되지 않았습니다.');
@@ -2100,7 +2185,7 @@ app.whenReady().then(async () => {
       ...ACTION_MANIFEST.filter(item => item.required !== false).map(item => item.action),
       'nav:scroll-reset', 'guide:wheel-closed', 'run:required-validation', 'run:failure-preserve', 'run:backdrop',
       'drawer:tabs-keyboard', 'drawer:backdrop', 'terminal:ime-enter', 'terminal:duplicate-enter', 'terminal:history-expand',
-      'drawer:close-scroll', 'drawer:background-inert', 'terminal:reorder', 'tmux:wheel-scroll-preserve', 'tmux:kill-window-wheel-closed',
+      'drawer:close-scroll', 'drawer:background-inert', 'terminal:reorder-drag', 'tmux:wheel-scroll-preserve', 'tmux:kill-window-wheel-closed',
       'nav:keyboard-roaming', 'nav:keyboard-shortcut', 'filter:search-shortcut', 'run:background-inert', 'run:background-restore', 'tmux:background-inert',
       'run:provider-keyboard', 'run:workspace-keyboard', 'terminal:create-single-flight',
       'mobile:keyboard-roaming', 'mobile:outside-dismiss', 'mobile:shortcut-guard', 'filter:keyboard-roaming', 'run:submit-close-guard', 'terminal:keyboard-roaming',
