@@ -82,6 +82,19 @@ const REQUIRED_UI_IDS = [
   'providerOverview',
   'automationOverview',
   'liveSection',
+  'controlRoomProjectToolbar',
+  'workspaceList',
+  'addWorkspaceBtn',
+  'controlRoomListToolbar',
+  'controlRoomSortSelect',
+  'controlRoomProjectSelect',
+  'controlRoomSearch',
+  'controlRoomSearchInput',
+  'controlRoomSearchBtn',
+  'controlRoomPageSummary',
+  'controlRoomPagePrev',
+  'controlRoomPageNext',
+  'agentMapToolbar',
   'liveSessionGrid',
   'activeEmptyState',
   'graphBreadcrumbs',
@@ -373,6 +386,8 @@ const AGENT_GRAPH_CONTRACTS = [
   'function controlRoomExecutionNode',
   'function controlRoomSummary',
   'function controlRoomAgentGoal',
+  'function controlRoomProject',
+  'function runtimeSeparatedOverview',
   'function inferredExecutionSummary',
   'function executionActivityDetailHtml',
   'function openExecutionActivity',
@@ -380,7 +395,14 @@ const AGENT_GRAPH_CONTRACTS = [
   'data-open-execution-id',
   'data-conversation-scope="execution-only"',
   'data-control-room-overview',
+  'data-control-project',
+  'control-room-project-group',
   'data-control-session',
+  'data-session-archive',
+  'function isControlRoomSession',
+  'control.waiting_background_session',
+  'is-unverified',
+  'function archiveSession',
   'function isRuntimeLoopSession',
   'function subagentTextPreview',
   'function subagentConversationHtml',
@@ -391,11 +413,25 @@ const AGENT_GRAPH_CONTRACTS = [
 const COLLABORATION_VIEW_CONTRACTS = [
   'data-collaboration-metric',
   'data-collaboration-communications',
+  'function subagentCallEvents',
+  'function subagentCallHtml',
+  'data-subagent-call-event',
+  'data-subagent-call-sequence',
+  'data-subagent-call-elapsed-ms',
+  'function subagentCallElapsed',
+  'function turnWithSubagentCallsHtml',
+  'subagent-call-anchor',
   'data-open-subagent-chat',
+  'openSubagentConversation(subagent.dataset.openSubagentChat)',
   'data-subagent-completed-toggle',
   'data-resume-agent',
   'data-subagent-message-preview',
   'data-truncated',
+  'assignmentProtected',
+  'assignmentContext',
+  'drawer.assignment_protected',
+  'drawer.assignment_source_claude',
+  'drawer.assignment_source_codex',
   'graph.created_in_task',
   'graph.simultaneous_capacity',
   'graph.currently_running',
@@ -527,6 +563,12 @@ const I18N_MESSAGE_CONTRACTS = [
   '应用设置',
   'common.progress',
   'time.seconds_ago',
+  'control.all_projects',
+  'control.add_project',
+  'control.page_summary',
+  'control.project_filter',
+  'control.search_sessions',
+  'control.sort_sessions',
 ];
 
 const LEGACY_I18N_INFERENCE_CONTRACTS = [
@@ -892,6 +934,13 @@ function registerUiContractTests(context) {
     }
     assert.equal(html.includes('data-view="subagents"'), false);
     assert.equal(html.includes('id="navSubagentCount"'), false);
+    const sidebarBlock = html.slice(html.indexOf('<aside class="sidebar"'), html.indexOf('<main id="mainContent"'));
+    const liveBlock = html.slice(html.indexOf('id="liveSection"'), html.indexOf('id="globalStats"'));
+    assert.equal(sidebarBlock.includes('id="workspaceList"'), false, '데스크톱 사이드바에 프로젝트 목록이 다시 들어가면 안 됩니다.');
+    assert.equal(sidebarBlock.includes('id="addWorkspaceBtn"'), false, '프로젝트 추가 버튼은 사이드바가 아니라 실행 세션 영역에 있어야 합니다.');
+    assert.ok(liveBlock.includes('id="workspaceList"') && liveBlock.includes('id="addWorkspaceBtn"'), '프로젝트 목록과 추가 버튼이 실행 세션 영역에 없습니다.');
+    assert.ok(liveBlock.indexOf('id="workspaceList"') < liveBlock.indexOf('id="addWorkspaceBtn"'), '프로젝트 추가 버튼은 프로젝트 목록 오른쪽 순서에 있어야 합니다.');
+    assert.ok(liveBlock.indexOf('id="controlRoomPageSummary"') < liveBlock.indexOf('id="liveSessionGrid"'), '페이징은 프로젝트 그룹 아래가 아니라 목록 상단에 있어야 합니다.');
     const rendererSource = files => files
       .map(file => fs.readFileSync(path.join(root, 'renderer', file), 'utf8'))
       .join('\n');
@@ -1094,6 +1143,63 @@ function registerUiContractTests(context) {
       Array.from(rows, ({ session, depth }) => [session.id, depth]),
       [['child-a', 1], ['child-b', 2]],
     );
+  });
+
+  test('종료된 세션은 마지막 AI 응답 후 30분 동안 대기 상태로 유지되고 수동 기록 이동을 따른다', () => {
+    const source = fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8');
+    const values = new Map();
+    const sandbox = {
+      localStorage: {
+        getItem: key => values.get(key) || null,
+        setItem: (key, value) => values.set(key, value),
+      },
+      document: { documentElement: { dataset: {} } },
+      window: {
+        LoadToAgentAppFactories: {},
+        LoadToAgentRendererUtils: {
+          $: () => null, $$: () => [], esc: value => String(value), uiLocale: () => 'ko',
+          providerLabel: value => value, reportRecoverableError: () => {},
+        },
+        matchMedia: () => ({ matches: false, addEventListener: () => {} }),
+        LoadToAgentI18n: { t: key => key, observedText: value => value },
+      },
+    };
+    vm.runInNewContext(source, sandbox, { filename: 'app.js' });
+    const core = sandbox.window.LoadToAgentAppFactories.createCore({});
+    const now = Date.parse('2026-07-23T01:00:00.000Z');
+    const responseAt = new Date(now - 5 * 60 * 1000).toISOString();
+    const ended = { id: 'ended', status: 'completed', messages: [{ role: 'assistant', timestamp: responseAt }] };
+    assert.equal(core.isControlRoomSession(ended, now), false);
+    const waitingWithBackground = {
+      ...ended,
+      id: 'waiting-background',
+      status: 'waiting',
+      executions: [{ id: 'background-1', status: 'running', mode: 'background' }],
+    };
+    assert.equal(core.isControlRoomSession(waitingWithBackground, now), true);
+    assert.equal(core.controlRoomStatus(waitingWithBackground, now), 'waiting');
+    assert.equal(core.isControlRoomSession({ ...ended, status: 'running' }, now), true);
+    assert.equal(core.isControlRoomSession(ended, now), true);
+    assert.equal(core.controlRoomStatus(ended, now), 'waiting');
+    assert.equal(core.sessionRetentionMinutes(ended, now), 25);
+    assert.equal(core.archiveSession(ended), true);
+    assert.equal(core.isControlRoomSession(ended, now), false);
+    const resumed = {
+      ...ended,
+      messages: [...ended.messages, { role: 'assistant', timestamp: new Date(now - 60 * 1000).toISOString() }],
+    };
+    assert.equal(core.isControlRoomSession(resumed, now), true);
+    const expired = { ...ended, id: 'expired', messages: [{ role: 'assistant', timestamp: new Date(now - 31 * 60 * 1000).toISOString() }] };
+    assert.equal(core.isControlRoomSession({ ...expired, status: 'running' }, now), true);
+    assert.equal(core.isControlRoomSession(expired, now), false);
+    const child = { ...ended, id: 'child', parentId: 'root' };
+    const rootSession = { ...ended, id: 'root', childIds: ['child'] };
+    core.state.snapshot = { sessions: [rootSession, child] };
+    assert.equal(core.isControlRoomSession({ ...rootSession, status: 'running' }, now), true);
+    assert.equal(core.isControlRoomSession({ ...child, status: 'running' }, now), true);
+    assert.equal(core.archiveSession('root'), true);
+    assert.equal(core.isControlRoomSession(child, now), false);
+    assert.ok(values.get(core.SESSION_ARCHIVE_STORAGE_KEY));
   });
 
   test('AI 표시 설정은 기본값·저장값·세션과 tmux 투영을 일관되게 적용한다', () => {

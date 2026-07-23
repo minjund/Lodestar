@@ -18,6 +18,7 @@ function createCodexCollaboration(session, dependencies) {
         assignmentObserved: false,
         assignmentProtected: false,
         assignmentSource: 'unavailable',
+        assignmentContext: '',
         sharedGoal: '',
         status: 'requested',
         startedAt: null,

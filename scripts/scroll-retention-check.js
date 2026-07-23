@@ -96,18 +96,18 @@ async function checkMainViews(win) {
 
 async function checkDisclosureStates(win) {
   await win.webContents.executeJavaScript(`window.LoadToAgentApp.selectView('all')`);
-  await waitFor(win, `Boolean(document.querySelector('details[data-disclosure-key="home:runtime-overview"]'))`, '홈 실행 현황 펼침 영역이 없습니다.');
+  await waitFor(win, `Boolean(document.querySelector('details.control-room-project-group[data-disclosure-key^="control-project:"]'))`, '홈 프로젝트 실행 그룹이 없습니다.');
   const runtime = [];
   for (const expected of [false, true]) {
     const result = await win.webContents.executeJavaScript(`(async () => {
-      const details = document.querySelector('details[data-disclosure-key="home:runtime-overview"]');
+      const details = document.querySelector('details.control-room-project-group[data-disclosure-key^="control-project:"]');
       details.open = ${expected};
       details.querySelector('summary').dispatchEvent(new WheelEvent('wheel', { deltaY: 160, bubbles: true, cancelable: true }));
       window.interactionTest.emitSnapshot();
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      return document.querySelector('details[data-disclosure-key="home:runtime-overview"]')?.open;
+      return document.querySelector('details.control-room-project-group[data-disclosure-key^="control-project:"]')?.open;
     })()`);
-    if (result !== expected) throw new Error(`홈 실행 현황의 ${expected ? '열림' : '닫힘'} 상태가 자동 갱신으로 뒤집혔습니다.`);
+    if (result !== expected) throw new Error(`홈 프로젝트 실행 그룹의 ${expected ? '열림' : '닫힘'} 상태가 자동 갱신으로 뒤집혔습니다.`);
     runtime.push(result);
   }
 
@@ -170,6 +170,7 @@ async function checkDrawer(win) {
     }
     results.toolActivityVisible = Boolean(document.querySelector('.chat-activities:not(.subagent-coordination)'))
       || document.querySelector('#drawerContent').innerText.includes('휠 상태 검사');
+    results.settledTop = document.querySelector('#drawerContent').scrollTop;
     return results;
   })()`);
   if (!disclosures['roadmap:true'] || disclosures['roadmap:false'] || disclosures.toolActivityVisible) {
@@ -179,7 +180,7 @@ async function checkDrawer(win) {
   await win.webContents.executeJavaScript(`window.interactionTest.emitSnapshot()`);
   await wait(180);
   const after = await win.webContents.executeJavaScript(`(() => { const content = document.querySelector('#drawerContent'); return { top: content.scrollTop, maximum: content.scrollHeight - content.clientHeight }; })()`);
-  if (Math.abs(after.top - before.top) > 2) throw new Error(`상세 대화가 사용자 휠 위치를 버렸습니다: ${JSON.stringify({ before, after })}`);
+  if (Math.abs(after.top - disclosures.settledTop) > 2) throw new Error(`상세 대화가 사용자 휠 위치를 버렸습니다: ${JSON.stringify({ before, settledTop: disclosures.settledTop, after })}`);
   return { before, after, disclosures };
 }
 

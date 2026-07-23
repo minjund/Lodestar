@@ -84,9 +84,149 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
       </details>`;
   }
 
+  function subagentCallEvents(session) {
+    const spawns = session?.collaboration?.spawns || [];
+    const children = (session?.childIds || [])
+      .map(id => state.details.get(id) || snapshotSession(id))
+      .filter(Boolean);
+    const recordedChildren = new Set(spawns.map(spawn => spawn.childId).filter(Boolean));
+    const records = spawns.concat(children
+      .filter(child => !recordedChildren.has(child.id)
+        && !spawns.some(spawn => (spawn.agentPath && child.agentPath === spawn.agentPath)
+          || (spawn.taskName && child.taskName === spawn.taskName)))
+      .map(child => ({
+        callId: `inferred:${child.id}`,
+        childId: child.id,
+        agentPath: child.agentPath,
+        taskName: child.taskName || child.delegation?.taskName || child.agentName,
+        assignment: child.delegation?.assignmentObserved ? child.delegation.assignment : "",
+        assignmentProtected: Boolean(child.delegation?.assignmentProtected),
+        assignmentSource: child.delegation?.assignmentSource || "unavailable",
+        status: child.status,
+        startedAt: child.delegation?.startedAt || child.startedAt,
+      })));
+    const calls = records.map((spawn, index) => {
+      const child = (spawn.childId && (state.details.get(spawn.childId) || snapshotSession(spawn.childId)))
+        || children.find(candidate => (spawn.agentPath && candidate.agentPath === spawn.agentPath)
+          || (spawn.taskName && candidate.taskName === spawn.taskName));
+      const timestamp = spawn.startedAt || child?.startedAt || session.startedAt || session.updatedAt;
+      const assignmentProtected = Boolean(spawn.assignmentProtected || child?.delegation?.assignmentProtected);
+      const observedAssignment = spawn.assignmentObserved
+        ? spawn.assignment
+        : (child?.delegation?.assignmentObserved ? child.delegation.assignment : "");
+      const childTitle = String(child?.title || "").trim();
+      return {
+        id: spawn.callId || child?.id || `subagent-call-${index}`,
+        childId: child?.id || spawn.childId || "",
+        taskName: spawn.taskName || child?.taskName || child?.agentName || t("control.subagent"),
+        assignment: observedAssignment,
+        workSummary: observedAssignment || (!assignmentProtected && childTitle && childTitle !== session.title ? childTitle : ""),
+        assignmentProtected,
+        assignmentSource: spawn.assignmentSource || child?.delegation?.assignmentSource || "unavailable",
+        status: child?.status || spawn.status || "idle",
+        timestamp,
+      };
+    }).sort((left, right) => Date.parse(left.timestamp || 0) - Date.parse(right.timestamp || 0));
+    const messages = session.messages || [];
+    return calls.map((call, index) => {
+      const calledAt = Date.parse(call.timestamp || 0);
+      const latestUserAt = messages.reduce((latest, message) => {
+        const messageAt = Date.parse(message?.timestamp || 0);
+        return message?.role === "user" && messageAt <= calledAt ? Math.max(latest, messageAt) : latest;
+      }, Number.NEGATIVE_INFINITY);
+      const anchor = [...messages].reverse().find(message => {
+        const messageAt = Date.parse(message?.timestamp || 0);
+        return message?.role === "assistant" && String(message.text || "").trim()
+          && messageAt <= calledAt && messageAt >= latestUserAt;
+      });
+      const anchorText = String(anchor?.text || "").replace(/\s+/g, " ").trim();
+      return {
+        ...call,
+        sequence: index + 1,
+        anchorText: anchorText.length > 240 ? `${anchorText.slice(0, 240).trimEnd()}…` : anchorText,
+        anchorTimestamp: anchor?.timestamp || "",
+        requestTimestamp: Number.isFinite(latestUserAt) ? new Date(latestUserAt).toISOString() : "",
+        elapsedAfterRequestMs: Number.isFinite(latestUserAt) && Number.isFinite(calledAt)
+          ? Math.max(0, calledAt - latestUserAt)
+          : null,
+      };
+    });
+  }
+
+  function subagentCallElapsed(milliseconds) {
+    if (!Number.isFinite(milliseconds)) return "";
+    const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+    if (totalSeconds < 1) return t("drawer.duration_less_than_second");
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours) return t("drawer.duration_hours_minutes_seconds", { hours, minutes, seconds });
+    if (minutes) return t("drawer.duration_minutes_seconds", { minutes, seconds });
+    return t("drawer.duration_seconds", { seconds });
+  }
+
+  function subagentCallStatus(status) {
+    if (status === "completed") return t("ui.completed");
+    if (status === "running" || status === "starting") return t("ui.working");
+    if (status === "waiting") return t("ui.waiting_for_review");
+    if (status === "failed") return t("ui.problem");
+    if (status === "cancelled") return t("ui.stopped");
+    return t("ui.idle");
+  }
+
+  function subagentCallHtml(call, options = {}) {
+    const fullTime = new Date(call.timestamp).toLocaleString(uiLocale());
+    const assignment = call.workSummary || call.assignment || (call.assignmentProtected ? t("drawer.assignment_protected_short") : call.taskName);
+    const elapsed = subagentCallElapsed(call.elapsedAfterRequestMs);
+    const timing = elapsed
+      ? t("drawer.called_after_user_request", { elapsed })
+      : t("drawer.subagent_called");
+    const anchorTime = call.anchorTimestamp ? timeOnly(call.anchorTimestamp) : "";
+    const anchor = call.anchorText
+      ? `<div class="subagent-call-anchor"><span aria-hidden="true">AI</span><div><small>${esc(t("drawer.called_after_main_message"))}${anchorTime ? ` · ${esc(anchorTime)}` : ""}</small><blockquote>${esc(call.anchorText)}</blockquote></div></div>`
+      : `<div class="subagent-call-anchor is-context-only"><span aria-hidden="true">AI</span><div><small>${esc(t("drawer.main_called_here"))}</small></div></div>`;
+    const showAnchor = options.showAnchor !== false || !call.anchorText;
+    const content = `<span class="subagent-call-icon" aria-hidden="true">⑂</span>
+      <span class="subagent-call-copy"><small class="subagent-call-timing">${esc(timing)}</small><span class="subagent-call-clock">${esc(t("drawer.subagent_call_point", { count: call.sequence }))} · <time title="${esc(fullTime)}">${esc(timeOnly(call.timestamp))}</time></span>
+      <b>${esc(assignment)}</b><span>${esc(t("drawer.subagent_name", { name: call.taskName }))}</span></span>
+      <span class="subagent-call-action"><em class="status-${esc(call.status)}">${esc(subagentCallStatus(call.status))}</em><strong>${esc(t("drawer.open_subagent_work"))} →</strong></span>`;
+    const event = !call.childId
+      ? `<div class="subagent-call-event is-unavailable" data-subagent-call-event="${esc(call.id)}">${content}</div>`
+      : `<button type="button" class="subagent-call-event" data-subagent-call-event="${esc(call.id)}"
+        data-open-subagent-chat="${esc(call.childId)}" aria-label="${esc(t("control.open_subagent", { task: call.taskName }))}">${content}</button>`;
+    return `<div class="subagent-call-moment${showAnchor ? "" : " is-inline"}" data-subagent-call-sequence="${call.sequence}"${Number.isFinite(call.elapsedAfterRequestMs) ? ` data-subagent-call-elapsed-ms="${call.elapsedAfterRequestMs}"` : ""}>${showAnchor ? anchor : ""}<span class="subagent-call-connector" aria-hidden="true"><i></i><b>↓</b></span>${event}</div>`;
+  }
+
+  function turnWithSubagentCallsHtml(turn, session, calls, labels) {
+    const representativeId = turn.representative?.id || "";
+    const items = [
+      ...turn.assistants.map((message, index) => ({ kind: "message", message, index, timestamp: message.timestamp })),
+      ...calls.map((call, index) => ({ kind: "call", call, index, timestamp: call.timestamp })),
+    ].sort((left, right) => {
+      const leftAt = Date.parse(left.timestamp || 0);
+      const rightAt = Date.parse(right.timestamp || 0);
+      if (leftAt !== rightAt) return leftAt - rightAt;
+      if (left.kind !== right.kind) return left.kind === "message" ? -1 : 1;
+      return left.index - right.index;
+    });
+    return items.map(item => {
+      if (item.kind === "call") return subagentCallHtml(item.call, { showAnchor: false });
+      const finalMessage = item.message.id === representativeId;
+      return conversationRowHtml(item.message, session, {
+        userLabel: labels.userLabel,
+        assistantLabel: labels.assistantLabel,
+        answerKind: finalMessage
+          ? t(turn.live ? "drawer.current_progress" : turn.awaitingFinal ? "drawer.last_progress" : "drawer.final_answer")
+          : t("drawer.main_progress_before_call"),
+        live: turn.live && finalMessage,
+      });
+    }).join("");
+  }
+
   function chatHtml(session, options = {}) {
     const messages = session.messages || [];
-    if (!messages.length) return `<div class="empty-state"><h3>${esc(t("drawer.no_conversation"))}</h3></div>`;
+    const calls = options.showSubagentCalls === false ? [] : subagentCallEvents(session);
+    if (!messages.length && !calls.length) return `<div class="empty-state"><h3>${esc(t("drawer.no_conversation"))}</h3></div>`;
     const userLabel = options.userLabel || t("drawer.user");
     const assistantLabel = options.assistantLabel || providerInfo(session.provider).label;
     const conversationLabel = options.conversationLabel || t("drawer.conversation");
@@ -97,7 +237,7 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
       omitted || session.truncated
         ? `<div class="chat-truncated">${esc(t("drawer.recent_history"))}${omitted ? ` · ${esc(t("drawer.messages_omitted", { count: omitted.toLocaleString(uiLocale()) }))}` : ""}</div>`
         : "";
-    const rows = turns.map((turn) => {
+    const rows = turns.map((turn, turnIndex) => {
       const user = conversationRowHtml(turn.user, session, { userLabel, assistantLabel });
       const representative = conversationRowHtml(turn.representative, session, {
         userLabel,
@@ -108,16 +248,35 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
       const waiting = turn.live && !turn.representative
         ? `<div class="chat-turn-waiting"><span aria-hidden="true"></span><b>${esc(t("drawer.preparing_response"))}</b></div>`
         : "";
+      const turnStartedAt = Date.parse(turn.user?.timestamp || turn.representative?.timestamp || 0);
+      const nextTurnTimestamp = turns[turnIndex + 1]?.user?.timestamp;
+      const nextTurnStartedAt = nextTurnTimestamp ? Date.parse(nextTurnTimestamp) : Number.NaN;
+      const turnCalls = calls.filter(call => {
+        const calledAt = Date.parse(call.timestamp || 0);
+        if (Number.isFinite(turnStartedAt) && calledAt < turnStartedAt) return false;
+        return !Number.isFinite(nextTurnStartedAt) || calledAt < nextTurnStartedAt;
+      });
+      const timeline = turnCalls.length
+        ? turnWithSubagentCallsHtml(turn, session, turnCalls, { userLabel, assistantLabel })
+        : `${representative}${waiting}${progressUpdatesHtml(turn, session)}`;
       return `<section class="chat-turn${turn.live ? " is-live" : ""}" data-conversation-turn="${esc(turn.id)}">
-        ${user}${representative}${waiting}${progressUpdatesHtml(turn, session)}
+        ${user}${timeline}${turnCalls.length ? waiting : ""}
       </section>`;
     }).join("");
-    const emptyConversation = turns.length ? "" : `<div class="empty-state compact"><h3>${esc(t("drawer.no_user_ai_conversation"))}</h3></div>`;
+    const unmatchedCalls = calls.filter(call => !turns.some((turn, turnIndex) => {
+      const startedAt = Date.parse(turn.user?.timestamp || turn.representative?.timestamp || 0);
+      const nextTimestamp = turns[turnIndex + 1]?.user?.timestamp;
+      const nextStartedAt = nextTimestamp ? Date.parse(nextTimestamp) : Number.NaN;
+      const calledAt = Date.parse(call.timestamp || 0);
+      return (!Number.isFinite(startedAt) || calledAt >= startedAt) && (!Number.isFinite(nextStartedAt) || calledAt < nextStartedAt);
+    }));
+    const callOnlyRows = unmatchedCalls.map(subagentCallHtml).join("");
+    const emptyConversation = turns.length || calls.length ? "" : `<div class="empty-state compact"><h3>${esc(t("drawer.no_user_ai_conversation"))}</h3></div>`;
     return `${notice}<div class="chat-history-head">
       <span>${esc(t("drawer.turn_summary", { label: conversationLabel, count: turns.length, updates: progressCount ? ` · ${t("drawer.progress_updates", { count: progressCount })}` : "" }))}</span>
       <button type="button" data-scroll-latest>${esc(t("drawer.latest_conversation"))} ↓</button>
       </div>
-      <div class="chat-list">${rows}${emptyConversation}<div class="chat-latest-anchor" aria-label="${esc(t("drawer.latest_conversation"))}">
+      <div class="chat-list">${callOnlyRows}${rows}${emptyConversation}<div class="chat-latest-anchor" aria-label="${esc(t("drawer.latest_conversation"))}">
       </div>
       </div>`;
   }
@@ -265,7 +424,23 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
     const delegation = session.delegation || {};
     const parent = session.parentId ? state.details.get(session.parentId) || snapshotSession(session.parentId) : null;
     const assignmentEvent = subagentCoordinationEvents(session).find(event => event.kind === "assignment" && String(event.text || "").trim());
-    const assignment = String(delegation.assignment || assignmentEvent?.text || delegation.taskName || session.taskName || session.title || "").trim();
+    const delegatedAssignment = delegation.assignmentObserved && String(delegation.assignment || "").trim()
+      ? delegation.assignment
+      : "";
+    const eventAssignment = assignmentEvent && !assignmentEvent.protected ? assignmentEvent.text : "";
+    const assignment = String(delegatedAssignment || eventAssignment || "").trim();
+    const assignmentProtected = Boolean(delegation.assignmentProtected || assignmentEvent?.protected);
+    const assignmentContext = String(delegation.assignmentContext || "").trim();
+    const assignmentBody = assignment || (assignmentProtected
+      ? t("drawer.assignment_protected")
+      : t("management.signal_unavailable"));
+    const assignmentSource = delegation.assignmentSource === "claude-agent-prompt"
+      ? t("drawer.assignment_source_claude")
+      : delegation.assignmentSource === "spawn-message"
+        ? t("drawer.assignment_source_codex")
+        : assignmentProtected
+          ? t("drawer.assignment_source_protected")
+          : "";
     let assignmentRemoved = false;
     const messages = subagentWorkMessages(session).filter(message => {
       if (assignmentRemoved || message.role !== "user" || !assignment) return true;
@@ -279,7 +454,8 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
       ? t("drawer.subagent_history_reconstructed")
       : t("drawer.subagent_history_actual");
     return `<section class="subagent-assignment-card" data-subagent-assignment="true">
-      <span aria-hidden="true">⌁</span><div><b>${esc(t("control.main_assignment"))}</b>${parent ? `<small>${esc(t("control.created_from"))} · ${esc(parent.title)}</small>` : ""}<p>${esc(assignment || t("management.signal_unavailable"))}</p></div>
+      <span aria-hidden="true">⌁</span><div><b>${esc(t("control.main_assignment"))}</b>${parent ? `<small>${esc(t("control.created_from"))} · ${esc(parent.title)}</small>` : ""}${assignmentSource ? `<small>${esc(assignmentSource)}</small>` : ""}<p>${esc(assignmentBody)}</p>
+      ${assignmentContext ? `<aside><b>${esc(t("drawer.assignment_context"))}</b><p>${esc(assignmentContext)}</p></aside>` : ""}</div>
     </section><section class="subagent-work-source" data-subagent-work-messages="${conversationCount}" data-conversation-scope="subagent-only">
       <b>${esc(t("control.subagent_conversation"))}</b><span>${esc(sourceCopy)}</span>
     </section>${chatHtml(workSession, {
@@ -306,7 +482,12 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
       : `${t("control.main_agent")} · ${session.agentName || providerInfo(session.provider).label}`;
     const timeline = [
       activity.startedAt ? { label: t("drawer.execution_started"), value: activity.startedAt } : null,
-      activity.updatedAt ? { label: activity.status === "running" ? t("drawer.execution_latest_activity") : t("drawer.execution_finished"), value: activity.updatedAt } : null,
+      activity.updatedAt ? {
+        label: activity.status === "running" || activity.status === "unverified"
+          ? t("drawer.execution_latest_activity")
+          : t("drawer.execution_finished"),
+        value: activity.updatedAt,
+      } : null,
     ].filter(Boolean);
     return `<div class="execution-drawer" data-execution-detail="${esc(activity.id)}" data-conversation-scope="execution-only">
       <section class="execution-purpose-card">

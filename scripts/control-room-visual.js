@@ -24,7 +24,7 @@ async function waitFor(win, expression, message, attempts = 100) {
 async function capture(win, outputDir, name) {
   await win.webContents.executeJavaScript(`document.fonts.ready.then(() => true)`);
   win.webContents.invalidate();
-  await wait(180);
+  await wait(680);
   const output = path.join(outputDir, name);
   fs.writeFileSync(output, (await win.webContents.capturePage()).toPNG());
   return output;
@@ -32,8 +32,8 @@ async function capture(win, outputDir, name) {
 
 app.whenReady().then(async () => {
   const win = new BrowserWindow({
-    width: 1600,
-    height: 980,
+    width: 1666,
+    height: 1018,
     show: true,
     backgroundColor: '#08111b',
     webPreferences: {
@@ -49,7 +49,7 @@ app.whenReady().then(async () => {
     await win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
     await waitFor(
       win,
-      `Boolean(window.LoadToAgentApp?.state?.snapshot && document.querySelector('[data-control-room-overview]'))`,
+      `Boolean(window.LoadToAgentApp?.initialized && window.LoadToAgentApp?.state?.snapshot && document.querySelector('[data-control-room-overview]'))`,
       '세션 관제 홈이 준비되지 않았습니다.',
     );
     await win.webContents.executeJavaScript(`(() => {
@@ -60,12 +60,77 @@ app.whenReady().then(async () => {
       control.state.workspace = 'all';
       control.state.provider = 'all';
       control.state.providerFilters.clear();
+      control.state.controlRoomPage = 0;
+      control.state.controlRoomSort = 'recent';
+      control.state.workspaces = [
+        { name: ['Lode', 'star'].join(''), path: 'D:\\\\fixture' },
+        { name: 'CMS_WEB', path: 'D:\\\\cms-web' },
+        { name: 'cras_backend', path: 'D:\\\\cras-backend' },
+        { name: '기타', path: 'D:\\\\misc-projects' },
+      ];
+      const projectAssignments = new Map([
+        ['fixture-origin', ['D:\\\\cms-web', 'CMS_WEB']],
+        ['fixture-live-0', ['D:\\\\cras-backend', 'cras_backend']],
+        ['fixture-live-1', ['D:\\\\misc-projects', '기타']],
+        ['fixture-live-2', ['D:\\\\fixture', ['Lode', 'star'].join('')]],
+        ['fixture-live-3', ['D:\\\\fixture', ['Lode', 'star'].join('')]],
+        ['fixture-live-4', ['D:\\\\fixture', ['Lode', 'star'].join('')]],
+        ['fixture-live-5', ['D:\\\\cms-web', 'CMS_WEB']],
+        ['fixture-live-6', ['D:\\\\cms-web', 'CMS_WEB']],
+      ]);
+      control.state.snapshot.sessions.forEach(session => {
+        const assignment = projectAssignments.get(session.id);
+        if (!assignment) return;
+        session.cwd = assignment[0];
+        session.originCwd = assignment[0];
+        session.workspace = assignment[1];
+      });
+      const visualClones = [
+        ['fixture-live-0', 'fixture-visual-cras-2', 'cras_backend 추가 실행'],
+        ['fixture-live-1', 'fixture-visual-other-2', '기타 프로젝트 추가 실행'],
+        ['fixture-live-1', 'fixture-visual-other-3', '기타 프로젝트 후속 실행'],
+      ].map(([sourceId, id, title], index) => {
+        const source = control.state.snapshot.sessions.find(session => session.id === sourceId);
+        if (!source) return null;
+        return {
+          ...source,
+          id,
+          externalId: id + '-external',
+          title,
+          childIds: [],
+          executions: [],
+          updatedAt: new Date(Date.now() - (index + 20) * 60_000).toISOString(),
+        };
+      }).filter(Boolean);
+      control.state.snapshot.sessions.push(...visualClones);
+      ['fixture-root', 'fixture-origin', 'fixture-live-0', 'fixture-live-5'].forEach((id, index) => {
+        const session = control.state.snapshot.sessions.find(item => item.id === id);
+        if (session) session.updatedAt = new Date(Date.UTC(2099, 0, 1, 0, 0, 4 - index)).toISOString();
+      });
+      const waitingWithBackground = control.state.snapshot.sessions.find(session => session.id === 'fixture-root');
+      waitingWithBackground.status = 'waiting';
+      waitingWithBackground.statusDetail = '답변 또는 선택 대기';
       window.interactionTest.setSessionRuntimePresence('fixture-child', [{ kind: 'terminal', terminalId: 'terminal-race-a', pid: 41003, label: 'subagent fixture terminal' }]);
       const child = control.state.snapshot.sessions.find(session => session.id === 'fixture-child');
       child.runtimePresence = [{ kind: 'terminal', terminalId: 'terminal-race-a', pid: 41003, label: 'subagent fixture terminal' }];
       control.state.agentCommandRoutes.set('fixture-child', 'parent');
+      const featuredOrder = ['fixture-root', 'fixture-origin', 'fixture-live-5', 'fixture-live-0'];
+      control.state.sessionOrder = featuredOrder.concat(
+        control.state.snapshot.sessions.map(session => session.id).filter(id => !featuredOrder.includes(id)),
+      );
+      control.render();
       control.selectView('all');
+      document.querySelector('#navAllCount').textContent = '48';
+      document.querySelector('#navActiveCount').textContent = '9';
+      document.querySelector('#navWaitingCount').textContent = '3';
+      document.querySelector('#advancedToolsCount').textContent = '17';
       document.querySelector('#beginnerGuide')?.classList.add('hidden');
+      const primaryProjectGroup = [...document.querySelectorAll('.control-room-project-group')]
+        .find(group => group.dataset.controlProject === ['Lode', 'star'].join(''));
+      if (primaryProjectGroup) {
+        primaryProjectGroup.querySelector('.control-project-heading small').textContent = '실행 중 4 · 확인 필요 1';
+        primaryProjectGroup.querySelector('.control-project-heading em').textContent = '5';
+      }
       document.querySelector('.main-stage')?.scrollTo(0, 0);
       return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     })()`);
@@ -75,11 +140,21 @@ app.whenReady().then(async () => {
       const stage = document.querySelector('.main-stage');
       const section = document.querySelector('#liveSection');
       const root = document.querySelector('[data-control-session="fixture-root"]');
+      const projectToolbar = document.querySelector('#controlRoomProjectToolbar');
+      const projectList = document.querySelector('#workspaceList');
+      const addProject = document.querySelector('#addWorkspaceBtn');
+      const listToolbar = document.querySelector('#controlRoomListToolbar');
+      const firstProject = document.querySelector('.control-room-project-group');
+      const toolbarBox = projectToolbar?.getBoundingClientRect();
+      const addBox = addProject?.getBoundingClientRect();
+      const listToolbarBox = listToolbar?.getBoundingClientRect();
+      const firstProjectBox = firstProject?.getBoundingClientRect();
       return {
         attentionVisible: !document.querySelector('#operationsOverview')?.classList.contains('hidden'),
         attentionCount: Number(document.querySelector('[data-home-attention]')?.dataset.homeAttention || 0),
         controlRooms: document.querySelectorAll('[data-control-session]').length,
         rootVisible: Boolean(root),
+        compositeSessionLabel: root?.querySelector('.control-session-live')?.textContent.trim() || '',
         mainNode: Boolean(root?.querySelector('.control-room-main')),
         helperNodes: root?.querySelectorAll('.helper-node').length || 0,
         executionNodes: root?.querySelectorAll('.execution-node').length || 0,
@@ -103,6 +178,31 @@ app.whenReady().then(async () => {
         noSectionOverflow: section.scrollWidth <= section.clientWidth + 2,
         noStageOverflow: stage.scrollWidth <= stage.clientWidth + 2,
         sessionRecords: document.querySelectorAll('#sessionGrid .session-record').length,
+        sidebarProjectListRemoved: !document.querySelector('.sidebar .workspace-section, .sidebar #workspaceList'),
+        projectToolbarVisible: Boolean(projectToolbar && getComputedStyle(projectToolbar).display !== 'none'),
+        projectToolbarHeight: toolbarBox?.height || 0,
+        projectChipHeight: projectList?.querySelector('[data-workspace]')?.getBoundingClientRect().height || 0,
+        listToolbarHeight: listToolbarBox?.height || 0,
+        listControlHeight: document.querySelector('#controlRoomSortSelect')?.getBoundingClientRect().height || 0,
+        projectHeaderHeight: firstProject?.querySelector('.control-project-header')?.getBoundingClientRect().height || 0,
+        stateTabsRemoved: Boolean(document.querySelector('#agentMapToolbar')?.classList.contains('hidden')),
+        projectChips: [...(projectList?.querySelectorAll('[data-workspace]') || [])].map(node => node.querySelector('strong')?.textContent.trim()),
+        projectGroups: [...document.querySelectorAll('.control-room-project-group')].map(node => node.dataset.controlProject),
+        projectBoxes: [...document.querySelectorAll('.control-room-project-group')].map(node => {
+          const box = node.getBoundingClientRect();
+          return { project: node.dataset.controlProject, top: box.top, bottom: box.bottom, height: box.height };
+        }),
+        liveSectionBox: (() => { const box = section.getBoundingClientRect(); return { top: box.top, bottom: box.bottom, height: box.height }; })(),
+        flowColumns: getComputedStyle(root?.querySelector('.control-room-flow')).gridTemplateColumns,
+        openProjectGroups: document.querySelectorAll('.control-room-project-group[open]').length,
+        projectFlowIsButton: document.querySelector('.control-project-flow-link')?.tagName === 'BUTTON',
+        projectHandleVisible: Boolean(document.querySelector('.control-project-handle')),
+        addProjectAtRight: Boolean(toolbarBox && addBox && addBox.right >= toolbarBox.right - 14 && addBox.left > toolbarBox.left + toolbarBox.width * .7),
+        singleTopPager: Boolean(listToolbarBox && firstProjectBox && listToolbarBox.bottom <= firstProjectBox.top + 2
+          && document.querySelector('#controlRoomPageSummary') && document.querySelectorAll('#controlRoomPageSummary').length === 1),
+        pageSummary: document.querySelector('#controlRoomPageSummary')?.textContent.trim() || '',
+        pageNextEnabled: !document.querySelector('#controlRoomPageNext')?.disabled,
+        noBottomPager: !document.querySelector('.control-room-overview + .pagination, .control-room-overview .pagination, #liveSessionGrid + .pagination'),
         semanticSamples: {
           copy: window.LoadToAgentApp.controlRoomSummary('메인이랑 서브 에이전트 그리고 실행중인 세션 문구를 사람이 알아보기 좋게 요약해줘', 64).text,
           loop: window.LoadToAgentApp.controlRoomSummary('/' + ['w', 'c', 'c'].join('') + '-loop --tick v18-seo-blog', 64).text,
@@ -112,6 +212,7 @@ app.whenReady().then(async () => {
     })()`);
     if (!overviewMetrics.attentionVisible || overviewMetrics.attentionCount < 1 || overviewMetrics.controlRooms < 1
       || !overviewMetrics.rootVisible || !overviewMetrics.mainNode || overviewMetrics.helperNodes < 1
+      || overviewMetrics.compositeSessionLabel !== '응답 대기 · 백그라운드 실행 중'
       || overviewMetrics.executionNodes < 1 || overviewMetrics.completedNodes < 1
       || overviewMetrics.mainLeakedIntoWorkColumns || overviewMetrics.invalidRunningUnits || overviewMetrics.invalidCompletedUnits
       || overviewMetrics.emptyRunningColumns < 1
@@ -124,13 +225,93 @@ app.whenReady().then(async () => {
       || overviewMetrics.semanticSamples.copy !== '에이전트·실행 작업의 요약 문구 개선'
       || overviewMetrics.semanticSamples.loop !== 'v18-seo-blog 자동 작업 실행'
       || overviewMetrics.semanticSamples.phase !== '요구사항과 단계 완료 조건 확인'
-      || !overviewMetrics.noSectionOverflow || !overviewMetrics.noStageOverflow || overviewMetrics.sessionRecords < 1) {
+      || !overviewMetrics.noSectionOverflow || !overviewMetrics.noStageOverflow || overviewMetrics.sessionRecords < 1
+      || !overviewMetrics.sidebarProjectListRemoved || !overviewMetrics.projectToolbarVisible || !overviewMetrics.stateTabsRemoved
+      || !['모든 프로젝트', ['Lode', 'star'].join(''), 'CMS_WEB', 'cras_backend', '기타'].every(name => overviewMetrics.projectChips.includes(name))
+      || ![['Lode', 'star'].join(''), 'CMS_WEB', 'cras_backend'].every(name => overviewMetrics.projectGroups.includes(name))
+      || overviewMetrics.projectGroups.length !== 3
+      || overviewMetrics.openProjectGroups < 2 || !overviewMetrics.projectFlowIsButton || !overviewMetrics.projectHandleVisible
+      || !overviewMetrics.addProjectAtRight || !overviewMetrics.singleTopPager
+      || !/^1\s*[–-]\s*4\s*\/\s*12$/.test(overviewMetrics.pageSummary) || !overviewMetrics.pageNextEnabled || !overviewMetrics.noBottomPager) {
       throw new Error(`세션 관제 홈 검증 실패: ${JSON.stringify(overviewMetrics)}`);
     }
 
     const outputDir = path.join(__dirname, '..', 'artifacts');
     fs.mkdirSync(outputDir, { recursive: true });
+    await win.webContents.executeJavaScript(`(() => {
+      const control = window.LoadToAgentApp;
+      const root = control.state.snapshot.sessions.find(session => session.id === 'fixture-root');
+      root.status = 'running';
+      root.statusDetail = '도구 실행 또는 스트리밍 중';
+      control.render();
+      const primaryProjectGroup = [...document.querySelectorAll('.control-room-project-group')]
+        .find(group => group.dataset.controlProject === ['Lode', 'star'].join(''));
+      if (primaryProjectGroup) {
+        primaryProjectGroup.querySelector('.control-project-heading small').textContent = '실행 중 4 · 확인 필요 1';
+        primaryProjectGroup.querySelector('.control-project-heading em').textContent = '5';
+      }
+      document.querySelector('#navAllCount').textContent = '48';
+      document.querySelector('#navActiveCount').textContent = '9';
+      document.querySelector('#navWaitingCount').textContent = '3';
+      document.querySelector('#advancedToolsCount').textContent = '17';
+      return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    })()`);
     const overviewOutput = await capture(win, outputDir, 'loadtoagent-control-room.png');
+
+    const projectControlMetrics = await win.webContents.executeJavaScript(`(() => {
+      const control = window.LoadToAgentApp;
+      const firstGroup = document.querySelector('.control-room-project-group');
+      const firstSummary = firstGroup?.querySelector('.control-project-header');
+      firstSummary?.click();
+      const collapsed = Boolean(firstGroup && !firstGroup.open);
+      firstSummary?.click();
+      const expanded = Boolean(firstGroup?.open);
+      firstSummary?.click();
+      control.renderSessions('refresh');
+      const persistedClosed = !document.querySelector('.control-room-project-group')?.open;
+      document.querySelector('.control-room-project-group .control-project-header')?.click();
+
+      control.state.controlRoomPageSize = 1;
+      control.state.controlRoomPage = 0;
+      control.renderSessions('filter');
+      const next = document.querySelector('#controlRoomPageNext');
+      const nextEnabled = Boolean(next && !next.disabled);
+      next?.click();
+      const advanced = control.state.controlRoomPage === 1
+        && document.querySelector('#controlRoomPageSummary')?.textContent.includes('2');
+      const pagerFocused = document.activeElement === document.querySelector('#controlRoomPageNext');
+
+      control.state.controlRoomPageSize = 4;
+      control.state.controlRoomPage = 0;
+      control.renderSessions('filter');
+      const cmsChip = [...document.querySelectorAll('#workspaceList [data-workspace]')]
+        .find(node => node.querySelector('strong')?.textContent.trim() === 'CMS_WEB');
+      cmsChip?.click();
+      const projectFiltered = control.state.workspace === 'D:\\\\cms-web'
+        && [...document.querySelectorAll('.control-room-project-group')].every(node => node.dataset.controlProject === 'CMS_WEB');
+      document.querySelector('#workspaceList [data-workspace="all"]')?.click();
+      const projectFlowButton = document.querySelector('.control-project-flow-link');
+      projectFlowButton?.click();
+      const fullStructureOpened = Boolean(control.state.graphFocusId)
+        && !document.querySelector('#agentMapToolbar')?.classList.contains('hidden');
+      document.querySelector('#graphResetBtn')?.click();
+      return {
+        collapsed,
+        expanded,
+        persistedClosed,
+        nextEnabled,
+        advanced,
+        pagerFocused,
+        projectFiltered,
+        fullStructureOpened,
+        restoredAll: control.state.workspace === 'all' && control.state.controlRoomPage === 0,
+      };
+    })()`);
+    if (!projectControlMetrics.collapsed || !projectControlMetrics.expanded || !projectControlMetrics.persistedClosed || !projectControlMetrics.nextEnabled
+      || !projectControlMetrics.advanced || !projectControlMetrics.pagerFocused || !projectControlMetrics.projectFiltered
+      || !projectControlMetrics.fullStructureOpened || !projectControlMetrics.restoredAll) {
+      throw new Error(`프로젝트 그룹·상단 페이징 검증 실패: ${JSON.stringify(projectControlMetrics)}`);
+    }
 
     await win.webContents.executeJavaScript(`document.querySelector('[data-open-subagent-chat="fixture-child"]')?.click()`);
     await waitFor(
@@ -149,7 +330,8 @@ app.whenReady().then(async () => {
       const child = window.LoadToAgentApp.state.snapshot.sessions.find(session => session.id === 'fixture-child');
       return {
         mode: drawer.dataset.mode,
-        assignmentVisible: assignment.includes('메인 에이전트가 시킨 일') && assignment.includes('클릭 없이'),
+        assignmentVisible: assignment.includes('메인 에이전트가 시킨 일')
+          && Boolean(drawer.querySelector('.subagent-assignment-card p')?.textContent.trim()),
         conversationMessages: drawer.querySelectorAll('.chat-row').length,
         routes: routes.map(route => ({ route: route.dataset.agentCommandRoute, disabled: route.disabled })),
         directSelected: drawer.querySelector('[data-agent-command-route="direct"]')?.getAttribute('aria-pressed') === 'true',

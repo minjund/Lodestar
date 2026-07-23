@@ -518,31 +518,51 @@ app.whenReady().then(() => {
         window.__ensureLoadToAgentDensityFixture?.();
         window.LoadToAgentApp.state.graphFocusId = null;
         window.LoadToAgentApp.state.graphExpandedProviders.clear();
+        window.LoadToAgentApp.state.controlRoomPage = 0;
+        window.LoadToAgentApp.renderSessions();
+        const defaultRooms = document.querySelectorAll('[data-control-session]').length;
+        const pageSummary = document.querySelector('#controlRoomPageSummary')?.textContent.trim() || '';
+        const pageTotal = Number(pageSummary.split('/').pop()?.trim() || 0);
+        const pageNextEnabled = !document.querySelector('#controlRoomPageNext')?.disabled;
+        const originalPageSize = window.LoadToAgentApp.state.controlRoomPageSize;
+        window.LoadToAgentApp.state.controlRoomPageSize = 100;
+        window.LoadToAgentApp.state.controlRoomPage = 0;
         window.LoadToAgentApp.renderSessions();
         const grid = document.querySelector('#liveSessionGrid');
         const densityRoom = document.querySelector('[data-control-session="visual-density:root:0"]');
-        return {
+        const metrics = {
+          defaultRooms,
+          pageSummary,
+          pageTotal,
+          pageNextEnabled,
           rooms: document.querySelectorAll('[data-control-session]').length,
           mains: document.querySelectorAll('.control-room-main').length,
           densityRoom: Boolean(densityRoom),
           completedPreview: densityRoom?.querySelectorAll('.completed-list .helper-node').length || 0,
-          directWork: Boolean(densityRoom?.querySelector('.direct-work')),
+          mainWorkColumn: Boolean(densityRoom?.querySelector('.main-column .control-room-main')),
           legends: document.querySelectorAll('#graphBreadcrumbs .control-room-legend > span').length,
+          projectGroups: document.querySelectorAll('.control-room-project-group').length,
           structureVisibleWithoutFocus: Boolean(document.querySelector('[data-control-room-overview]')),
           noHorizontalOverflow: grid ? grid.scrollWidth <= grid.clientWidth + 2 : false,
           subagentTabRemoved: !document.querySelector('[data-view="subagents"]'),
         };
+        window.LoadToAgentApp.state.controlRoomPageSize = originalPageSize;
+        window.LoadToAgentApp.state.controlRoomPage = 0;
+        window.LoadToAgentApp.renderSessions();
+        return metrics;
       })()`);
-      if (!densityMetrics.subagentTabRemoved || densityMetrics.rooms < 32 || densityMetrics.mains !== densityMetrics.rooms
-        || !densityMetrics.densityRoom || densityMetrics.completedPreview !== 3 || !densityMetrics.directWork
-        || densityMetrics.legends !== 3 || !densityMetrics.structureVisibleWithoutFocus || !densityMetrics.noHorizontalOverflow) {
+      if (!densityMetrics.subagentTabRemoved || densityMetrics.defaultRooms !== 4 || densityMetrics.pageTotal < 32
+        || !densityMetrics.pageNextEnabled || densityMetrics.rooms < 32 || densityMetrics.mains !== densityMetrics.rooms
+        || !densityMetrics.densityRoom || densityMetrics.completedPreview !== 3 || !densityMetrics.mainWorkColumn
+        || densityMetrics.legends !== 0 || densityMetrics.projectGroups < 1
+        || !densityMetrics.structureVisibleWithoutFocus || !densityMetrics.noHorizontalOverflow) {
         throw new Error(`대규모 세션 관제 밀도 조절이 올바르지 않습니다: ${JSON.stringify(densityMetrics)}`);
       }
       if (densityFocusId) {
         await win.webContents.executeJavaScript(`(() => {
           window.__ensureLoadToAgentDensityFixture?.();
+          window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(densityFocusId)};
           window.LoadToAgentApp.renderSessions();
-          document.querySelector('[data-graph-focus="${densityFocusId}"]')?.click();
         })()`);
         await new Promise(resolve => setTimeout(resolve, 500));
       }
@@ -703,9 +723,8 @@ app.whenReady().then(() => {
       await new Promise(resolve => setTimeout(resolve, 300));
       const motionMetrics = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
-        window.LoadToAgentApp.state.graphFocusId = null;
-        window.LoadToAgentApp.renderSessions();
-        document.querySelector('[data-graph-focus="${densityFocusId}"]')?.click();
+        window.LoadToAgentApp.state.graphFocusId = ${JSON.stringify(densityFocusId)};
+        window.LoadToAgentApp.renderSessions('focus');
         window.LoadToAgentApp.drawAgentWorkflowConnections();
         const path = document.querySelector('.agent-workflow-edge');
         window.LoadToAgentApp.openRunModal();
@@ -881,7 +900,12 @@ app.whenReady().then(() => {
       })()`, `window.LoadToAgentApp.state.graphFocusId === ${JSON.stringify(childFocusId)} && document.querySelector('.upstream-column [data-graph-focus]')?.dataset.graphFocus === ${JSON.stringify(densityFocusId)} && !document.querySelector('#detailDrawer')?.classList.contains('open') && document.querySelector('#drawerBackdrop')?.classList.contains('hidden')`);
       const childFocusOutput = path.join(outputDir, 'loadtoagent-agent-child-focus.png');
       fs.writeFileSync(childFocusOutput, childFocusImage.toPNG());
-      if (childMetrics.focusId !== childFocusId || childMetrics.parentId !== densityFocusId || !childMetrics.parentOnLeft || childMetrics.downstreamNodes !== 1 || !childMetrics.emptyShown || childMetrics.connectionPaths !== 2 || !childMetrics.resumeReady || !childMetrics.commandEnabled || !childMetrics.resumeMode || childMetrics.bridgeCopyVisible || childMetrics.communicationEvents !== 3) throw new Error(`중첩 도움 AI 선택 후 부모 방향·재개 상태·하위 통신 기록이 올바르지 않습니다: ${JSON.stringify(childMetrics)}`);
+      if (childMetrics.focusId !== childFocusId || childMetrics.parentId !== densityFocusId || !childMetrics.parentOnLeft
+        || childMetrics.downstreamNodes !== 1 || !childMetrics.emptyShown || childMetrics.connectionPaths !== 2
+        || childMetrics.resumeReady || childMetrics.commandEnabled || childMetrics.resumeMode || childMetrics.bridgeCopyVisible
+        || !childMetrics.resumeSupport?.parentControlled || childMetrics.communicationEvents !== 3) {
+        throw new Error(`중첩 도움 AI 선택 후 부모 방향·메인 관리 상태·하위 통신 기록이 올바르지 않습니다: ${JSON.stringify(childMetrics)}`);
+      }
 
       const controlStateMetrics = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
@@ -933,7 +957,14 @@ app.whenReady().then(() => {
           ended,
         };
       })()`);
-      if (!controlStateMetrics.connect.classes.includes('control-connect') || !controlStateMetrics.connect.bridge || !controlStateMetrics.origin.classes.includes('control-origin-resume') || controlStateMetrics.origin.origin || !controlStateMetrics.origin.enabledTextarea || !controlStateMetrics.originResume.classes.includes('control-origin-resume') || controlStateMetrics.originResume.origin || !controlStateMetrics.originResume.enabledTextarea || !controlStateMetrics.resume.classes.includes('control-resume') || !controlStateMetrics.resume.enabledTextarea || !controlStateMetrics.handoff.classes.includes('control-handoff') || !controlStateMetrics.handoff.enabledTextarea || !controlStateMetrics.ended.classes.includes('control-ended') || controlStateMetrics.ended.origin || controlStateMetrics.ended.bridge || controlStateMetrics.ended.enabledTextarea) throw new Error(`AI 입력·재개 상태 UI가 올바르지 않습니다: ${JSON.stringify(controlStateMetrics)}`);
+      if (!controlStateMetrics.connect.classes.includes('control-connect') || !controlStateMetrics.connect.bridge || controlStateMetrics.connect.enabledTextarea
+        || !controlStateMetrics.origin.classes.includes('control-connect') || !controlStateMetrics.origin.bridge || controlStateMetrics.origin.enabledTextarea
+        || !controlStateMetrics.originResume.classes.includes('control-ended') || controlStateMetrics.originResume.origin || controlStateMetrics.originResume.bridge || controlStateMetrics.originResume.enabledTextarea
+        || !controlStateMetrics.resume.classes.includes('control-ended') || controlStateMetrics.resume.origin || controlStateMetrics.resume.bridge || controlStateMetrics.resume.enabledTextarea
+        || !controlStateMetrics.handoff.classes.includes('control-connect') || !controlStateMetrics.handoff.bridge || controlStateMetrics.handoff.enabledTextarea
+        || !controlStateMetrics.ended.classes.includes('control-ended') || controlStateMetrics.ended.origin || controlStateMetrics.ended.bridge || controlStateMetrics.ended.enabledTextarea) {
+        throw new Error(`AI 입력 채널 연결·종료 상태 UI가 올바르지 않습니다: ${JSON.stringify(controlStateMetrics)}`);
+      }
 
       const returnClick = await win.webContents.executeJavaScript(`(() => {
         window.__ensureLoadToAgentDensityFixture?.();
@@ -992,12 +1023,14 @@ app.whenReady().then(() => {
           longEvent.text = '아주 긴 서브에이전트 작업 지시 내용 '.repeat(80);
           longEvent.protected = false;
         }
+        const child = window.LoadToAgentApp.state.snapshot.sessions.find(item => item.id === 'visual-density:child:2');
+        if (child) window.LoadToAgentApp.state.details.set(child.id, child);
         window.LoadToAgentApp.renderSessions();
         document.querySelector('.downstream-column [data-open-subagent-chat="visual-density:child:2"]')?.click();
-      })()`, `window.LoadToAgentApp.state.graphFocusId === ${JSON.stringify(densityFocusId)} && window.LoadToAgentApp.state.drawerMode === 'subagent' && document.querySelector('[data-subagent-work-messages="1"]') && document.querySelector('[data-subagent-coordination-count="2"]') && document.querySelectorAll('.drawer-tab:not(.hidden)').length === 1 && document.querySelector('[data-agent-command-route="direct"]')?.disabled && document.querySelector('[data-agent-command-route="parent"]')?.getAttribute('aria-pressed') === 'true' && !document.querySelector('[data-agent-command-form] button[type="submit"]')?.disabled`);
+      })()`, `window.LoadToAgentApp.state.graphFocusId === ${JSON.stringify(densityFocusId)} && window.LoadToAgentApp.state.drawerMode === 'subagent' && document.querySelector('.subagent-assignment-card')`);
       const subagentConversationOutput = path.join(outputDir, 'loadtoagent-subagent-conversation.png');
       fs.writeFileSync(subagentConversationOutput, subagentConversationImage.toPNG());
-      const subagentConversationMetrics = await win.webContents.executeJavaScript(`(() => ({ focusId: window.LoadToAgentApp.state.graphFocusId, drawerMode: window.LoadToAgentApp.state.drawerMode, workMessages: Number(document.querySelector('[data-subagent-work-messages]')?.dataset.subagentWorkMessages || 0), coordinationEvents: document.querySelectorAll('[data-subagent-communication]').length, coordinationCollapsed: !document.querySelector('.subagent-coordination')?.open, visibleTabs: document.querySelectorAll('.drawer-tab:not(.hidden)').length, inlineRelay: document.querySelector('[data-agent-command-route="direct"]')?.disabled && document.querySelector('[data-agent-command-route="parent"]')?.getAttribute('aria-pressed') === 'true' && !document.querySelector('[data-agent-command-form] button[type="submit"]')?.disabled, actualWorkVisible: document.querySelector('#drawerContent')?.innerText.includes('동시에 실행되는 작업의 상태를 확인하고 있습니다.') || false, placeholderNoise: /보호된 메시지|내용 없이 통신 상태|서브에이전트 실행이 시작/.test(document.querySelector('#drawerContent')?.innerText || ''), drawerOverflow: document.querySelector('#detailDrawer')?.scrollWidth > document.querySelector('#detailDrawer')?.clientWidth + 2 }))()`);
+      const subagentConversationMetrics = await win.webContents.executeJavaScript(`(() => ({ focusId: window.LoadToAgentApp.state.graphFocusId, drawerMode: window.LoadToAgentApp.state.drawerMode, workMessages: Number(document.querySelector('[data-subagent-work-messages]')?.dataset.subagentWorkMessages || 0), coordinationEvents: document.querySelectorAll('[data-subagent-communication]').length, coordinationCollapsed: !document.querySelector('.subagent-coordination')?.open, visibleTabs: document.querySelectorAll('.drawer-tab:not(.hidden)').length, inlineRelay: document.querySelector('[data-agent-command-route="direct"]')?.disabled && document.querySelector('[data-agent-command-route="parent"]')?.getAttribute('aria-pressed') === 'true' && !document.querySelector('[data-agent-command-form] button[type="submit"]')?.disabled, actualWorkVisible: Boolean(document.querySelector('#drawerContent .chat-row')), placeholderNoise: /보호된 메시지|내용 없이 통신 상태|서브에이전트 실행이 시작/.test(document.querySelector('#drawerContent')?.innerText || ''), drawerOverflow: document.querySelector('#detailDrawer')?.scrollWidth > document.querySelector('#detailDrawer')?.clientWidth + 2 }))()`);
       if (subagentConversationMetrics.focusId !== densityFocusId || subagentConversationMetrics.drawerMode !== 'subagent' || subagentConversationMetrics.workMessages !== 1 || subagentConversationMetrics.coordinationEvents !== 2 || !subagentConversationMetrics.coordinationCollapsed || subagentConversationMetrics.visibleTabs !== 1 || !subagentConversationMetrics.inlineRelay || !subagentConversationMetrics.actualWorkVisible || subagentConversationMetrics.placeholderNoise || subagentConversationMetrics.drawerOverflow) throw new Error(`서브에이전트 실제 작업 상세가 올바르지 않습니다: ${JSON.stringify(subagentConversationMetrics)}`);
       await win.webContents.executeJavaScript("document.querySelector('#closeDrawerBtn')?.click()");
 

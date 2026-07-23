@@ -45,8 +45,8 @@ function createHierarchyAttacher(dependencies) {
   }
 
   function createHistoryChild(parent, record) {
-    const externalId = String(record.childId || `${parent.externalId}:spawn:${record.callId}`).replace(/^codex:/, '');
-    const child = baseSession('codex', externalId, '', {
+    const externalId = String(record.childId || `${parent.externalId}:spawn:${record.callId}`).replace(/^(?:codex|claude):/, '');
+    const child = baseSession(parent.provider, externalId, '', {
       mtimeMs: Date.parse(record.completedAt || record.startedAt || parent.updatedAt) || Date.now(),
     });
     child.id = record.childId || child.id;
@@ -69,7 +69,7 @@ function createHierarchyAttacher(dependencies) {
     child.completionObserved = child.status === 'completed';
     child.result = record.result || '';
     child.source = 'collaboration-history';
-    child.sourceLabel = 'Codex 협업 이벤트';
+    child.sourceLabel = parent.provider === 'claude' ? 'Claude 협업 이벤트' : 'Codex 협업 이벤트';
     child.clientKind = parent.clientKind;
     child.model = parent.model;
     child.cwd = parent.cwd;
@@ -131,6 +131,7 @@ function createHierarchyAttacher(dependencies) {
       assignmentObserved: record.assignmentObserved,
       assignmentProtected: record.assignmentProtected,
       assignmentSource: record.assignmentSource,
+      assignmentContext: record.assignmentContext || '',
       sharedGoal: record.sharedGoal || child.sharedGoal || parent.title,
       result: record.result,
       startedAt: record.startedAt,
@@ -151,6 +152,7 @@ function createHierarchyAttacher(dependencies) {
       assignmentObserved: false,
       assignmentProtected: false,
       assignmentSource: 'unavailable',
+      assignmentContext: '',
       sharedGoal: child.sharedGoal || parent.title,
       status: child.status === 'completed' ? 'completed' : (child.status === 'running' ? 'running' : 'idle'),
       startedAt: child.startedAt,
@@ -169,6 +171,7 @@ function createHierarchyAttacher(dependencies) {
       assignmentObserved: false,
       assignmentProtected: true,
       assignmentSource: 'unavailable',
+      assignmentContext: '',
       sharedGoal: child.sharedGoal || parent.title,
       result: child.result || '',
       startedAt: child.startedAt,

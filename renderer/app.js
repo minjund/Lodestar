@@ -5,6 +5,8 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
   const observedText = (value) => window.LoadToAgentI18n.observedText(value);
   const PROJECTLESS_WORKSPACE = "__projectless__";
+  const SESSION_RETENTION_MS = 30 * 60 * 1000;
+  const SESSION_ARCHIVE_STORAGE_KEY = "loadtoagent:session-archives:v1";
   const state = {
     providers: [],
     providerMap: new Map(),
@@ -22,6 +24,8 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     search: "",
     sort: "recent",
     sessionOrder: [],
+    sessionArchives: new Map(),
+    controlRoomObservedIds: new Set(),
     selectedId: null,
     drawerTab: "chat",
     drawerMode: "session",
@@ -32,6 +36,9 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     drawerForceLatest: false,
     visibleLimit: 30,
     graphFocusId: null,
+    controlRoomPage: 0,
+    controlRoomPageSize: 4,
+    controlRoomSort: "recent",
     supervisionFocusId: null,
     graphExpandedProviders: new Set(),
     expandedExecutionSessions: new Set(),
@@ -566,6 +573,91 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
   function isLiveSession(session) {
     return session && (session.status === "running" || session.status === "starting");
   }
+  function hasRunningExecution(session) {
+    return Boolean((session?.executions || []).some((execution) => execution?.status === "running"));
+  }
+  function sessionResponseTimestamp(session) {
+    const assistantAt = Math.max(0, ...(session?.messages || [])
+      .filter((message) => message?.role === "assistant")
+      .map((message) => Date.parse(message.timestamp || 0))
+      .filter(Number.isFinite));
+    if (assistantAt) return assistantAt;
+    const completedAt = Date.parse(session?.completedAt || session?.endedAt || 0);
+    return Number.isFinite(completedAt) ? completedAt : 0;
+  }
+  function loadSessionArchives() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SESSION_ARCHIVE_STORAGE_KEY) || "{}");
+      state.sessionArchives = new Map(Object.entries(saved)
+        .filter(([id, value]) => id && Number.isFinite(Number(value?.responseAt)))
+        .map(([id, value]) => [id, { responseAt: Number(value.responseAt), archivedAt: Number(value.archivedAt || 0) }]));
+    } catch (error) {
+      reportRecoverableError("session-archives-load", error);
+      state.sessionArchives = new Map();
+    }
+  }
+  function saveSessionArchives() {
+    try {
+      const recent = [...state.sessionArchives.entries()]
+        .sort((left, right) => Number(right[1]?.archivedAt || 0) - Number(left[1]?.archivedAt || 0))
+        .slice(0, 500);
+      state.sessionArchives = new Map(recent);
+      localStorage.setItem(SESSION_ARCHIVE_STORAGE_KEY, JSON.stringify(Object.fromEntries(recent)));
+    } catch (error) {
+      reportRecoverableError("session-archives-save", error);
+    }
+  }
+  function isSessionManuallyArchived(session) {
+    const archived = session && state.sessionArchives.get(String(session.id || ""));
+    if (!archived) return false;
+    return sessionResponseTimestamp(session) <= Number(archived.responseAt || 0);
+  }
+  function isControlRoomSession(session, now = Date.now()) {
+    if (!session) return false;
+    if (isLiveSession(session) || hasRunningExecution(session)) {
+      state.controlRoomObservedIds.add(String(session.id || ""));
+      return true;
+    }
+    if (!state.controlRoomObservedIds.has(String(session.id || ""))) return false;
+    const responseAt = sessionResponseTimestamp(session);
+    const retained = Boolean(responseAt
+      && !isSessionManuallyArchived(session)
+      && Math.max(0, Number(now) - responseAt) < SESSION_RETENTION_MS);
+    if (!retained && responseAt && Math.max(0, Number(now) - responseAt) >= SESSION_RETENTION_MS) {
+      state.controlRoomObservedIds.delete(String(session.id || ""));
+    }
+    return retained;
+  }
+  function controlRoomStatus(session, now = Date.now()) {
+    return isLiveSession(session) ? session.status : (isControlRoomSession(session, now) ? "waiting" : session?.status);
+  }
+  function sessionRetentionMinutes(session, now = Date.now()) {
+    const remaining = SESSION_RETENTION_MS - Math.max(0, Number(now) - sessionResponseTimestamp(session));
+    return Math.max(0, Math.ceil(remaining / 60_000));
+  }
+  function archiveSession(sessionOrId) {
+    const session = typeof sessionOrId === "object"
+      ? sessionOrId
+      : (state.snapshot?.sessions || []).find((item) => item.id === String(sessionOrId || ""));
+    if (!session || isLiveSession(session)) return false;
+    const responseAt = sessionResponseTimestamp(session);
+    if (!responseAt) return false;
+    const archivedAt = Date.now();
+    const sessions = state.snapshot?.sessions || [];
+    const byId = new Map(sessions.map((item) => [item.id, item]));
+    const queue = [session, ...(session.childIds || []).map((id) => byId.get(id)).filter(Boolean)];
+    const seen = new Set();
+    while (queue.length) {
+      const item = queue.shift();
+      if (!item?.id || seen.has(item.id)) continue;
+      seen.add(item.id);
+      const itemResponseAt = sessionResponseTimestamp(item);
+      if (itemResponseAt) state.sessionArchives.set(String(item.id), { responseAt: itemResponseAt, archivedAt });
+      queue.push(...(item.childIds || []).map((id) => byId.get(id)).filter(Boolean));
+    }
+    saveSessionArchives();
+    return true;
+  }
   function isRuntimeLoopSession(session) {
     if (!session || session.parentId || !isLiveSession(session)) return false;
     if (session.loop === true || (session.loop && typeof session.loop === "object")) return true;
@@ -627,6 +719,7 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     if (/end|complete/.test(type)) return "✓";
     return "·";
   }
+  loadSessionArchives();
   return {
     $,
     $$,
@@ -636,6 +729,8 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     reportRecoverableError,
     observedText,
     PROJECTLESS_WORKSPACE,
+    SESSION_RETENTION_MS,
+    SESSION_ARCHIVE_STORAGE_KEY,
     state,
     motionPreference,
     motionState,
@@ -681,6 +776,15 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     statusClass,
     currentActivity,
     isLiveSession,
+    hasRunningExecution,
+    sessionResponseTimestamp,
+    loadSessionArchives,
+    saveSessionArchives,
+    isSessionManuallyArchived,
+    isControlRoomSession,
+    controlRoomStatus,
+    sessionRetentionMinutes,
+    archiveSession,
     isRuntimeLoopSession,
     subagentWorkState,
     subagentWorkLabel,

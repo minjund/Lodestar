@@ -141,10 +141,10 @@ async function layoutMetrics(win) {
         return Boolean(label && getComputedStyle(label).display !== 'none' && label.getBoundingClientRect().width > 0);
       }),
       narrowSidebarTitles: !narrowSidebar || visibleNavItems.every(item => item.getAttribute('title')?.trim()),
-      projectFilterAvailable: !['all', 'active', 'waiting'].includes(window.LoadToAgentApp?.state?.view)
+      projectFilterAvailable: !['all', 'active'].includes(window.LoadToAgentApp?.state?.view)
         || (window.innerWidth <= 720
           ? Boolean(document.querySelector('#mobileWorkspaceList'))
-          : Boolean(document.querySelector('.workspace-section')?.getBoundingClientRect().width > 0 && document.querySelector('#workspaceList')?.getBoundingClientRect().height > 0)),
+          : Boolean(document.querySelector('#controlRoomProjectToolbar') && document.querySelector('#workspaceList'))),
       compactContentClearance: !compact || Boolean(stageRect && sidebarRect && stageRect.bottom <= sidebarRect.top + 1),
       terminalActionLabels,
       tmuxShortcutVisible: !liveSectionVisible || Boolean(tmuxShortcutRect && tmuxShortcutRect.width > 0 && tmuxShortcutRect.height >= 40),
@@ -490,6 +490,8 @@ app.whenReady().then(async () => {
       drawer?.classList.remove('open');
       document.querySelector('#drawerBackdrop')?.classList.add('hidden');
       window.LoadToAgentApp.state.selectedId = null;
+      window.LoadToAgentApp.state.graphFocusId = null;
+      window.LoadToAgentApp.renderSessions('filter');
     })()`);
     console.log(`management detail responsive check passed ${JSON.stringify(managementDetailReports)}`);
 

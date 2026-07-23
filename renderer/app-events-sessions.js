@@ -10,6 +10,7 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
     copyText = async () => false,
     announce = () => {},
     moveSessionOrder = () => false,
+    archiveSession = () => false,
   } = context;
 
   let sessionDragJustEnded = false;
@@ -38,7 +39,9 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
   const commitSessionPosition = (container, sourceId, targetId, placeAfter, focusSource = false) => {
     if (!moveSessionOrder(sourceId, targetId, placeAfter)) return false;
     state.sort = "recent";
+    state.controlRoomSort = "recent";
     if ($("#sortSelect")) $("#sortSelect").value = "recent";
+    if ($("#controlRoomSortSelect")) $("#controlRoomSortSelect").value = "recent";
     saveDashboardPreferences();
     renderSessions("reorder");
     announce(window.LoadToAgentI18n.t("session.position_changed"));
@@ -335,6 +338,16 @@ window.LoadToAgentAppFactories.createSessionEventBindings = function createSessi
     bindSortableSessionList($("#liveSessionGrid"), "[data-control-session][data-session-sortable]");
     $("#liveSessionGrid").addEventListener("click", async (event) => {
       if (sessionDragJustEnded) return;
+      const archive = event.target.closest("[data-session-archive]");
+      if (archive) {
+        event.stopPropagation();
+        if (archiveSession(archive.dataset.sessionArchive)) {
+          if (state.graphFocusId === archive.dataset.sessionArchive) state.graphFocusId = null;
+          renderSessions("archive");
+          announce(window.LoadToAgentI18n.t("control.moved_to_history"));
+        }
+        return;
+      }
       const route = event.target.closest("[data-agent-command-route]");
       if (route) {
         event.stopPropagation();

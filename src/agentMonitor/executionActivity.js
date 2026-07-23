@@ -156,7 +156,7 @@ function outputStatus(value, explicitError = false) {
   if (firstLine.startsWith('script running')) return 'running';
   const code = exitCode(text);
   if (explicitError || (code != null && code !== 0) || /(?:script|command|process)\s+failed|isError["':\s]+true|fatal error/i.test(text)) return 'failed';
-  if (/(?:script|command|process)\s+(?:is\s+)?(?:still\s+)?running|running\s+in\s+(?:the\s+)?background|background\s+(?:task|command)|yielded/i.test(text)) return 'running';
+  if (/^(?:command|process)\s+(?:is\s+)?(?:still\s+)?running\b|\brunning\s+in\s+(?:the\s+)?background\b|^background\s+(?:task|command)\b.*\brunning\b|\byielded\b/i.test(firstLine)) return 'running';
   return 'completed';
 }
 
@@ -270,6 +270,30 @@ function createExecutionTracker(options = {}) {
   return { activities, recordCall, recordOutput, finalize };
 }
 
+function reconcileExecutionActivities(activities = [], options = {}) {
+  const now = Number.isFinite(Number(options.now)) ? Number(options.now) : Date.now();
+  const staleAfterMs = Math.max(0, Number(options.staleAfterMs || 0));
+  const turnSettled = Boolean(options.turnFinished || options.waitingForUser);
+  return activities.map((activity) => {
+    if (!activity || activity.status !== 'running') return activity;
+    const observedAt = Date.parse(activity.updatedAt || activity.startedAt || 0);
+    const observationAge = Number.isFinite(observedAt) ? Math.max(0, now - observedAt) : Number.POSITIVE_INFINITY;
+    const foregroundEnded = activity.mode !== 'background' && turnSettled;
+    const backgroundUnobserved = activity.mode === 'background'
+      && staleAfterMs > 0
+      && observationAge >= staleAfterMs;
+    if (!foregroundEnded && !backgroundUnobserved) return activity;
+    return {
+      ...activity,
+      status: 'unverified',
+      statusDetail: foregroundEnded
+        ? '턴 종료 후 실행 상태 미확인'
+        : '최근 실행 신호 없음',
+      completedAt: null,
+    };
+  });
+}
+
 module.exports = {
   CONTINUATION_TOOLS,
   SHELL_TOOLS,
@@ -277,6 +301,7 @@ module.exports = {
   executionInput,
   outputStatus,
   outputText,
+  reconcileExecutionActivities,
   runtimeHandle,
   toolName,
 };

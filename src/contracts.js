@@ -42,7 +42,7 @@
  * @property {TokenUsage} usage
  * @property {Array<Object>} messages
  * @property {Array<Object>} lifecycle
- * @property {Array<{id:string,kind:'shell'|'background',mode:'foreground'|'background',tool:string,runtime:string,label:string,command:string,cwd:string,status:'running'|'completed'|'failed',statusDetail:string,output:string,backgroundId:string,exitCode:number|null,startedAt:string|null,updatedAt:string|null,completedAt:string|null}>} executions Logged regular and background command runs owned by this AI session.
+ * @property {Array<{id:string,kind:'shell'|'background',mode:'foreground'|'background',tool:string,runtime:string,label:string,command:string,cwd:string,status:'running'|'completed'|'failed'|'unverified',statusDetail:string,output:string,backgroundId:string,exitCode:number|null,startedAt:string|null,updatedAt:string|null,completedAt:string|null}>} executions Logged regular and background command runs owned by this AI session. `unverified` means the last running observation is no longer fresh enough to claim current liveness.
  * @property {CollaborationSummary|null} collaboration
  * @property {{kind:string,iteration:number,phase?:string}|boolean|null} loop Safe execution-loop metadata; internal goal text is never included.
  * @property {{required:boolean,kind:string,summary:string,requestedAt:string|null,source:string,confidence:string}} attention Actionable reason why the session needs the user.

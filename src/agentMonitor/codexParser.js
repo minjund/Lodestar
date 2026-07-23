@@ -232,20 +232,21 @@ function createCodexParser(dependencies) {
         : record.agentPath;
       record.assignmentProtected = messageProtected;
       const directAssignment = rawMessage && !messageProtected ? rawMessage : '';
-      record.assignment = directAssignment || (messageProtected ? state.latestDelegationNarration : '');
-      record.assignmentObserved = Boolean(record.assignment);
-      record.assignmentSource = directAssignment ? 'spawn-message' : (record.assignment ? 'parent-narration' : 'unavailable');
+      record.assignment = directAssignment;
+      record.assignmentObserved = Boolean(directAssignment);
+      record.assignmentSource = directAssignment ? 'spawn-message' : (messageProtected ? 'protected' : 'unavailable');
+      record.assignmentContext = messageProtected ? compactText(state.latestDelegationNarration, 6000) : '';
       record.sharedGoal = compactText(state.latestUser, 6000);
       record.startedAt = timestamp(row.timestamp, record.startedAt || session.updatedAt);
       state.collaboration.addCommunication({
         id: `assign:${callId}`,
         kind: 'assignment',
-        label: record.assignmentSource === 'parent-narration' ? '메인 AI 작업 지시' : '새 작업 배정',
+        label: '새 작업 배정',
         from: session.agentPath || '/root',
         to: record.agentPath,
         taskName: record.taskName,
         text: record.assignment,
-        protected: record.assignmentProtected && !record.assignment,
+        protected: record.assignmentProtected,
         assignmentSource: record.assignmentSource,
         timestamp: row.timestamp,
       });

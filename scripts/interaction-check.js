@@ -72,6 +72,13 @@ const ACTION_MANIFEST = [
   { selector: '#resetFiltersBtn', action: 'filter:reset-all' },
   { selector: '[data-provider-filter]', action: 'filter:provider' },
   { selector: '#sortSelect', action: 'filter:sort' },
+  { selector: '#controlRoomSortSelect', action: 'control-room:sort' },
+  { selector: '#controlRoomProjectSelect', action: 'control-room:project-select' },
+  { selector: '#controlRoomSearchInput', action: 'control-room:search' },
+  { selector: '#controlRoomSearchBtn', action: 'control-room:search-toggle' },
+  { selector: '#controlRoomPagePrev', action: 'control-room:page-prev' },
+  { selector: '#controlRoomPageNext', action: 'control-room:page-next' },
+  { selector: '[data-project-toggle]', action: 'control-room:project-toggle' },
   { selector: '#loadMoreBtn', action: 'filter:load-more' },
   { selector: '[data-open-run]', action: 'run:open-empty' },
   { selector: '#closeDrawerBtn', action: 'drawer:close' },
@@ -335,7 +342,9 @@ async function exerciseTabDataRouting(win, round) {
       const visibleTools = toolIds.filter(id => !document.querySelector('#' + id)?.classList.contains('hidden'));
       return {
         visibleTools,
-        workspaceVisible: getComputedStyle(document.querySelector('.workspace-section')).display !== 'none',
+        workspaceVisible: Boolean(document.querySelector('#controlRoomProjectToolbar')
+          && !document.querySelector('#liveSection')?.classList.contains('hidden')
+          && getComputedStyle(document.querySelector('#controlRoomProjectToolbar')).display !== 'none'),
         historySectionVisible: !document.querySelector('#sessionSection')?.classList.contains('hidden'),
         attentionInboxVisible: !document.querySelector('#attentionInbox')?.classList.contains('hidden'),
         activeEmptyVisible: !document.querySelector('#activeEmptyState')?.classList.contains('hidden'),
@@ -825,8 +834,8 @@ async function exerciseDashboardControls(win, round) {
     humanSummaries: [...document.querySelectorAll('.control-room-main, .helper-node, .execution-node')]
       .map(node => node.dataset.controlSummary || ''),
   }))()`);
-  assert(controlRoom.rooms === 9 && controlRoom.mains === controlRoom.rooms && controlRoom.helperNodes >= 3
-    && controlRoom.executionNodes >= 3 && controlRoom.completedNodes >= 3 && controlRoom.legends === 3
+  assert(controlRoom.rooms >= 1 && controlRoom.rooms <= 4 && controlRoom.mains === controlRoom.rooms && controlRoom.helperNodes >= 3
+    && controlRoom.executionNodes >= 3 && controlRoom.completedNodes >= 3 && controlRoom.legends === 0
     && !controlRoom.mainLeakedIntoWorkColumns && controlRoom.invalidRunningUnits === 0
     && controlRoom.invalidCompletedUnits === 0 && controlRoom.emptyRunningColumns >= 1
     && controlRoom.mainOwnerLabelsHidden && controlRoom.executionTypeLabels.some(label => label.startsWith('PowerShell ·'))
@@ -847,6 +856,55 @@ async function exerciseDashboardControls(win, round) {
   await click(win, '#openTmuxFromAgentWork', 'tmux:shortcut-from-agent-work');
   await waitFor(win, `window.LoadToAgentApp.state.view === 'tmux' && !document.querySelector('#tmuxSection').classList.contains('hidden') && document.activeElement?.id === 'mainContent'`, 'AI 작업의 tmux 바로가기가 포커스를 옮기며 tmux 탭을 열지 못했습니다.');
   await click(win, '[data-view="all"]', 'nav:all');
+  await click(win, '.control-project-header', 'control-room:project-toggle');
+  await waitFor(win, `!document.querySelector('.control-room-project-group')?.open`, '프로젝트 그룹을 접지 못했습니다.');
+  await click(win, '.control-project-header', 'control-room:project-toggle');
+  await waitFor(win, `document.querySelector('.control-room-project-group')?.open`, '프로젝트 그룹을 다시 펼치지 못했습니다.');
+  await win.webContents.executeJavaScript(`(() => {
+    const select = document.querySelector('#controlRoomSortSelect');
+    select.value = 'tokens';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  mark('control-room:sort');
+  await waitFor(win, `window.LoadToAgentApp.state.controlRoomSort === 'tokens'`, '관제 정렬 선택이 적용되지 않았습니다.');
+  await win.webContents.executeJavaScript(`(() => {
+    const select = document.querySelector('#controlRoomSortSelect');
+    select.value = 'recent';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  await waitFor(win, `window.LoadToAgentApp.state.controlRoomSort === 'recent'`, '관제 최신 활동 정렬을 복원하지 못했습니다.');
+  await click(win, '#controlRoomSearchBtn', 'control-room:search-toggle');
+  await waitFor(win, `document.querySelector('#controlRoomSearch')?.classList.contains('is-open') && document.activeElement?.id === 'controlRoomSearchInput'`, '관제 검색 입력을 열지 못했습니다.');
+  await win.webContents.executeJavaScript(`(() => {
+    const input = document.querySelector('#controlRoomSearchInput');
+    input.value = 'Codex 원래 작업';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  mark('control-room:search');
+  await waitFor(win, `window.LoadToAgentApp.state.search === 'Codex 원래 작업' && Boolean(document.querySelector('[data-control-session="fixture-origin"]'))`, '관제 검색이 실행 세션에 적용되지 않았습니다.');
+  await win.webContents.executeJavaScript(`(() => {
+    const input = document.querySelector('#controlRoomSearchInput');
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await waitFor(win, `window.LoadToAgentApp.state.search === ''`, '관제 검색을 초기화하지 못했습니다.');
+  await click(win, '#controlRoomPageNext', 'control-room:page-next');
+  await waitFor(win, `window.LoadToAgentApp.state.controlRoomPage === 1 && document.querySelector('#controlRoomPageSummary')?.textContent.startsWith('5')`, '상단 다음 페이징이 적용되지 않았습니다.');
+  await click(win, '#controlRoomPagePrev', 'control-room:page-prev');
+  await waitFor(win, `window.LoadToAgentApp.state.controlRoomPage === 0 && document.querySelector('#controlRoomPageSummary')?.textContent.startsWith('1')`, '상단 이전 페이징이 적용되지 않았습니다.');
+  await win.webContents.executeJavaScript(`(() => {
+    const select = document.querySelector('#controlRoomProjectSelect');
+    select.value = 'D:\\\\unregistered-origin';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  mark('control-room:project-select');
+  await waitFor(win, `window.LoadToAgentApp.state.workspace === 'D:\\\\unregistered-origin' && Boolean(document.querySelector('[data-control-session="fixture-origin"]'))`, '관제 프로젝트 선택이 적용되지 않았습니다.');
+  await win.webContents.executeJavaScript(`(() => {
+    const select = document.querySelector('#controlRoomProjectSelect');
+    select.value = 'all';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  await waitFor(win, `window.LoadToAgentApp.state.workspace === 'all'`, '관제 프로젝트 전체 선택을 복원하지 못했습니다.');
   round.observed.controlRoom = controlRoom;
   await clearCalls(win);
   await click(win, '#probeBtn', 'dashboard:probe');
@@ -855,8 +913,9 @@ async function exerciseDashboardControls(win, round) {
   await click(win, '#addWorkspaceBtn', 'workspace:add');
   await waitFor(win, `window.interactionTest.getCalls().some(item => item.name === 'addWorkspaces')`, 'workspace 추가가 호출되지 않았습니다.');
   await waitFor(win, `Boolean(document.querySelector('[data-workspace="__projectless__"]')) && document.querySelector('[data-workspace="__projectless__"] small')?.textContent === '1'`, '프로젝트 없는 세션 필터와 개수가 표시되지 않았습니다.');
-  await waitFor(win, `document.querySelector('.workspace-list > .observed-project')?.dataset.workspace === 'D:\\\\unregistered-origin' && document.querySelector('.workspace-list > .observed-project small')?.textContent === '1'`, '등록하지 않은 관측 프로젝트가 세션 개수와 함께 자동 표시되지 않았습니다.');
-  await click(win, '.workspace-list > .observed-project', 'workspace:select-observed-project');
+  await waitFor(win, `(() => { const item = [...document.querySelectorAll('#workspaceList [data-workspace]')].find(node => node.dataset.workspace === 'D:\\\\unregistered-origin'); return item?.querySelector('small')?.textContent === '1'; })()`, '등록하지 않은 관측 프로젝트가 세션 개수와 함께 자동 표시되지 않았습니다.');
+  await win.webContents.executeJavaScript(`[...document.querySelectorAll('#workspaceList [data-workspace]')].find(node => node.dataset.workspace === 'D:\\\\unregistered-origin')?.click()`);
+  mark('workspace:select-observed-project');
   await waitFor(win, `window.LoadToAgentApp.state.workspace === 'D:\\\\unregistered-origin' && window.LoadToAgentApp.filteredSessions().length === 1 && window.LoadToAgentApp.filteredSessions()[0].id === 'fixture-origin' && Boolean(document.querySelector('[data-control-session="fixture-origin"]'))`, '감지된 폴더별 세션 필터가 홈 관제 구조에 적용되지 않았습니다.');
   await click(win, '[data-workspace="all"]', 'workspace:select');
   await waitFor(win, `document.querySelector('#sessionGrid .origin-project small')?.textContent === '작업 시작 폴더'`, '세션 카드에 작업 시작 폴더가 명시되지 않았습니다.');

@@ -9,7 +9,7 @@ window.LoadToAgentAppFactories.createDialogEventBindings = function createDialog
     closeDrawer, renderDrawer, providerPickerHtml, syncRunComposer, openRunModal, closeRunModal, toast, performUiAction,
     handleRun, trapDialogFocus, currentDialog, selectView, saveRunDraft = () => {}, safeBackdrop = null,
     copyText = async () => false,
-    dispatchAgentCommand, controlManagedRun, quickRespond, prepareReassignment,
+    dispatchAgentCommand, controlManagedRun, quickRespond, prepareReassignment, openSubagentConversation,
   } = context;
 
   function bindRunComposerEvents() {
@@ -161,6 +161,11 @@ window.LoadToAgentAppFactories.createDialogEventBindings = function createDialog
       $(`.drawer-tab[data-tab="${state.drawerTab}"]`)?.focus();
     });
     $("#detailDrawer").addEventListener("click", async (event) => {
+      const subagent = event.target.closest("[data-open-subagent-chat]");
+      if (subagent) {
+        openSubagentConversation(subagent.dataset.openSubagentChat);
+        return;
+      }
       const route = event.target.closest("[data-agent-command-route]");
       if (route) {
         state.agentCommandRoutes.set(route.dataset.agentCommandSession, route.dataset.agentCommandRoute);

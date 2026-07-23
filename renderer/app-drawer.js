@@ -6,7 +6,7 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
   const {
     $, $$, esc, state, motionPreference, motionState, STATUS, markGuideStep, rememberDialogTrigger, restoreDialogTrigger, setDialogOpenState,
-    providerInfo, isLiveSession, subagentWorkState, subagentWorkLabel, isProjectlessSession, sessionOriginPath, sessionWorkspaceLabel,
+    providerInfo, isLiveSession, controlRoomStatus = session => session?.status, subagentWorkState, subagentWorkLabel, isProjectlessSession, sessionOriginPath, sessionWorkspaceLabel,
     agentResumeSupport, originAppInfo, selectedSession, snapshotSession, loadSessionDetail, loadSubagentParentDetail,
     chatHtml, lifecycleHtml, tokensHtml, outcomeHtml, subagentCoordinationEvents, subagentConversationHtml, executionActivityDetailHtml,
     agentCommandComposer,
@@ -97,6 +97,7 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     const session = selectedSession();
     if (!session) return closeDrawer();
     const provider = providerInfo(session.provider);
+    const presentationStatus = controlRoomStatus(session);
     const subagentMode = state.drawerMode === "subagent" && Boolean(session.parentId);
     const executionMode = state.drawerMode === "execution" && Boolean(state.drawerExecutionId);
     const snapshot = snapshotSession(session.id);
@@ -115,8 +116,8 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     $("#drawerProvider").textContent = executionMode
       ? `${activity?.runtime || activity?.tool || t("drawer.execution_unit")} · ${activity ? context.executionActivityStatus(activity) : t("drawer.unknown")}`
       : subagentMode
-      ? `${t("control.subagent")} · ${STATUS[session.status] || session.status}`
-      : `${provider.company} · ${STATUS[session.status] || session.status}`;
+      ? `${t("control.subagent")} · ${STATUS[presentationStatus] || presentationStatus}`
+      : `${provider.company} · ${STATUS[presentationStatus] || presentationStatus}`;
     const drawerTitle = executionMode
       ? context.inferredExecutionSummary(activity || {}).text
       : subagentMode ? session.title || session.taskName || (session.delegation && session.delegation.taskName) : session.title;

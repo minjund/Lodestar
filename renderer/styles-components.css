@@ -1018,7 +1018,7 @@ button[aria-busy="true"] {
   border-radius: 999px;
   background: color-mix(in srgb,var(--drawer-provider) 7%,#101720);
   color: color-mix(in srgb,var(--drawer-provider) 75%,#d9e3ec);
-  font-size: 11px !important;
+  font-size: 12px !important;
   font-weight: 700;
 }
 
@@ -1137,6 +1137,223 @@ button[aria-busy="true"] {
   border-radius: 50%;
   background: #59dfa7;
   animation: control-room-pulse 1.35s ease-in-out infinite;
+}
+
+.subagent-call-moment {
+  position: relative;
+  display: grid;
+  width: calc(100% - 43px);
+  margin-left: 43px;
+}
+
+.subagent-call-anchor {
+  display: grid;
+  grid-template-columns: 28px minmax(0,1fr);
+  align-items: start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid #263443;
+  border-left: 3px solid color-mix(in srgb,var(--drawer-provider) 68%,#6f8ca4);
+  border-radius: 10px;
+  background: #0b1119;
+}
+
+.subagent-call-anchor > span {
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: color-mix(in srgb,var(--drawer-provider) 12%,#17212c);
+  color: var(--drawer-provider);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.subagent-call-anchor small {
+  display: block;
+  margin-bottom: 4px;
+  color: color-mix(in srgb,var(--drawer-provider) 70%,#9eb0bf);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.subagent-call-anchor blockquote {
+  margin: 0;
+  color: #aebbc8;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.subagent-call-anchor.is-context-only {
+  align-items: center;
+}
+
+.subagent-call-anchor.is-context-only small {
+  margin: 5px 0 0;
+}
+
+.subagent-call-connector {
+  position: relative;
+  height: 24px;
+  display: grid;
+  place-items: center;
+}
+
+.subagent-call-connector i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 25px;
+  width: 2px;
+  background: color-mix(in srgb,var(--drawer-provider) 55%,#34495c);
+}
+
+.subagent-call-connector b {
+  position: relative;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb,var(--drawer-provider) 55%,#3c5368);
+  border-radius: 50%;
+  background: #101821;
+  color: var(--drawer-provider);
+  font-size: 10px;
+}
+
+.subagent-call-moment.is-inline .subagent-call-connector {
+  height: 18px;
+}
+
+.subagent-call-moment.is-inline .subagent-call-connector i {
+  left: 16px;
+}
+
+.subagent-call-event {
+  display: grid;
+  grid-template-columns: 34px minmax(0,1fr) auto;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 2px solid color-mix(in srgb,var(--drawer-provider) 52%,#2a4658);
+  border-radius: 11px;
+  background: linear-gradient(135deg,color-mix(in srgb,var(--drawer-provider) 16%,#101822),#0d141d);
+  color: inherit;
+  text-align: left;
+}
+
+button.subagent-call-event {
+  cursor: pointer;
+  transition: border-color var(--motion-fast) ease, transform var(--motion-fast) ease, background var(--motion-fast) ease;
+}
+
+button.subagent-call-event:hover,
+button.subagent-call-event:focus-visible {
+  border-color: color-mix(in srgb,var(--drawer-provider) 62%,#45627a);
+  background: linear-gradient(135deg,color-mix(in srgb,var(--drawer-provider) 15%,#111b26),#101923);
+  transform: translateY(-1px);
+}
+
+.subagent-call-event.is-unavailable {
+  opacity: .72;
+}
+
+.subagent-call-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb,var(--drawer-provider) 38%,#304154);
+  border-radius: 9px;
+  background: color-mix(in srgb,var(--drawer-provider) 9%,#151d28);
+  color: var(--drawer-provider);
+  font-size: 16px;
+}
+
+.subagent-call-copy,
+.subagent-call-action {
+  min-width: 0;
+}
+
+.subagent-call-copy small,
+.subagent-call-copy b,
+.subagent-call-copy > span,
+.subagent-call-action em,
+.subagent-call-action strong {
+  display: block;
+}
+
+.subagent-call-copy small {
+  margin-bottom: 3px;
+  color: #7f8ea1;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.subagent-call-copy .subagent-call-timing {
+  width: fit-content;
+  margin-bottom: 4px;
+  padding: 3px 7px;
+  border: 1px solid rgba(244,168,93,.4);
+  border-radius: 999px;
+  background: rgba(151,83,31,.17);
+  color: #f2b16f;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.subagent-call-copy .subagent-call-clock {
+  margin: 0 0 5px;
+  color: #77889b;
+  font-size: 10px;
+}
+
+.subagent-call-copy b {
+  overflow: hidden;
+  color: #e0e8ef;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-call-copy > span {
+  margin-top: 4px;
+  overflow: hidden;
+  color: #8e9daf;
+  font-size: 11px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-call-action {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.subagent-call-action em {
+  color: #7f90a3;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.subagent-call-action em.status-running,
+.subagent-call-action em.status-starting {
+  color: #66d9a8;
+}
+
+.subagent-call-action em.status-completed {
+  color: #8ba1b5;
+}
+
+.subagent-call-action strong {
+  color: color-mix(in srgb,var(--drawer-provider) 75%,#dbe6ef);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .chat-row.system .chat-avatar {

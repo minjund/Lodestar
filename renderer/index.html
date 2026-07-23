@@ -61,11 +61,6 @@
         <div id="providerRail" class="provider-rail"></div>
       </section>
 
-      <section class="sidebar-section workspace-section">
-        <div class="section-title"><span data-i18n="ui.workspaces">프로젝트 폴더 필터</span><button id="addWorkspaceBtn" class="icon-button" type="button" title="폴더 필터 추가" data-i18n-title="ui.add_workspace" aria-label="폴더 필터 추가" data-i18n-aria-label="ui.add_workspace" aria-controls="workspaceList">＋</button></div>
-        <div id="workspaceList" class="workspace-list" role="group" aria-label="작업 시작 폴더별 AI 세션 필터" data-i18n-aria-label="quality.workspace_filter"></div>
-      </section>
-
       <div class="sidebar-footer">
         <span class="privacy-light"></span>
         <div><strong data-i18n="ui.secure_on_this_computer">내 컴퓨터에서 안전하게</strong><small data-i18n="ui.conversation_history_is_read_only_on_this_pc">대화 기록은 이 PC에서만 읽습니다</small></div>
@@ -311,7 +306,37 @@
             </button>
           </div>
         </div>
-        <div class="agent-map-toolbar">
+        <div id="controlRoomProjectToolbar" class="control-room-project-toolbar">
+          <div id="workspaceList" class="workspace-list control-room-project-list" role="toolbar" aria-label="프로젝트별 실행 세션 필터" data-i18n-aria-label="control.project_filter"></div>
+          <button id="addWorkspaceBtn" class="control-room-add-project" type="button" title="프로젝트 추가" data-i18n-title="control.add_project" aria-label="프로젝트 추가" data-i18n-aria-label="control.add_project" aria-controls="workspaceList">＋ <span data-i18n="control.add_project">프로젝트 추가</span></button>
+        </div>
+        <div id="controlRoomListToolbar" class="control-room-list-toolbar">
+          <span class="control-room-toolbar-spacer" aria-hidden="true"></span>
+          <label class="control-room-select-field">
+            <span class="sr-only" data-i18n="ui.sort">정렬</span>
+            <select id="controlRoomSortSelect" aria-label="실행 세션 정렬" data-i18n-aria-label="control.sort_sessions">
+              <option value="recent" data-i18n="control.recent_activity">최근 활동순</option>
+              <option value="tokens" data-i18n="ui.highest_usage">많이 사용한 순서</option>
+              <option value="context" data-i18n="ui.highest_context_usage">기억 공간을 많이 쓴 순서</option>
+            </select>
+          </label>
+          <label class="control-room-select-field control-room-project-select-field">
+            <span class="sr-only" data-i18n="control.project_filter">프로젝트</span>
+            <select id="controlRoomProjectSelect" aria-label="프로젝트 선택" data-i18n-aria-label="control.project_filter"><option value="all" data-i18n="control.all_projects">모든 프로젝트</option></select>
+          </label>
+          <div id="controlRoomSearch" class="control-room-search">
+            <input id="controlRoomSearchInput" type="search" maxlength="240" tabindex="-1" aria-hidden="true" aria-label="실행 세션 검색" data-i18n-aria-label="control.search_sessions" placeholder="세션 검색" data-i18n-placeholder="control.search_sessions" autocomplete="off" />
+            <button id="controlRoomSearchBtn" type="button" aria-label="실행 세션 검색 열기" data-i18n-aria-label="control.open_search" aria-controls="controlRoomSearchInput" aria-expanded="false"><span aria-hidden="true">⌕</span></button>
+          </div>
+          <div class="control-room-pagination">
+            <output id="controlRoomPageSummary" class="control-room-page-summary" aria-live="polite">0–0 / 0</output>
+            <div class="control-room-page-buttons">
+              <button id="controlRoomPagePrev" type="button" aria-label="이전 실행 세션" data-i18n-aria-label="control.previous_page">‹</button>
+              <button id="controlRoomPageNext" type="button" aria-label="다음 실행 세션" data-i18n-aria-label="control.next_page">›</button>
+            </div>
+          </div>
+        </div>
+        <div id="agentMapToolbar" class="agent-map-toolbar">
           <div id="graphBreadcrumbs" class="graph-breadcrumbs" aria-label="에이전트 탐색 경로" data-i18n-aria-label="ui.agent_navigation_path"></div>
           <button id="graphResetBtn" class="graph-reset hidden" type="button" data-i18n="ui.back_to_task_list">작업 목록으로</button>
         </div>

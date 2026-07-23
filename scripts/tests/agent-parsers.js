@@ -36,6 +36,20 @@ function registerClaudeParserTests(context) {
     assert.equal(backgroundShell.executions[0].backgroundId, 'shell-42');
     assert.equal(backgroundShell.executions[0].command, 'npm run dev');
 
+    const completedNotification = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'background-notification.jsonl'), [
+      { type: 'assistant', uuid: 'notify-a1', timestamp: '2026-07-14T01:06:00Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'notify-bg', name: 'Bash', input: { command: 'git commit -m done', description: '백그라운드 커밋', run_in_background: true } }] } },
+      { type: 'user', uuid: 'notify-result', timestamp: '2026-07-14T01:06:01Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'notify-bg', content: 'Command running in background with ID: task-42' }] } },
+      { type: 'queue-operation', operation: 'enqueue', timestamp: '2026-07-14T01:06:02Z', content: '<task-notification><task-id>task-42</task-id><tool-use-id>notify-bg</tool-use-id><status>completed</status><summary>Background command completed (exit code 0)</summary></task-notification>' },
+    ]));
+    assert.equal(completedNotification.executions[0].status, 'completed');
+    assert.equal(completedNotification.executions[0].completedAt, '2026-07-14T01:06:02.000Z');
+
+    const processLog = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'process-log.jsonl'), [
+      { type: 'assistant', uuid: 'process-a1', timestamp: '2026-07-14T01:07:00Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'process-poll', name: 'Bash', input: { command: 'powershell.exe -Command poll', description: '서버 시작 확인' } }] } },
+      { type: 'user', uuid: 'process-result', timestamp: '2026-07-14T01:07:01Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'process-poll', content: 'poll 1: port=UP\nStarted Application in 18 seconds (process running for 20 seconds)' }] } },
+    ]));
+    assert.equal(processLog.executions[0].status, 'completed');
+
     const waiting = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'question.jsonl'), [
       { type: 'user', uuid: 'question-u', timestamp: '2026-07-14T01:10:00Z', message: { role: 'user', content: '실행 환경을 정해줘' } },
       { type: 'assistant', uuid: 'question-a', timestamp: '2026-07-14T01:10:01Z', message: { role: 'assistant', content: [{ type: 'text', text: 'WSL과 Windows 중 어떤 환경으로 진행할까요?' }] } },
@@ -43,6 +57,26 @@ function registerClaudeParserTests(context) {
     ]));
     assert.equal(waiting.status, 'waiting');
     assert.equal(waiting.statusDetail, '답변 또는 선택 대기');
+
+    const now = Date.now();
+    const recentBackground = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'question-with-recent-background.jsonl'), [
+      { type: 'user', timestamp: new Date(now - 4_000).toISOString(), message: { role: 'user', content: '개발 서버를 켜고 배포 환경을 물어봐' } },
+      { type: 'assistant', timestamp: new Date(now - 3_000).toISOString(), message: { role: 'assistant', content: [{ type: 'tool_use', id: 'recent-bg', name: 'Bash', input: { command: 'npm run dev', run_in_background: true } }] } },
+      { type: 'user', timestamp: new Date(now - 2_000).toISOString(), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'recent-bg', content: 'Command running in background with ID: recent-42' }] } },
+      { type: 'assistant', timestamp: new Date(now - 1_000).toISOString(), message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: '배포 환경은 Windows와 WSL 중 무엇으로 할까요?' }] } },
+    ]));
+    assert.equal(recentBackground.status, 'waiting');
+    assert.deepStrictEqual(recentBackground.executions.map(item => [item.mode, item.status]), [['background', 'running']]);
+
+    const staleAt = new Date(now - 10 * 60_000).toISOString();
+    const staleBackground = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'question-with-stale-background.jsonl'), [
+      { type: 'assistant', timestamp: staleAt, message: { role: 'assistant', content: [{ type: 'tool_use', id: 'stale-bg', name: 'Bash', input: { command: 'npm run dev', run_in_background: true } }] } },
+      { type: 'user', timestamp: staleAt, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'stale-bg', content: 'Command running in background with ID: stale-42' }] } },
+      { type: 'assistant', timestamp: staleAt, message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: '계속 진행할까요?' }] } },
+    ]));
+    assert.equal(staleBackground.status, 'waiting');
+    assert.deepStrictEqual(staleBackground.executions.map(item => [item.mode, item.status]), [['background', 'unverified']]);
+    assert.equal(staleBackground.executions[0].statusDetail, '최근 실행 신호 없음');
   });
 
   test('세션 상세 조회는 카드 제한과 달리 Claude 전체 대화를 다시 읽는다', () => {
@@ -101,6 +135,85 @@ function registerClaudeParserTests(context) {
     const session = parseClaude(jsonl(file, [{ type: 'assistant', agentId: 'child-01', timestamp: '2026-07-14T01:00:02Z', message: { role: 'assistant', model: 'claude-sonnet-4-6', content: [{ type: 'text', text: '조사 완료' }], usage: { input_tokens: 10, output_tokens: 5 } } }]));
     assert.equal(session.parentId, 'claude:parent-session');
     assert.equal(session.depth, 1);
+  });
+
+  test('Claude Agent와 Task 호출의 실제 prompt를 자식 세션에 연결한다', () => {
+    const parent = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'claude-parent.jsonl'), [
+      { type: 'user', uuid: 'claude-parent-user', timestamp: '2026-07-14T00:59:59Z', message: { role: 'user', content: '두 검사를 나눠서 진행해줘' } },
+      { type: 'assistant', uuid: 'claude-parent-tools', timestamp: '2026-07-14T01:00:00Z', message: { role: 'assistant', content: [
+        { type: 'tool_use', id: 'toolu-agent', name: 'Agent', input: { description: '암호화 인자 검사', subagent_type: 'tester', prompt: 'Crypto.encrypt 호출과 repository 인자를 정확히 검증해줘' } },
+        { type: 'tool_use', id: 'toolu-task', name: 'Task', input: { description: '문서 검사', subagent_type: 'reviewer', prompt: '계획 문서의 frontmatter만 읽기 전용으로 검증해줘' } },
+      ] } },
+      { type: 'user', uuid: 'claude-agent-started', timestamp: '2026-07-14T01:00:01Z', message: { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'toolu-agent', content: 'Async agent launched successfully.\nagentId: claude-agent-child' },
+        { type: 'tool_result', tool_use_id: 'toolu-task', content: 'Async agent launched successfully.\nagentId: claude-task-child' },
+      ] } },
+      { type: 'user', uuid: 'claude-agent-done', timestamp: '2026-07-14T01:00:03Z', message: { role: 'user', content: '<task-notification><task-id>claude-agent-child</task-id><tool-use-id>toolu-agent</tool-use-id><status>completed</status><result>암호화 검사 완료</result></task-notification>' } },
+    ]));
+    const agentChild = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'claude-parent', 'subagents', 'agent-claude-agent-child.jsonl'), [
+      { type: 'user', timestamp: '2026-07-14T01:00:01Z', message: { role: 'user', content: 'Crypto.encrypt 호출과 repository 인자를 정확히 검증해줘' } },
+      { type: 'assistant', timestamp: '2026-07-14T01:00:03Z', message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: '암호화 검사 완료' }] } },
+    ]));
+    const taskChild = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'claude-parent', 'subagents', 'agent-claude-task-child.jsonl'), [
+      { type: 'user', timestamp: '2026-07-14T01:00:01Z', message: { role: 'user', content: '계획 문서의 frontmatter만 읽기 전용으로 검증해줘' } },
+    ]));
+    const sessions = [parent, agentChild, taskChild];
+    attachHierarchy(sessions);
+
+    assert.equal(parent.collaboration.spawns.length, 2);
+    assert.deepStrictEqual(parent.collaboration.spawns.map(spawn => spawn.assignment), [
+      'Crypto.encrypt 호출과 repository 인자를 정확히 검증해줘',
+      '계획 문서의 frontmatter만 읽기 전용으로 검증해줘',
+    ]);
+    assert.equal(parent.collaboration.spawns.every(spawn => spawn.assignmentSource === 'claude-agent-prompt'), true);
+    assert.equal(agentChild.delegation.assignment, 'Crypto.encrypt 호출과 repository 인자를 정확히 검증해줘');
+    assert.equal(taskChild.delegation.assignment, '계획 문서의 frontmatter만 읽기 전용으로 검증해줘');
+    assert.equal(agentChild.delegation.assignmentProtected, false);
+    assert.deepStrictEqual(parent.collaboration.communications.map(event => event.kind), [
+      'assignment', 'assignment', 'started', 'started', 'result',
+    ]);
+  });
+
+  test('Claude 서브에이전트의 end_turn만 작업 완료로 판정한다', () => {
+    const completed = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'completed-parent', 'subagents', 'agent-completed.jsonl'), [
+      { type: 'user', timestamp: '2026-07-14T01:00:00Z', message: { role: 'user', content: '주문 관리 이관을 점검해줘' } },
+      { type: 'assistant', timestamp: '2026-07-14T01:00:01Z', message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: '점검을 완료했습니다.' }] } },
+    ]));
+    assert.equal(completed.status, 'completed');
+    assert.equal(completed.statusDetail, '작업 완료');
+    assert.equal(completed.completionObserved, true);
+    assert.equal(completed.completedAt, '2026-07-14T01:00:01.000Z');
+    assert.equal(completed.result, '점검을 완료했습니다.');
+
+    const interrupted = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'interrupted-parent', 'subagents', 'agent-interrupted.jsonl'), [
+      { type: 'assistant', timestamp: '2026-07-14T02:00:00Z', message: { role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'read-1', name: 'Read', input: { file_path: 'orders.js' } }] } },
+      { type: 'user', timestamp: '2026-07-14T02:00:01Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'read-1', content: 'file contents' }] } },
+    ]));
+    assert.notEqual(interrupted.status, 'completed');
+    assert.equal(interrupted.completionObserved, false);
+
+    const main = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'main-end-turn.jsonl'), [
+      { type: 'assistant', timestamp: '2026-07-14T03:00:00Z', message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: '메인 응답 완료' }] } },
+    ]));
+    assert.notEqual(main.status, 'completed');
+    assert.equal(main.completionObserved, false);
+  });
+
+  test('Claude의 과거 완료 턴이 새로 실행 중인 턴을 대기 상태로 덮지 않는다', () => {
+    const file = path.join(temp, 'claude', 'project', 'active-after-complete.jsonl');
+    const info = jsonl(file, [
+      { type: 'user', timestamp: '2026-07-14T01:00:00Z', message: { role: 'user', content: '첫 작업' } },
+      { type: 'assistant', timestamp: '2026-07-14T01:00:01Z', message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: '첫 작업 완료' }] } },
+      { type: 'system', subtype: 'turn_complete', timestamp: '2026-07-14T01:00:02Z' },
+      { type: 'user', timestamp: '2026-07-14T01:01:00Z', message: { role: 'user', content: '다음 작업을 계속해줘' } },
+      { type: 'assistant', timestamp: '2026-07-14T01:01:01Z', message: { role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'bash-1', name: 'Bash', input: { command: 'npm test' } }] } },
+    ]);
+    const active = new Date(Date.now() - 30_000);
+    fs.utimesSync(file, active, active);
+    info.mtimeMs = fs.statSync(file).mtimeMs;
+    const session = parseClaude(info);
+    assert.equal(session.status, 'running');
+    assert.equal(session.statusDetail, '도구 실행 또는 스트리밍 중');
   });
 
   test('Claude 내부 명령 안내를 숨기고 최근 실제 요청을 제목으로 사용한다', () => {
@@ -319,7 +432,7 @@ function registerCollaborationSummaryTests(context) {
     assert.equal(child.delegation.assignment, '버튼의 실제 동작을 검사해줘');
   });
 
-  test('암호화된 spawn 지시는 직전 메인 AI 설명으로 복원한다', () => {
+  test('암호화된 spawn 지시와 직전 메인 AI 설명을 실제 원문으로 혼동하지 않는다', () => {
     const parent = parseCodex(jsonl(path.join(temp, 'codex', 'rollout-encrypted-assignment.jsonl'), [
       { timestamp: '2026-07-14T02:15:00Z', type: 'session_meta', payload: { id: 'encrypted-assignment', cwd: 'D:\\repo' } },
       { timestamp: '2026-07-14T02:15:01Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-1' } },
@@ -328,13 +441,15 @@ function registerCollaborationSummaryTests(context) {
     ]));
     const spawn = parent.collaboration.spawns[0];
     const assignment = parent.collaboration.communications.find(item => item.kind === 'assignment');
-    assert.equal(spawn.assignment, '서브에이전트를 생성해 독립적으로 1 = 1을 확인시키겠습니다.');
-    assert.equal(spawn.assignmentObserved, true);
+    assert.equal(spawn.assignment, '');
+    assert.equal(spawn.assignmentObserved, false);
     assert.equal(spawn.assignmentProtected, true);
-    assert.equal(spawn.assignmentSource, 'parent-narration');
-    assert.equal(assignment.text, spawn.assignment);
-    assert.equal(assignment.protected, false);
-    assert.equal(assignment.assignmentSource, 'parent-narration');
+    assert.equal(spawn.assignmentSource, 'protected');
+    assert.equal(spawn.assignmentContext, '서브에이전트를 생성해 독립적으로 1 = 1을 확인시키겠습니다.');
+    assert.equal(assignment.text, '');
+    assert.equal(assignment.protected, true);
+    assert.equal(assignment.assignmentSource, 'protected');
+    assert.equal(JSON.stringify(parent).includes('gAAAAABencryptedPayload'), false);
   });
 
 }
@@ -486,6 +601,28 @@ function registerCodexRecoveryTests(context) {
     fs.utimesSync(claudeFile, old, old);
     claudeInfo.mtimeMs = fs.statSync(claudeFile).mtimeMs;
     assert.equal(parseClaude(claudeInfo).status, 'idle');
+
+    const realNow = Date.now;
+    const cacheClock = realNow();
+    const cacheHome = path.join(temp, 'time-sensitive-cache-home');
+    const cacheFile = path.join(cacheHome, '.claude', 'projects', 'cache-project', 'cache-refresh.jsonl');
+    jsonl(cacheFile, [
+      { type: 'user', timestamp: new Date(cacheClock - 4_000).toISOString(), message: { role: 'user', content: '서버를 켜고 진행 여부를 물어봐' } },
+      { type: 'assistant', timestamp: new Date(cacheClock - 3_000).toISOString(), message: { role: 'assistant', content: [{ type: 'tool_use', id: 'cache-bg', name: 'Bash', input: { command: 'npm run dev', run_in_background: true } }] } },
+      { type: 'user', timestamp: new Date(cacheClock - 2_000).toISOString(), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'cache-bg', content: 'Command running in background with ID: cache-42' }] } },
+      { type: 'assistant', timestamp: new Date(cacheClock - 1_000).toISOString(), message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: '계속 진행할까요?' }] } },
+    ]);
+    const monitor = new AgentMonitor({ home: cacheHome });
+    Date.now = () => cacheClock;
+    try {
+      const fresh = monitor.scanNow().sessions.find(session => session.externalId === 'cache-refresh');
+      assert.equal(fresh.executions[0].status, 'running');
+      Date.now = () => cacheClock + 6 * 60_000;
+      const refreshed = monitor.scanNow().sessions.find(session => session.externalId === 'cache-refresh');
+      assert.equal(refreshed.executions[0].status, 'unverified');
+    } finally {
+      Date.now = realNow;
+    }
   });
 
 }

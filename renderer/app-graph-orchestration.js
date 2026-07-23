@@ -10,32 +10,52 @@ window.LoadToAgentAppFactories.createGraphOrchestration = function createGraphOr
     readablePreview,
     agentRoleLabel,
     isLiveSession,
+    isControlRoomSession = isLiveSession,
     graphPath,
     connectedGraphSessions,
     sortGraphNodes,
+    stableSessionSort = sessions => [...sessions],
     runtimeAgentSummary,
     liveTmuxEntries,
     runtimeSeparatedOverview,
     focusedGraph,
     scheduleAgentWorkflowConnections,
+    rememberDisclosureStates = () => {},
+    restoreDisclosureStates = () => {},
   } = context;
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
 
   function renderAgentMap(sessions, motionKind = "refresh") {
+    const liveSessionGrid = $("#liveSessionGrid");
+    rememberDisclosureStates(liveSessionGrid);
     const model = connectedGraphSessions(sessions);
     const focus =
       state.graphFocusId && model.byId.get(state.graphFocusId) && model.included.has(state.graphFocusId) ? model.byId.get(state.graphFocusId) : null;
     if (state.graphFocusId && !focus) state.graphFocusId = null;
-    const roots = sortGraphNodes(model.nodes.filter((session) => !session.parentId || !model.included.has(session.parentId)));
+    const rootSessions = model.nodes.filter((session) => !session.parentId || !model.included.has(session.parentId));
+    const roots = state.controlRoomSort === "tokens"
+      ? [...rootSessions].sort((a, b) => Number((b.usage && b.usage.total) || 0) - Number((a.usage && a.usage.total) || 0))
+      : state.controlRoomSort === "context"
+        ? [...rootSessions].sort((a, b) => Number((b.context && b.context.percent) || 0) - Number((a.context && a.context.percent) || 0))
+        : stableSessionSort(rootSessions);
     if (!model.nodes.length) {
-      $("#liveSessionGrid").innerHTML = "";
+      liveSessionGrid.innerHTML = "";
       $("#graphBreadcrumbs").innerHTML = "";
       $("#graphResetBtn").classList.add("hidden");
+      $("#agentMapToolbar")?.classList.add("hidden");
+      $("#controlRoomProjectToolbar")?.classList.remove("hidden");
+      $("#controlRoomListToolbar")?.classList.remove("hidden");
+      if ($("#controlRoomPageSummary")) $("#controlRoomPageSummary").textContent = t("control.page_summary", { start: 0, end: 0, total: 0 });
+      if ($("#controlRoomPagePrev")) $("#controlRoomPagePrev").disabled = true;
+      if ($("#controlRoomPageNext")) $("#controlRoomPageNext").disabled = true;
       return 0;
     }
 
     if (focus) {
-      $("#liveSessionGrid").innerHTML = focusedGraph(focus, model, motionKind);
+      $("#agentMapToolbar")?.classList.remove("hidden");
+      $("#controlRoomProjectToolbar")?.classList.add("hidden");
+      $("#controlRoomListToolbar")?.classList.add("hidden");
+      liveSessionGrid.innerHTML = focusedGraph(focus, model, motionKind);
       const path = graphPath(focus, model.byId);
       $("#graphBreadcrumbs").innerHTML = `<button type="button" data-graph-reset>${esc(t("graph.task_list"))}</button>${path
         .map((item) => {
@@ -51,17 +71,29 @@ window.LoadToAgentAppFactories.createGraphOrchestration = function createGraphOr
       scheduleAgentWorkflowConnections();
     } else {
       const runtime = runtimeAgentSummary(model, liveTmuxEntries(state.snapshot && state.snapshot.tmux));
-      $("#liveSessionGrid").innerHTML = runtimeSeparatedOverview(roots, model);
-      $("#graphBreadcrumbs").innerHTML = `<span class="control-room-legend">
-        <span><i class="spawn"></i>${esc(t("control.legend_spawn"))}</span>
-        <span><i class="running"></i>${esc(t("control.legend_running"))}</span>
-        <span><i class="done"></i>${esc(t("control.legend_completed"))}</span>
-        <b>${esc(t("control.live_summary", { sessions: runtime.rootCount, helpers: runtime.activeHelperCount, executions: runtime.runningExecutionCount }))}</b>
-      </span>`;
+      const pageSize = Math.max(1, Number(state.controlRoomPageSize || 4));
+      const maxPage = Math.max(0, Math.ceil(roots.length / pageSize) - 1);
+      state.controlRoomPage = Math.min(maxPage, Math.max(0, Number(state.controlRoomPage || 0)));
+      const startIndex = state.controlRoomPage * pageSize;
+      const endIndex = Math.min(roots.length, startIndex + pageSize);
+      const visibleRoots = roots.slice(startIndex, endIndex);
+      liveSessionGrid.innerHTML = runtimeSeparatedOverview(visibleRoots, model, roots);
+      restoreDisclosureStates(liveSessionGrid);
+      $("#graphBreadcrumbs").innerHTML = "";
+      $("#agentMapToolbar")?.classList.add("hidden");
+      $("#controlRoomProjectToolbar")?.classList.remove("hidden");
+      $("#controlRoomListToolbar")?.classList.remove("hidden");
+      if ($("#controlRoomPageSummary")) $("#controlRoomPageSummary").textContent = t("control.page_summary", {
+        start: roots.length ? startIndex + 1 : 0,
+        end: endIndex,
+        total: roots.length,
+      });
+      if ($("#controlRoomPagePrev")) $("#controlRoomPagePrev").disabled = state.controlRoomPage === 0;
+      if ($("#controlRoomPageNext")) $("#controlRoomPageNext").disabled = state.controlRoomPage >= maxPage;
       $("#graphResetBtn").classList.add("hidden");
       return runtime.activeCount;
     }
-    return model.nodes.filter(isLiveSession).length;
+    return model.nodes.filter(isControlRoomSession).length;
   }
 
   return { renderAgentMap };

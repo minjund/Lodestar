@@ -20,6 +20,9 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     statusClass,
     currentActivity,
     isLiveSession,
+    isControlRoomSession = isLiveSession,
+    controlRoomStatus = session => session?.status,
+    sessionRetentionMinutes = () => 0,
     subagentWorkState,
     subagentWorkLabel,
     latestWorkCopy,
@@ -30,6 +33,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     executionModeBadge,
     graphDescendantCount,
     sessionWorkspaceLabel,
+    controlRoomProject = session => ({ key: String(session?.workspace || session?.id || "unknown"), label: sessionWorkspaceLabel(session) }),
   } = context;
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
   const statusLabel = (status) => ({
@@ -44,6 +48,8 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     const usage = session.usage || {};
     const percent = Math.max(0, Math.min(100, Number(context.percent || 0)));
     const running = isLiveSession(session);
+    const presentationStatus = controlRoomStatus(session);
+    const retained = isControlRoomSession(session) && !running;
     const childCount = (session.childIds || []).length;
     const childMetrics = session.collaboration && session.collaboration.metrics;
     const cumulativeChildren = childMetrics ? childMetrics.cumulativeCreated : childCount;
@@ -72,10 +78,12 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
           <span class="provider-mark">${esc(provider.mark)}</span>
           <span class="agent-identity"><b>${esc(role)}</b><small>${esc(provider.label)} · ${esc(session.model || t("graph.model_unknown"))}</small></span>
           ${executionModeBadge(session, true)}
-          <span class="status-pill ${statusClass(session.status)}">${esc(statusLabel(session.status))}</span>
+          <span class="status-pill ${statusClass(presentationStatus)}">${esc(statusLabel(presentationStatus))}</span>
         </span>
         <span class="agent-task-label">
-          ${session.parentId ? t("graph.assigned_task", { source: delegation.assignmentSource === "parent-narration" ? t("graph.main_ai_explanation_suffix") : "" }) : t("graph.current_goal")}
+          ${session.parentId ? t("graph.assigned_task", { source: delegation.assignmentSource === "protected"
+            ? t("graph.assignment_protected_suffix")
+            : (delegation.assignmentSource === "parent-narration" ? t("graph.main_ai_explanation_suffix") : "") }) : t("graph.current_goal")}
         </span>
         <strong class="agent-task" title="${esc(goalPreview.full)}">${esc(goalPreview.text)}</strong>
         ${goalPreview.truncated ? `<span class="agent-goal-note">${esc(t("graph.summary_shown"))}</span>` : ""}
@@ -103,6 +111,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
         <span>${session.parentId
           ? (cumulativeChildren ? t("graph.subagents_created", { count: cumulativeChildren }) : t("graph.helper_ai"))
           : t("project.origin_named", { name: sessionWorkspaceLabel(session) })}</span>
+        ${retained ? `<button type="button" data-session-archive="${esc(session.id)}">${esc(t("control.move_to_history"))}</button>` : ""}
         <button type="button" data-open-session="${esc(session.id)}">${esc(t("graph.view_conversation"))} <b>↗</b>
         </button>
         </footer>
@@ -113,6 +122,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     const provider = providerInfo(session.provider);
     const usage = session.usage || {};
     const directChildren = graphChildren(session, model).length;
+    const presentationStatus = controlRoomStatus(session);
     const identity = session.parentId
       ? t("graph.helper_ai_named", { name: session.agentName || agentRoleLabel(session.agentRole) })
       : t("project.origin_named", { name: sessionWorkspaceLabel(session) });
@@ -124,8 +134,9 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     const outcomeText = outcome || latestWorkCopy(session);
     const assignedWorkPreview = readablePreview(assignedWork, session.parentId ? 110 : 104);
     const taskLabel = session.parentId ? `${label || agentRoleLabel(session.agentRole)}${taskName ? t("graph.assigned_name_suffix", { name: taskName }) : ""}` : label;
-    const assignmentSourceNote =
-      session.parentId && delegation.assignmentSource === "parent-narration"
+    const assignmentSourceNote = session.parentId && delegation.assignmentSource === "protected"
+      ? `<span class="agent-flow-assignment-source">${esc(t("graph.assignment_source_protected"))}</span>`
+      : session.parentId && delegation.assignmentSource === "parent-narration"
         ? `<span class="agent-flow-assignment-source">${esc(t("graph.main_ai_prestart_explanation"))}</span>`
         : "";
     const sharedGoalCopy =
@@ -173,7 +184,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
         </span>
       </button>`;
     }
-    return `<button type="button" class="agent-flow-row ${isLiveSession(session) ? "running" : ""} ${statusClass(session.status)}"
+    return `<button type="button" class="agent-flow-row ${isLiveSession(session) ? "running" : ""} ${statusClass(presentationStatus)}"
       data-graph-focus="${esc(session.id)}"
       data-motion-key="agent:${esc(session.id)}"
       data-motion-value="${esc(session.updatedAt || "")}:${usage.total || 0}:${esc(session.status || "")}"
@@ -185,7 +196,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
         <em>${esc(identity)} · ${directChildren ? `${t("graph.helper_ai_count", { count: directChildren })} · ` : ""}${esc(timeAgo(session.updatedAt))}</em>
         ${assignmentSourceNote}${sharedGoalCopy}${outcomeCopy}
       </span>
-      <span class="agent-flow-provider"><i>${esc(provider.mark)}</i><small>${esc(statusLabel(session.status))}</small></span>
+      <span class="agent-flow-provider"><i>${esc(provider.mark)}</i><small>${esc(statusLabel(presentationStatus))}</small></span>
     </button>`;
   }
 
@@ -418,7 +429,8 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     const executionLabel = t("control.runtime_work", { runtime, kind: executionKind });
     const ownerGoal = controlRoomAgentGoal(owner, 52);
     const running = activity.status === "running";
-    return `<button type="button" class="control-room-node execution-node ${running ? "is-running" : "is-complete"}"
+    const stateClass = running ? "is-running" : (activity.status === "unverified" ? "is-unverified" : "is-complete");
+    return `<button type="button" class="control-room-node execution-node ${stateClass}"
       data-open-execution-owner="${esc(owner.id)}"
       data-open-execution-id="${esc(activity.id)}"
       data-control-summary="${esc(summary.text)}"
@@ -433,10 +445,13 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
 
   function controlRoomSession(root, model) {
     const provider = providerInfo(root.provider);
+    const presentationStatus = controlRoomStatus(root);
+    const waiting = presentationStatus === "waiting";
+    const retained = isControlRoomSession(root) && !isLiveSession(root);
     const descendants = controlRoomDescendants(root, model);
     const actors = [root, ...descendants];
     const executionItems = actors.flatMap(owner => (owner.executions || []).map(activity => ({ activity, owner })));
-    const activeChildren = descendants.filter(child => !["completed", "cancelled", "failed"].includes(child.status) && !child.completionObserved);
+    const activeChildren = descendants.filter(child => ["starting", "running", "paused", "waiting"].includes(child.status) && !child.completionObserved);
     const completedChildren = descendants.filter(child => ["completed", "cancelled", "failed"].includes(child.status) || child.completionObserved);
     const activeExecutions = executionItems.filter(item => item.activity.status === "running");
     const completedExecutions = executionItems
@@ -454,7 +469,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
       data-control-summary="${esc(title.text)}"
       data-motion-key="control-main:${esc(root.id)}" data-motion-value="${esc(root.updatedAt || "")}:${esc(root.status || "")}"
       style="${providerStyle(root.provider)}">
-      <span class="control-main-top"><span class="provider-mark">${esc(provider.mark)}</span><span><small>${esc(t("control.main_agent"))}</small><b>${esc(provider.label)} · ${esc(root.model || t("session.model_unknown"))}</b></span><em><i aria-hidden="true"></i>${esc(statusLabel(root.status))}</em></span>
+      <span class="control-main-top"><span class="provider-mark">${esc(provider.mark)}</span><span><small>${esc(t("control.main_agent"))}</small><b>${esc(provider.label)} · ${esc(root.model || t("session.model_unknown"))}</b></span><em><i aria-hidden="true"></i>${esc(statusLabel(presentationStatus))}</em></span>
       <strong title="${esc(title.full)}">${esc(title.text)}</strong>
       <span class="control-main-now"><small>${esc(t("graph.current_work"))}</small><b title="${esc(current.full)}">${esc(current.text)}</b></span>
       <span class="control-main-meta"><small>${esc(t("control.unit_counts", { helpers: activeChildren.length, executions: activeExecutions.length }))}</small><b>${esc(t("graph.view_conversation"))} →</b></span>
@@ -467,10 +482,16 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     const completed = completedUnits.length
       ? completedUnits.map(unit => unit.kind === "child" ? controlRoomChildNode(unit.child) : controlRoomExecutionNode(unit.item)).join("")
       : `<div class="control-room-complete-empty"><span>✓</span><small>${esc(t("control.completed_empty"))}</small></div>`;
-    return `<article class="control-room-session" data-control-session="${esc(root.id)}" data-session-sortable="${esc(root.id)}"
+    const waitingWithBackground = waiting && activeExecutions.some(item => item.activity.mode === "background" || item.activity.kind === "background");
+    const sessionStateKey = waitingWithBackground
+      ? "control.waiting_background_session"
+      : (waiting ? "control.waiting_session" : "control.live_session");
+    const retention = retained ? `<small class="control-session-retention">${esc(t("control.auto_history_in_minutes", { minutes: sessionRetentionMinutes(root) }))}</small>` : "";
+    const archive = retained ? `<button type="button" class="control-session-archive" data-session-archive="${esc(root.id)}">${esc(t("control.move_to_history"))}</button>` : "";
+    return `<article class="control-room-session ${waiting ? "is-waiting" : ""} ${waitingWithBackground ? "has-background-work" : ""}" data-control-session="${esc(root.id)}" data-session-sortable="${esc(root.id)}"
       style="${providerStyle(root.provider)}" role="group" tabindex="0" draggable="true" aria-grabbed="false"
       aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" aria-label="${esc(t("session.drag_label", { title: title.text }))}" aria-describedby="sessionReorderHelp">
-      <header><div><span class="control-session-live"><i></i>${esc(t("control.live_session"))}</span><b>${esc(title.text)}</b></div><span class="session-drag-handle" aria-hidden="true" title="${esc(t("session.reorder_hint"))}"></span><button type="button" data-graph-focus="${esc(root.id)}">${esc(t("control.open_full_flow"))} ↗</button></header>
+      <header><div><span class="control-session-live"><i></i>${esc(t(sessionStateKey))}</span><b>${esc(title.text)}</b>${retention}</div><span class="session-drag-handle" aria-hidden="true" title="${esc(t("session.reorder_hint"))}"></span>${archive}<button type="button" class="control-session-flow" data-graph-focus="${esc(root.id)}">${esc(t("control.open_full_flow"))} ↗</button></header>
       <div class="control-room-flow">
         <section class="control-room-column main-column"><span class="control-column-label">${esc(t("control.main_work_column"))}</span>${main}</section>
         <span class="control-flow-link live" aria-hidden="true"><i></i></span>
@@ -481,9 +502,44 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     </article>`;
   }
 
-  function runtimeSeparatedOverview(roots, model) {
+  function runtimeSeparatedOverview(roots, model, allRoots = roots) {
+    const projectDescriptor = (root) => {
+      const project = controlRoomProject(root);
+      return { key: project.key, name: project.label };
+    };
+    const allGroups = new Map();
+    allRoots.forEach((root) => {
+      const { key, name } = projectDescriptor(root);
+      if (!allGroups.has(key)) allGroups.set(key, { name, roots: [] });
+      allGroups.get(key).roots.push(root);
+    });
+    const groups = new Map();
+    roots.forEach((root) => {
+      const { key, name } = projectDescriptor(root);
+      if (!groups.has(key)) groups.set(key, { name, roots: [] });
+      groups.get(key).roots.push(root);
+    });
+    const projectGroups = [...groups.entries()].map(([key, { name, roots: projectRoots }], index) => {
+      const projectTotals = allGroups.get(key)?.roots || projectRoots;
+      const activeCount = projectTotals.filter((root) => isLiveSession(root)).length;
+      const attentionCount = projectTotals.filter((root) => !isLiveSession(root) && isControlRoomSession(root)).length;
+      const summary = attentionCount
+        ? t("control.project_live_attention_summary", { active: activeCount, attention: attentionCount })
+        : t("control.project_live_summary", { active: activeCount });
+      const disclosureKey = `control-project:${key}`;
+      const presentation = index === 0 ? "is-primary" : index === 1 ? "is-preview" : "is-collapsed";
+      const projectFocusId = projectRoots[0]?.id || "";
+      return `<details class="control-room-project-group ${presentation}" data-control-project="${esc(name)}" data-disclosure-key="${esc(disclosureKey)}" ${index < 2 ? "open" : ""}>
+        <summary class="control-project-header" data-project-toggle="${esc(name)}">
+          <span class="control-project-heading"><i aria-hidden="true">□</i><b>${esc(name)}</b><small>${esc(summary)}</small><em>${projectTotals.length}</em></span>
+          <span class="control-project-handle" role="img" aria-label="프로젝트 그룹" title="프로젝트 그룹 · 세션은 최근 활동순으로 표시됩니다"></span>
+        </summary>
+        <button type="button" class="control-project-flow-link" data-graph-focus="${esc(projectFocusId)}"><span>${esc(t("control.open_full_flow"))} ↗</span></button>
+        <div class="control-project-body" ${index === 1 ? 'inert aria-hidden="true"' : ""}>${projectRoots.map(root => controlRoomSession(root, model)).join("")}</div>
+      </details>`;
+    }).join("");
     return `<div class="control-room-overview" data-control-room-overview="true">
-      ${sortGraphNodes(roots).map(root => controlRoomSession(root, model)).join("")}
+      ${projectGroups}
     </div>`;
   }
 
@@ -611,7 +667,9 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
             : event.kind === "started"
               ? t("graph.runtime_start_confirmed")
               : t("graph.status_only_recorded"));
-        const sourceLabel = event.assignmentSource === "parent-narration" ? ` · ${t("graph.main_ai_prestart_short")}` : "";
+        const sourceLabel = event.assignmentSource === "protected"
+          ? ` · ${t("graph.assignment_source_protected_short")}`
+          : (event.assignmentSource === "parent-narration" ? ` · ${t("graph.main_ai_prestart_short")}` : "");
         return `<article class="agent-communication-event ${esc(event.kind)}" data-communication-kind="${esc(event.kind)}">
         <span class="communication-route">
           <b>${esc(communicationEndpoint(event.from, owner, model))}</b><i>→</i>
@@ -652,6 +710,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
       running: t("graph.execution_running"),
       completed: t("graph.execution_completed"),
       failed: t("graph.execution_failed"),
+      unverified: t("graph.execution_unverified"),
       cancelled: t("ui.stopped"),
     })[activity.status] || activity.status;
   }

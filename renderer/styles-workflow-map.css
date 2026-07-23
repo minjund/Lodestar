@@ -610,6 +610,10 @@
   border-color: rgba(230,104,112,.4);
 }
 
+.execution-activity-card.unverified {
+  border-color: rgba(229,184,95,.34);
+}
+
 .execution-activity-icon {
   width: 36px;
   height: 36px;
@@ -714,6 +718,10 @@
 
 .execution-activity-card.failed .execution-activity-state>span:first-child i {
   background: #e26972;
+}
+
+.execution-activity-card.unverified .execution-activity-state>span:first-child i {
+  background: #d6b36c;
 }
 
 .execution-activity-state b {

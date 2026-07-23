@@ -291,6 +291,7 @@ app.whenReady().then(async () => {
     await win.webContents.executeJavaScript(`(() => { for (const animation of document.getAnimations()) { try { animation.finish(); } catch {} } return true; })()`);
     viewReports.push(await auditVisibleText(win, 'run-modal'));
     await win.webContents.executeJavaScript(`(() => { document.querySelector('#cancelRunBtn')?.click(); return true; })()`);
+    await waitFor(win, `document.querySelector('#runModal')?.classList.contains('hidden') && document.querySelector('#runModal')?.inert`);
 
     await win.webContents.executeJavaScript(`(() => {
       const app = window.LoadToAgentApp;

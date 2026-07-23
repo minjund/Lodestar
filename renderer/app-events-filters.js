@@ -9,7 +9,7 @@ window.LoadToAgentAppFactories.createFilterEventBindings = function createFilter
   function bindFilterAndWorkspaceEvents() {
     const syncFilterResetButton = () => {
       const hasFilters = Boolean(
-        $("#searchInput").value || state.search || state.providerFilters.size || state.workspace !== "all" || state.sort !== "recent",
+        $("#searchInput").value || state.search || state.providerFilters.size || state.workspace !== "all" || state.sort !== "recent" || state.controlRoomSort !== "recent",
       );
       $("#resetFiltersBtn").classList.toggle("hidden", !hasFilters);
     };
@@ -62,6 +62,7 @@ window.LoadToAgentAppFactories.createFilterEventBindings = function createFilter
       if (item) {
         const label = item.querySelector("strong")?.textContent.trim() || t("project.all");
         state.workspace = item.dataset.workspace;
+        state.controlRoomPage = 0;
         state.visibleLimit = 30;
         renderWorkspaces();
         renderSessions("filter");
@@ -85,8 +86,79 @@ window.LoadToAgentAppFactories.createFilterEventBindings = function createFilter
     workspaceLists.forEach((list) => {
       list.addEventListener("click", handleWorkspaceClick);
       list.addEventListener("keydown", (event) => {
-        moveFocus(event, event.currentTarget, "[data-workspace]", ["ArrowUp"], ["ArrowDown"]);
+        const horizontal = event.currentTarget.id === "workspaceList";
+        moveFocus(event, event.currentTarget, "[data-workspace]", horizontal ? ["ArrowLeft", "ArrowUp"] : ["ArrowUp"], horizontal ? ["ArrowRight", "ArrowDown"] : ["ArrowDown"]);
       });
+    });
+    const controlProjectSelect = $("#controlRoomProjectSelect");
+    controlProjectSelect?.addEventListener("change", (event) => {
+      state.workspace = event.target.value;
+      state.controlRoomPage = 0;
+      state.visibleLimit = 30;
+      renderWorkspaces();
+      renderSessions("filter");
+      syncFilterResetButton();
+      saveDashboardPreferences();
+      announce(t("filter.workspace_results", { project: event.target.selectedOptions[0]?.textContent || t("control.all_projects"), count: filteredSessions().length }));
+    });
+    const controlSortSelect = $("#controlRoomSortSelect");
+    controlSortSelect?.addEventListener("change", (event) => {
+      state.controlRoomSort = event.target.value;
+      state.controlRoomPage = 0;
+      state.visibleLimit = 30;
+      renderSessions("filter");
+      syncFilterResetButton();
+      saveDashboardPreferences();
+      announce(t("filter.sort_changed", { sort: event.target.selectedOptions[0]?.textContent || event.target.value, count: filteredSessions().length }));
+    });
+    const controlSearch = $("#controlRoomSearch");
+    const controlSearchInput = $("#controlRoomSearchInput");
+    const controlSearchButton = $("#controlRoomSearchBtn");
+    let controlSearchTimer = null;
+    const setControlSearchOpen = (open) => {
+      controlSearch?.classList.toggle("is-open", open);
+      controlSearchButton?.setAttribute("aria-expanded", open ? "true" : "false");
+      if (controlSearchInput) {
+        controlSearchInput.tabIndex = open ? 0 : -1;
+        controlSearchInput.setAttribute("aria-hidden", open ? "false" : "true");
+      }
+      if (open) requestAnimationFrame(() => controlSearchInput?.focus());
+    };
+    controlSearchButton?.addEventListener("click", () => setControlSearchOpen(!controlSearch?.classList.contains("is-open")));
+    controlSearchInput?.addEventListener("input", (event) => {
+      clearTimeout(controlSearchTimer);
+      const value = event.target.value;
+      if ($("#searchInput")) $("#searchInput").value = value;
+      controlSearchTimer = setTimeout(() => {
+        state.search = normalizedSearch(value);
+        state.controlRoomPage = 0;
+        state.visibleLimit = 30;
+        renderSessions("filter");
+        syncFilterResetButton();
+        saveDashboardPreferences();
+        announce(t("filter.search_results", { count: filteredSessions().length }));
+      }, 120);
+    });
+    controlSearchInput?.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      if (event.currentTarget.value) {
+        event.currentTarget.value = "";
+        event.currentTarget.dispatchEvent(new Event("input", { bubbles: true }));
+      } else {
+        setControlSearchOpen(false);
+        controlSearchButton?.focus();
+      }
+    });
+    $("#controlRoomPagePrev")?.addEventListener("click", (event) => {
+      state.controlRoomPage = Math.max(0, Number(state.controlRoomPage || 0) - 1);
+      renderSessions("filter");
+      event.currentTarget.focus({ preventScroll: true });
+    });
+    $("#controlRoomPageNext")?.addEventListener("click", (event) => {
+      state.controlRoomPage = Math.max(0, Number(state.controlRoomPage || 0) + 1);
+      renderSessions("filter");
+      event.currentTarget.focus({ preventScroll: true });
     });
     let searchTimer = null;
     $("#searchInput").addEventListener("input", (event) => {
@@ -96,6 +168,7 @@ window.LoadToAgentAppFactories.createFilterEventBindings = function createFilter
       syncFilterResetButton();
       searchTimer = setTimeout(() => {
         state.search = normalizedSearch(value);
+        state.controlRoomPage = 0;
         state.visibleLimit = 30;
         renderSessions("filter");
         announce(window.LoadToAgentI18n.t("filter.search_results", { count: filteredSessions().length }));
@@ -108,6 +181,7 @@ window.LoadToAgentAppFactories.createFilterEventBindings = function createFilter
       $("#searchInput").value = "";
       $("#searchClearBtn").classList.add("hidden");
       state.search = "";
+      state.controlRoomPage = 0;
       state.visibleLimit = 30;
       renderSessions("filter");
       announce(window.LoadToAgentI18n.t("filter.search_cleared"));
@@ -138,6 +212,7 @@ window.LoadToAgentAppFactories.createFilterEventBindings = function createFilter
       const chip = event.target.closest("[data-provider-filter]");
       if (!chip) return;
       toggleProviderFilter(chip.dataset.providerFilter);
+      state.controlRoomPage = 0;
       state.visibleLimit = 30;
       renderProviderFilter();
       renderProviderOverview();
@@ -154,6 +229,7 @@ window.LoadToAgentAppFactories.createFilterEventBindings = function createFilter
     });
     $("#sortSelect").addEventListener("change", (event) => {
       state.sort = event.target.value;
+      state.controlRoomPage = 0;
       state.visibleLimit = 30;
       renderSessions("filter");
       const label = event.target.selectedOptions[0]?.textContent || event.target.value;
@@ -167,6 +243,8 @@ window.LoadToAgentAppFactories.createFilterEventBindings = function createFilter
       state.providerFilters.clear();
       state.workspace = "all";
       state.sort = "recent";
+      state.controlRoomSort = "recent";
+      state.controlRoomPage = 0;
       state.visibleLimit = 30;
       $("#searchInput").value = "";
       $("#searchClearBtn").classList.add("hidden");

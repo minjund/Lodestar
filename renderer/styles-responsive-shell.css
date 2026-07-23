@@ -399,8 +399,15 @@
   }
 
   .chat-progress-updates,
-  .chat-turn-waiting {
+  .chat-turn-waiting,
+  .subagent-call-moment,
+  .subagent-call-event {
     margin-left: 0;
+  }
+
+  .subagent-call-moment,
+  .subagent-call-event {
+    width: 100%;
   }
 
   .json-object>div {
@@ -473,6 +480,20 @@
     width: 25px;
     height: 25px;
     border-radius: 7px;
+  }
+
+  .subagent-call-event {
+    grid-template-columns: 32px minmax(0,1fr);
+  }
+
+  .subagent-call-anchor {
+    grid-template-columns: 26px minmax(0,1fr);
+    padding: 9px 10px;
+  }
+
+  .subagent-call-action {
+    grid-column: 2;
+    justify-items: start;
   }
 
   .main-stage {

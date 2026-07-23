@@ -10,6 +10,7 @@ window.LoadToAgentAppFactories.createGraphModel = function createGraphModel(cont
     state,
     compact,
     isLiveSession,
+    isControlRoomSession = isLiveSession,
     stableSessionSort = sessions => [...sessions],
   } = context;
 
@@ -27,7 +28,7 @@ window.LoadToAgentAppFactories.createGraphModel = function createGraphModel(cont
 
   function connectedGraphSessions(sessions, focusId = state.graphFocusId) {
     const byId = new Map(sessions.map((session) => [session.id, session]));
-    const included = new Set(sessions.filter(isLiveSession).map((session) => session.id));
+    const included = new Set(sessions.filter(isControlRoomSession).map((session) => session.id));
     const includeAncestors = (session) => {
       let current = session;
       const seen = new Set();
@@ -37,7 +38,7 @@ window.LoadToAgentAppFactories.createGraphModel = function createGraphModel(cont
         current = current.parentId ? byId.get(current.parentId) : null;
       }
     };
-    sessions.filter(isLiveSession).forEach(includeAncestors);
+    sessions.filter(isControlRoomSession).forEach(includeAncestors);
     const includeDescendants = (session) => {
       const queue = [...((session && session.childIds) || [])];
       const seen = new Set();
@@ -102,6 +103,7 @@ window.LoadToAgentAppFactories.createGraphModel = function createGraphModel(cont
   }
 
   function runtimeAgentSummary(model, tmuxEntries = []) {
+    const controlNodes = model.nodes.filter(isControlRoomSession);
     const liveNodes = model.nodes.filter(isLiveSession);
     const liveById = new Map(liveNodes.map((session) => [session.id, session]));
     const tmuxSessionIds = new Set(
@@ -114,12 +116,13 @@ window.LoadToAgentAppFactories.createGraphModel = function createGraphModel(cont
       if (agentExecutionMode(session).kind === "tmux") tmuxSessionIds.add(session.id);
     }
     const tmuxCount = liveNodes.filter((session) => tmuxSessionIds.has(session.id)).length;
-    const runningExecutions = liveNodes.flatMap((session) => (session.executions || []).filter((activity) => activity.status === "running"));
+    const runningExecutions = controlNodes.flatMap((session) => (session.executions || []).filter((activity) => activity.status === "running"));
     return {
-      activeCount: liveNodes.length,
+      activeCount: controlNodes.length,
+      waitingCount: controlNodes.filter((session) => !isLiveSession(session)).length,
       standardCount: liveNodes.length - tmuxCount,
       tmuxCount,
-      rootCount: liveNodes.filter((session) => !session.parentId).length,
+      rootCount: controlNodes.filter((session) => !session.parentId).length,
       activeHelperCount: liveNodes.filter((session) => session.parentId).length,
       helperRecordCount: model.nodes.filter((session) => session.parentId).length,
       runningExecutionCount: runningExecutions.length,

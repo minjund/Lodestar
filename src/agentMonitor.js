@@ -492,10 +492,17 @@ class AgentMonitor extends EventEmitter {
 
   parseFile(info, parser, variant = '') {
     const key = `${info.file}|${info.mtimeMs}|${info.size}|${variant}`;
-    const cached = this.parseCache.get(key);
-    if (cached) return cached;
+    const cachedEntry = this.parseCache.get(key);
+    const cached = cachedEntry && cachedEntry.value || cachedEntry;
+    const parsedAt = Number(cachedEntry && cachedEntry.parsedAt || 0);
+    const timeSensitive = Boolean(cached && (
+      cached.status === 'running'
+      || cached.status === 'starting'
+      || (cached.executions || []).some(execution => execution.status === 'running')
+    ));
+    if (cached && (!timeSensitive || Date.now() - parsedAt < ACTIVE_THRESHOLD_MS)) return cached;
     const value = parser(info);
-    if (value) this.parseCache.set(key, value);
+    if (value) this.parseCache.set(key, { value, parsedAt: Date.now() });
     if (this.parseCache.size > 500) {
       const keep = [...this.parseCache.entries()].slice(-300);
       this.parseCache = new Map(keep);
