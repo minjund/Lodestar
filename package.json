@@ -43,6 +43,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node scripts/regression-test.js",
+    "test:accuracy": "node scripts/accuracy-evaluation.js",
     "test:terminal": "electron scripts/terminal-integration-test.js",
     "test:terminal:mac-stress": "node scripts/mac-terminal-stress-check.js",
     "test:terminal-restart": "node scripts/terminal-restart-persistence-check.js",

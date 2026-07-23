@@ -114,9 +114,14 @@ function createHierarchyAttacher(dependencies) {
     record.taskName = record.taskName || child.taskName || collaborationTaskName(child.agentPath);
     record.agentName = child.agentName || record.agentName;
     record.result = record.result || child.result || '';
-    if (child.status === 'running' || child.status === 'starting') record.status = 'running';
+    const lastSentAt = Date.parse(record.lastSentAt || 0);
+    const childCompletedAt = Date.parse(child.completedAt || 0);
+    const followupStillNewer = record.status === 'running'
+      && Number.isFinite(lastSentAt)
+      && (!Number.isFinite(childCompletedAt) || lastSentAt > childCompletedAt);
+    if (child.status === 'running' || child.status === 'starting' || followupStillNewer) record.status = 'running';
     else if (child.status === 'completed' || child.completionObserved || record.result) record.status = 'completed';
-    if (!record.completedAt && child.completedAt) record.completedAt = child.completedAt;
+    if (!record.completedAt && child.completedAt && !followupStillNewer) record.completedAt = child.completedAt;
 
     const retained = retainedByTask.get(record.taskName);
     record.currentlyRetained = Boolean(retained);

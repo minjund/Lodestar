@@ -3,7 +3,9 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { AgentMonitor, parseClaude, parseCodex, attachHierarchy, isProjectlessSession } = require('../../src/agentMonitor');
+const {
+  AgentMonitor, parseClaude, parseCodex, attachHierarchy, isProjectlessSession, mergeManagedWithHistory,
+} = require('../../src/agentMonitor');
 const { assistantRequestsUserResponse } = require('../../src/agentMonitor/responseIntent');
 
 function registerClaudeParserTests(context) {
@@ -172,6 +174,91 @@ function registerClaudeParserTests(context) {
     assert.deepStrictEqual(parent.collaboration.communications.map(event => event.kind), [
       'assignment', 'assignment', 'started', 'started', 'result',
     ]);
+  });
+
+  test('Claude SendMessage 후속 대화와 재개된 서브에이전트 상태를 추적한다', () => {
+    const activeAt = new Date(Date.now() - 1_000);
+    const activeFile = path.join(temp, 'claude', 'project', 'claude-followup-active.jsonl');
+    const activeInfo = jsonl(activeFile, [
+      { type: 'user', uuid: 'followup-user', timestamp: '2026-07-14T01:00:00Z', message: { role: 'user', content: '서브에이전트와 두 번 대화해줘' } },
+      { type: 'assistant', uuid: 'followup-agent-call', timestamp: '2026-07-14T01:00:01Z', message: { role: 'assistant', stop_reason: 'tool_use', content: [
+        { type: 'tool_use', id: 'toolu-agent-followup', name: 'Agent', input: { description: '토큰 확인', prompt: 'FIRST-91C2를 반환해줘' } },
+      ] } },
+      { type: 'user', uuid: 'followup-agent-result', timestamp: '2026-07-14T01:00:02Z', message: { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'toolu-agent-followup', content: 'FIRST-91C2\nagentId: child-followup' },
+      ] } },
+      { type: 'assistant', uuid: 'followup-message-call', timestamp: '2026-07-14T01:00:03Z', message: { role: 'assistant', stop_reason: 'tool_use', content: [
+        { type: 'tool_use', id: 'toolu-send-followup', name: 'SendMessage', input: { to: 'child-followup', summary: '두 번째 토큰', message: 'SECOND-4DB8과 FIRST를 결합해줘', type: 'message' } },
+      ] } },
+      { type: 'user', uuid: 'followup-message-result', timestamp: '2026-07-14T01:00:04Z', message: { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'toolu-send-followup', content: '{"success":true,"resumedAgentId":"child-followup"}' },
+      ] } },
+      { type: 'assistant', uuid: 'followup-waiting', timestamp: '2026-07-14T01:00:05Z', message: { role: 'assistant', stop_reason: 'end_turn', content: [
+        { type: 'text', text: '후속 답변이 도착하면 계속하겠습니다.' },
+      ] } },
+    ]);
+    fs.utimesSync(activeFile, activeAt, activeAt);
+    activeInfo.mtimeMs = fs.statSync(activeFile).mtimeMs;
+    const active = parseClaude(activeInfo);
+
+    assert.equal(active.status, 'running');
+    assert.equal(active.statusDetail, '서브에이전트 작업 진행 중');
+    assert.equal(active.collaboration.spawns[0].status, 'running');
+    assert.equal(active.collaboration.spawns[0].childId, 'claude:child-followup');
+    assert.deepStrictEqual(active.collaboration.communications.map(event => event.kind), [
+      'assignment', 'started', 'result', 'followup',
+    ]);
+    const followup = active.collaboration.communications.find(event => event.kind === 'followup');
+    assert.equal(followup.childId, 'claude:child-followup');
+    assert.equal(followup.text, 'SECOND-4DB8과 FIRST를 결합해줘');
+
+    const child = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'claude-followup-active', 'subagents', 'agent-child-followup.jsonl'), [
+      { type: 'user', timestamp: '2026-07-14T01:00:01Z', message: { role: 'user', content: 'FIRST-91C2를 반환해줘' } },
+      { type: 'assistant', timestamp: '2026-07-14T01:00:02Z', message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: 'FIRST-91C2' }] } },
+    ]));
+    const activeSessions = [active, child];
+    attachHierarchy(activeSessions);
+    assert.equal(active.collaboration.spawns[0].status, 'running');
+    assert.equal(child.delegation.completedAt, null);
+
+    const completed = parseClaude(jsonl(path.join(temp, 'claude', 'project', 'claude-followup-completed.jsonl'), [
+      { type: 'user', timestamp: '2026-07-14T02:00:00Z', message: { role: 'user', content: '서브에이전트와 두 번 대화해줘' } },
+      { type: 'assistant', timestamp: '2026-07-14T02:00:01Z', message: { role: 'assistant', content: [
+        { type: 'tool_use', id: 'toolu-agent-completed', name: 'Agent', input: { description: '토큰 확인', prompt: 'FIRST-91C2를 반환해줘' } },
+      ] } },
+      { type: 'user', timestamp: '2026-07-14T02:00:02Z', message: { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'toolu-agent-completed', content: 'FIRST-91C2\nagentId: child-completed' },
+      ] } },
+      { type: 'assistant', timestamp: '2026-07-14T02:00:03Z', message: { role: 'assistant', content: [
+        { type: 'tool_use', id: 'toolu-send-completed', name: 'SendMessage', input: { to: 'child-completed', message: 'SECOND-4DB8과 FIRST를 결합해줘', type: 'message' } },
+      ] } },
+      { type: 'user', timestamp: '2026-07-14T02:00:04Z', message: { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'toolu-send-completed', content: '{"success":true,"resumedAgentId":"child-completed"}' },
+      ] } },
+      { type: 'queue-operation', operation: 'enqueue', timestamp: '2026-07-14T02:00:05Z', content: '<task-notification><task-id>child-completed</task-id><tool-use-id>toolu-send-completed</tool-use-id><status>completed</status><result>FIRST-91C2 SECOND-4DB8</result></task-notification>' },
+      { type: 'assistant', timestamp: '2026-07-14T02:00:06Z', message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: '왕복 완료' }] } },
+    ]));
+    assert.equal(completed.collaboration.spawns[0].status, 'completed');
+    assert.equal(completed.collaboration.spawns[0].result, 'FIRST-91C2 SECOND-4DB8');
+    assert.deepStrictEqual(completed.collaboration.communications.map(event => event.kind), [
+      'assignment', 'started', 'result', 'followup', 'result',
+    ]);
+    assert.equal(completed.collaboration.communications.at(-1).text, 'FIRST-91C2 SECOND-4DB8');
+
+    const managed = mergeManagedWithHistory(completed, {
+      ...completed,
+      source: 'loadtoagent',
+      runId: 'managed-run',
+      file: 'managed-events.jsonl',
+      messages: [{ id: 'managed-final', role: 'assistant', text: '관리 실행 완료', timestamp: '2026-07-14T02:00:07Z' }],
+      childIds: [],
+      collaboration: { capacity: {}, spawns: [], communications: [], retainedAgents: [] },
+    });
+    assert.equal(managed.source, 'loadtoagent');
+    assert.equal(managed.historyFile, completed.file);
+    assert.equal(managed.collaboration.spawns.length, 1);
+    assert.equal(managed.collaboration.communications.length, 5);
+    assert.equal(managed.messages.some(message => message.id === 'managed-final'), true);
   });
 
   test('Claude 서브에이전트의 end_turn만 작업 완료로 판정한다', () => {

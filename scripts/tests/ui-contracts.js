@@ -1145,7 +1145,7 @@ function registerUiContractTests(context) {
     );
   });
 
-  test('종료된 세션은 마지막 AI 응답 후 30분 동안 대기 상태로 유지되고 수동 기록 이동을 따른다', () => {
+  test('종료된 세션은 최근 기록 위치만 유지하고 실제 상태와 수동 기록 이동을 보존한다', () => {
     const source = fs.readFileSync(path.join(root, 'renderer', 'app.js'), 'utf8');
     const values = new Map();
     const sandbox = {
@@ -1180,7 +1180,7 @@ function registerUiContractTests(context) {
     assert.equal(core.controlRoomStatus(waitingWithBackground, now), 'waiting');
     assert.equal(core.isControlRoomSession({ ...ended, status: 'running' }, now), true);
     assert.equal(core.isControlRoomSession(ended, now), true);
-    assert.equal(core.controlRoomStatus(ended, now), 'waiting');
+    assert.equal(core.controlRoomStatus(ended, now), 'completed');
     assert.equal(core.sessionRetentionMinutes(ended, now), 25);
     assert.equal(core.archiveSession(ended), true);
     assert.equal(core.isControlRoomSession(ended, now), false);
@@ -1200,6 +1200,63 @@ function registerUiContractTests(context) {
     assert.equal(core.archiveSession('root'), true);
     assert.equal(core.isControlRoomSession(child, now), false);
     assert.ok(values.get(core.SESSION_ARCHIVE_STORAGE_KEY));
+  });
+
+  test('서브에이전트 대화에 메인 AI의 SendMessage 후속 지시를 시간순으로 합친다', () => {
+    const source = fs.readFileSync(path.join(root, 'renderer', 'app-drawer-content.js'), 'utf8');
+    const sandbox = {
+      window: {
+        LoadToAgentAppFactories: {},
+        LoadToAgentI18n: { t: key => key, observedText: value => value },
+      },
+    };
+    vm.runInNewContext(source, sandbox, { filename: 'app-drawer-content.js' });
+    const parent = {
+      id: 'claude:parent',
+      messages: [],
+      collaboration: {
+        communications: [{
+          id: 'followup:send-1',
+          kind: 'followup',
+          childId: 'claude:child',
+          taskName: '토큰 확인',
+          from: 'claude:parent',
+          to: 'claude:child',
+          text: 'SECOND-4DB8과 FIRST를 결합해줘',
+          timestamp: '2026-07-14T01:00:03Z',
+        }],
+      },
+    };
+    const child = {
+      id: 'claude:child',
+      parentId: parent.id,
+      taskName: '토큰 확인',
+      agentPath: 'claude:child',
+      startedAt: '2026-07-14T01:00:01Z',
+      updatedAt: '2026-07-14T01:00:04Z',
+      delegation: { taskName: '토큰 확인', startedAt: '2026-07-14T01:00:01Z' },
+      messages: [
+        { id: 'child-user', role: 'user', text: 'FIRST-91C2를 반환해줘', timestamp: '2026-07-14T01:00:01Z' },
+        { id: 'child-first', role: 'assistant', text: 'FIRST-91C2', timestamp: '2026-07-14T01:00:02Z' },
+        { id: 'child-second', role: 'assistant', text: 'FIRST-91C2 SECOND-4DB8', timestamp: '2026-07-14T01:00:04Z' },
+      ],
+    };
+    const details = new Map([[parent.id, parent], [child.id, child]]);
+    const drawer = sandbox.window.LoadToAgentAppFactories.createDrawerContent({
+      state: { details },
+      snapshotSession: id => details.get(id),
+      agentPathTaskName: value => String(value || '').split(':').pop(),
+    });
+    const messages = drawer.subagentWorkMessages(child);
+    assert.deepStrictEqual(
+      Array.from(messages, message => [message.role, message.text]),
+      [
+        ['user', 'FIRST-91C2를 반환해줘'],
+        ['assistant', 'FIRST-91C2'],
+        ['user', 'SECOND-4DB8과 FIRST를 결합해줘'],
+        ['assistant', 'FIRST-91C2 SECOND-4DB8'],
+      ],
+    );
   });
 
   test('AI 표시 설정은 기본값·저장값·세션과 tmux 투영을 일관되게 적용한다', () => {

@@ -629,7 +629,11 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     return retained;
   }
   function controlRoomStatus(session, now = Date.now()) {
-    return isLiveSession(session) ? session.status : (isControlRoomSession(session, now) ? "waiting" : session?.status);
+    // Retention controls where a recently active session is shown, not what
+    // state it is in. Preserve the observed provider status so an idle or
+    // completed session is never presented as waiting for user input.
+    isControlRoomSession(session, now);
+    return session?.status;
   }
   function sessionRetentionMinutes(session, now = Date.now()) {
     const remaining = SESSION_RETENTION_MS - Math.max(0, Number(now) - sessionResponseTimestamp(session));

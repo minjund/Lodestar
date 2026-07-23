@@ -406,6 +406,59 @@ function isProjectlessSession(session) {
     && /(?:^|\/)Documents\/Codex\/\d{4}-\d{2}-\d{2}\/new-chat$/i.test(normalized);
 }
 
+function mergeObservedRows(historyRows = [], managedRows = []) {
+  const rows = [];
+  const ids = new Map();
+  const signatures = new Set();
+  for (const row of [...historyRows, ...managedRows]) {
+    if (!row) continue;
+    const id = String(row.id || row.callId || row.path || '');
+    const signature = [
+      row.role || row.type || '',
+      compactText(row.text || row.detail || row.label || row.assignment || row.taskName || row.result, 6000),
+      timestamp(row.timestamp || row.updatedAt || row.startedAt, ''),
+    ].join('\u0000');
+    if (id && ids.has(id)) {
+      Object.assign(rows[ids.get(id)], row);
+      continue;
+    }
+    if (signatures.has(signature)) continue;
+    if (id) ids.set(id, rows.length);
+    signatures.add(signature);
+    rows.push(structuredClone(row));
+  }
+  return rows.sort((left, right) =>
+    Date.parse(left.timestamp || left.updatedAt || left.startedAt || 0)
+    - Date.parse(right.timestamp || right.updatedAt || right.startedAt || 0));
+}
+
+function mergeManagedWithHistory(history, managed) {
+  if (!history) return managed;
+  if (!managed) return history;
+  const historyCollaboration = history.collaboration || {};
+  const managedCollaboration = managed.collaboration || {};
+  const collaboration = {
+    ...managedCollaboration,
+    ...historyCollaboration,
+    capacity: Number(historyCollaboration.capacity && historyCollaboration.capacity.totalThreads || 0)
+      ? historyCollaboration.capacity
+      : managedCollaboration.capacity,
+    spawns: mergeObservedRows(historyCollaboration.spawns, managedCollaboration.spawns),
+    communications: mergeObservedRows(historyCollaboration.communications, managedCollaboration.communications),
+    retainedAgents: mergeObservedRows(historyCollaboration.retainedAgents, managedCollaboration.retainedAgents),
+  };
+  return {
+    ...history,
+    ...managed,
+    historyFile: history.historyFile || history.file || '',
+    messages: mergeObservedRows(history.messages, managed.messages),
+    lifecycle: mergeObservedRows(history.lifecycle, managed.lifecycle),
+    executions: (history.executions || []).length ? history.executions : (managed.executions || []),
+    childIds: [...new Set([...(history.childIds || []), ...(managed.childIds || [])])],
+    collaboration,
+  };
+}
+
 const attachHierarchy = createHierarchyAttacher({
   addMessage,
   baseSession,
@@ -516,6 +569,19 @@ class AgentMonitor extends EventEmitter {
     let detailed = null;
     if (stored.source === 'loadtoagent' && stored.runId && this.runsDir) {
       detailed = parseManagedSession(path.join(this.runsDir, stored.runId), { fullHistory: true });
+      if (stored.historyFile) {
+        const historyStat = safeStat(stored.historyFile);
+        if (historyStat && historyStat.isFile()) {
+          const historyInfo = { file: stored.historyFile, mtimeMs: historyStat.mtimeMs, size: historyStat.size };
+          const historyParser = stored.provider === 'claude'
+            ? item => parseClaude(item, { fullHistory: true })
+            : stored.provider === 'codex'
+              ? item => parseCodex(item, { fullHistory: true })
+              : item => parseGeneric(item, stored.provider, { fullHistory: true });
+          const historyDetail = this.parseFile(historyInfo, historyParser, 'full-history');
+          detailed = mergeManagedWithHistory(historyDetail, detailed);
+        }
+      }
     } else if (stored.file) {
       const stat = safeStat(stored.file);
       if (stat && stat.isFile()) {
@@ -609,7 +675,9 @@ class AgentMonitor extends EventEmitter {
         const existing = byId.get(session.id);
         if (!existing || Date.parse(session.updatedAt || 0) > Date.parse(existing.updatedAt || 0)) byId.set(session.id, session);
       }
-      for (const session of managed) byId.set(session.id, session);
+      for (const session of managed) {
+        byId.set(session.id, mergeManagedWithHistory(byId.get(session.id), session));
+      }
       const merged = [...byId.values()]
         .map(session => {
           const originCwd = session.originCwd || session.cwd || '';
@@ -653,4 +721,5 @@ module.exports = {
   buildSummary,
   contextInfo,
   attachHierarchy,
+  mergeManagedWithHistory,
 };

@@ -485,7 +485,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     const waitingWithBackground = waiting && activeExecutions.some(item => item.activity.mode === "background" || item.activity.kind === "background");
     const sessionStateKey = waitingWithBackground
       ? "control.waiting_background_session"
-      : (waiting ? "control.waiting_session" : "control.live_session");
+      : (waiting ? "control.waiting_session" : (retained ? "control.recently_completed" : "control.live_session"));
     const retention = retained ? `<small class="control-session-retention">${esc(t("control.auto_history_in_minutes", { minutes: sessionRetentionMinutes(root) }))}</small>` : "";
     const archive = retained ? `<button type="button" class="control-session-archive" data-session-archive="${esc(root.id)}">${esc(t("control.move_to_history"))}</button>` : "";
     return `<article class="control-room-session ${waiting ? "is-waiting" : ""} ${waitingWithBackground ? "has-background-work" : ""}" data-control-session="${esc(root.id)}" data-session-sortable="${esc(root.id)}"
@@ -522,7 +522,10 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     const projectGroups = [...groups.entries()].map(([key, { name, roots: projectRoots }], index) => {
       const projectTotals = allGroups.get(key)?.roots || projectRoots;
       const activeCount = projectTotals.filter((root) => isLiveSession(root)).length;
-      const attentionCount = projectTotals.filter((root) => !isLiveSession(root) && isControlRoomSession(root)).length;
+      const attentionCount = projectTotals.filter((root) =>
+        !isLiveSession(root)
+        && isControlRoomSession(root)
+        && ["waiting", "failed", "paused"].includes(root.status)).length;
       const summary = attentionCount
         ? t("control.project_live_attention_summary", { active: activeCount, attention: attentionCount })
         : t("control.project_live_summary", { active: activeCount });

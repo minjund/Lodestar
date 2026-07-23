@@ -85,6 +85,15 @@ function createClaudeParser(dependencies) {
     return /^(?:Agent|Task)$/i.test(String(name || ''));
   }
 
+  function isClaudeMessageTool(name) {
+    return /^(?:SendMessage|send_message)$/i.test(String(name || ''));
+  }
+
+  function claudeChildId(value) {
+    const externalId = compactText(value, 180).replace(/^claude:/i, '');
+    return externalId ? `claude:${externalId}` : '';
+  }
+
   function addClaudeCommunication(session, event) {
     const communications = session.collaboration.communications;
     const row = {
@@ -103,8 +112,10 @@ function createClaudeParser(dependencies) {
     if (!communications.some(item => item.id === row.id)) communications.push(row);
   }
 
-  function findClaudeSpawn(session, callId) {
-    return session.collaboration.spawns.find(record => record.callId === String(callId || ''));
+  function findClaudeSpawn(session, callId, childExternalId = '') {
+    const childId = claudeChildId(childExternalId);
+    return session.collaboration.spawns.find(record => record.callId === String(callId || '')
+      || (childId && (record.childId === childId || record.agentPath === childId)));
   }
 
   function recordClaudeAgentCall(session, state, row, callId, args) {
@@ -143,14 +154,16 @@ function createClaudeParser(dependencies) {
   }
 
   function updateClaudeSpawn(session, callId, details = {}) {
-    const record = findClaudeSpawn(session, callId);
+    const record = findClaudeSpawn(session, callId, details.childExternalId);
     if (!record) return;
     const childExternalId = compactText(details.childExternalId, 180);
     if (childExternalId) {
-      record.childId = `claude:${childExternalId}`;
+      record.childId = claudeChildId(childExternalId);
       record.agentPath = record.childId;
     }
     if (details.status) record.status = details.status;
+    if (details.startedAt) record.lastSentAt = timestamp(details.startedAt, record.lastSentAt || record.startedAt);
+    if (details.status === 'running') record.completedAt = null;
     if (details.completedAt) record.completedAt = timestamp(details.completedAt, record.completedAt || session.updatedAt);
     if (details.result) record.result = compactText(details.result, 6000);
     for (const communication of session.collaboration.communications) {
@@ -170,9 +183,10 @@ function createClaudeParser(dependencies) {
         timestamp: record.startedAt,
       });
     }
-    if (record.completedAt && !session.collaboration.communications.some(item => item.id === `result:${record.callId}`)) {
+    const resultCallId = String(details.resultCallId || record.callId);
+    if (record.completedAt && !session.collaboration.communications.some(item => item.id === `result:${resultCallId}`)) {
       addClaudeCommunication(session, {
-        id: `result:${record.callId}`,
+        id: `result:${resultCallId}`,
         kind: 'result',
         label: '결과 반환 확인',
         from: record.agentPath || record.taskName,
@@ -185,9 +199,60 @@ function createClaudeParser(dependencies) {
     }
   }
 
+  function recordClaudeMessageCall(session, state, row, callId, args) {
+    const target = compactText(args.to || args.recipient || args.agent_id || args.agentId || args.task_id || args.taskId, 180);
+    const childId = claudeChildId(target);
+    const record = findClaudeSpawn(session, '', target);
+    const messageType = String(args.type || '').toLowerCase();
+    const kind = /interrupt|cancel|shutdown|stop/.test(messageType) ? 'interrupt' : 'followup';
+    const text = compactText(args.message || args.content || args.prompt, 6000);
+    const taskName = record && record.taskName || compactText(args.summary, 180);
+    state.claudeMessageCalls.set(String(callId), { target, childId, kind, text, taskName });
+    if (record && kind === 'followup') {
+      updateClaudeSpawn(session, callId, {
+        childExternalId: target,
+        status: 'running',
+        startedAt: row.timestamp,
+      });
+    }
+    addClaudeCommunication(session, {
+      id: `${kind}:${callId}`,
+      kind,
+      label: kind === 'interrupt' ? '서브에이전트 중단 요청' : '후속 메시지 전달',
+      from: session.agentPath || session.id,
+      to: childId || target,
+      taskName,
+      childId,
+      text,
+      timestamp: row.timestamp,
+    });
+  }
+
+  function recordClaudeMessageToolResult(session, state, item, at) {
+    const callId = String(item.tool_use_id || '');
+    const messageCall = state.claudeMessageCalls.get(callId);
+    if (!messageCall) return;
+    const output = compactText(item.content || item, 12000);
+    const resumed = output.match(/"resumedAgentId"\s*:\s*"([^"]+)"/i)
+      || output.match(/\bAgent\s+"([^"]+)"\s+had no active task/i);
+    const target = resumed && resumed[1] || messageCall.target;
+    updateClaudeSpawn(session, callId, {
+      childExternalId: target,
+      status: item.is_error === true || /"success"\s*:\s*false/i.test(output)
+        ? 'failed'
+        : (messageCall.kind === 'interrupt' ? 'cancelled' : 'running'),
+      startedAt: at,
+    });
+  }
+
   function recordClaudeAgentToolResult(session, state, item, at) {
     const call = state.toolCalls.get(String(item.tool_use_id || ''));
-    if (!call || !isClaudeAgentTool(call.name)) return;
+    if (!call) return;
+    if (isClaudeMessageTool(call.name)) {
+      recordClaudeMessageToolResult(session, state, item, at);
+      return;
+    }
+    if (!isClaudeAgentTool(call.name)) return;
     const output = compactText(item.content || item, 12000);
     const agentId = output.match(/\bagentId:\s*([A-Za-z0-9_-]+)/i);
     const launched = /agent launched successfully|working in the background/i.test(output);
@@ -200,14 +265,16 @@ function createClaudeParser(dependencies) {
     });
   }
 
-  function recordClaudeTaskCompletion(session, notification, at) {
+  function recordClaudeTaskCompletion(session, state, notification, at) {
     if (!notification) return;
     const resultMatch = notification.text.match(/<result>([\s\S]*?)<\/result>/i);
+    const messageCall = state.claudeMessageCalls.get(String(notification.toolUseId || ''));
     updateClaudeSpawn(session, notification.toolUseId, {
       childExternalId: notification.taskId,
       status: notification.status === 'completed' ? 'completed' : notification.status,
       completedAt: at,
       result: resultMatch ? resultMatch[1].trim() : '',
+      resultCallId: messageCall ? notification.toolUseId : undefined,
     });
   }
 
@@ -223,6 +290,7 @@ function createClaudeParser(dependencies) {
       const args = item.input && typeof item.input === 'object' ? item.input : {};
       state.toolCalls.set(String(callId), { name, args });
       if (isClaudeAgentTool(name)) recordClaudeAgentCall(session, state, row, callId, args);
+      if (isClaudeMessageTool(name)) recordClaudeMessageCall(session, state, row, callId, args);
       state.executionTracker.recordCall({ name, callId, args, rawInput: item.input, at: row.timestamp });
       addMessage(session, {
         id,
@@ -305,7 +373,7 @@ function createClaudeParser(dependencies) {
     content.filter(item => item && (!item.type || item.type === 'text'))
       .forEach((item) => {
         const notification = recordTaskNotification(state, typeof item === 'string' ? item : item.text, row.timestamp);
-        recordClaudeTaskCompletion(session, notification, row.timestamp);
+        recordClaudeTaskCompletion(session, state, notification, row.timestamp);
       });
     if (session.depth && role === 'user') state.subagentCompletedAt = null;
     content.forEach((item, index) => {
@@ -367,6 +435,7 @@ function createClaudeParser(dependencies) {
       pendingUserInputCalls: new Set(),
       toolCalls: new Map(),
       executionTracker: createExecutionTracker({ compactText, timestamp }),
+      claudeMessageCalls: new Map(),
       latestTs: session.updatedAt,
       lastTurnFinished: false,
       subagentCompletedAt: null,
@@ -379,7 +448,7 @@ function createClaudeParser(dependencies) {
       if (row.agentId && session.depth) session.agentName = row.agentId;
       if (row.type === 'queue-operation' && row.operation === 'enqueue' && row.content) {
         const notification = recordTaskNotification(state, row.content, row.timestamp);
-        recordClaudeTaskCompletion(session, notification, row.timestamp);
+        recordClaudeTaskCompletion(session, state, notification, row.timestamp);
         const detectedUtility = utilityKind(row.content);
         if (detectedUtility) session.utilityKind = detectedUtility;
         const visibleUser = visibleUserText(row.content);
@@ -430,6 +499,7 @@ function createClaudeParser(dependencies) {
     session.context = contextInfo(currentInput, modelContextWindow('claude', session.model, 0));
     const age = Date.now() - fileInfo.mtimeMs;
     const pendingUserInput = state.pendingUserInputCalls.size > 0;
+    const activeSubagents = session.collaboration.spawns.filter(record => record.status === 'running');
     const conversationalInput = state.lastConversationRole === 'assistant'
       && assistantRequestsUserResponse(state.lastAssistantText)
       && (state.lastTurnFinished || age >= ACTIVE_THRESHOLD_MS);
@@ -443,6 +513,11 @@ function createClaudeParser(dependencies) {
     } else if (!session.depth && (pendingUserInput || conversationalInput)) {
       session.status = 'waiting';
       session.statusDetail = pendingUserInput ? '선택 또는 입력 대기' : '답변 또는 선택 대기';
+    } else if (!session.depth && activeSubagents.length) {
+      session.status = 'running';
+      session.statusDetail = activeSubagents.length === 1
+        ? '서브에이전트 작업 진행 중'
+        : `서브에이전트 ${activeSubagents.length}개 작업 진행 중`;
     } else if (age < STALE_TURN_THRESHOLD_MS && !state.lastTurnFinished) {
       session.status = 'running';
       session.statusDetail = state.lastRole === 'user' ? '응답 생성 중' : '도구 실행 또는 스트리밍 중';

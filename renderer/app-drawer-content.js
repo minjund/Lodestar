@@ -375,17 +375,31 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
       const inheritedText = parentMessageKeys.has(messageKey(message));
       return !inheritedId && !inheritedText;
     });
+    const existingKeys = new Set(messages.map(messageKey));
+    for (const event of subagentCoordinationEvents(session)) {
+      if (!["followup", "message"].includes(event.kind) || !normalizedText(event.text)) continue;
+      const message = {
+        id: `${session.id}:coordination:${event.id}`,
+        role: "user",
+        text: event.text,
+        timestamp: event.timestamp || session.updatedAt,
+        source: "coordination",
+      };
+      const key = messageKey(message);
+      if (existingKeys.has(key)) continue;
+      messages.push(message);
+      existingKeys.add(key);
+    }
     const hasConversation = messages.some((message) =>
       (message.role === "user" || message.role === "assistant") && String(message.text || "").trim(),
     );
-    if (hasConversation) return messages;
-    if (delegation.assignmentObserved && !delegation.assignmentProtected && String(delegation.assignment || "").trim()) {
+    if (!hasConversation && delegation.assignmentObserved && !delegation.assignmentProtected && String(delegation.assignment || "").trim()) {
       messages.push({
         id: `${session.id}:delegation`, role: "user", text: delegation.assignment,
         timestamp: delegation.startedAt || session.startedAt || session.updatedAt,
       });
     }
-    if (String(session.result || delegation.result || "").trim()) {
+    if (!hasConversation && String(session.result || delegation.result || "").trim()) {
       messages.push({
         id: `${session.id}:result`, role: "assistant", text: session.result || delegation.result,
         timestamp: session.completedAt || delegation.completedAt || session.updatedAt,
@@ -515,5 +529,9 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
     </div>`;
   }
 
-  return { conversationTurns, chatHtml, lifecycleHtml, tokensHtml, subagentCommunicationEvents, subagentCoordinationEvents, subagentTextPreview, subagentConversationHtml, executionActivityDetailHtml };
+  return {
+    conversationTurns, chatHtml, lifecycleHtml, tokensHtml,
+    subagentCommunicationEvents, subagentCoordinationEvents, subagentWorkMessages,
+    subagentTextPreview, subagentConversationHtml, executionActivityDetailHtml,
+  };
 };
