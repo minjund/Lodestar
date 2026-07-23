@@ -6,6 +6,7 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
   const {
     esc, uiLocale, state, messageContentHtml, compact, fullNumber, timeOnly, providerInfo, statusIcon, agentPathTaskName, snapshotSession,
     controlRoomAgentGoal, inferredExecutionSummary, executionActivityLabel, executionActivityStatus,
+    conversationDeliveryState, observeConversationDelivery,
   } = context;
   const t = (key, params) => window.LoadToAgentI18n.t(key, params);
 
@@ -57,12 +58,17 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
     const answerKind = assistant && options.answerKind
       ? `<span class="chat-answer-kind${options.live ? " is-live" : ""}">${esc(options.answerKind)}</span>`
       : "";
+    const deliveryStatusKey = {
+      sending: "drawer.message_sending",
+      confirming: "drawer.message_confirming",
+      delayed: "drawer.message_unconfirmed",
+      received: "drawer.message_received",
+      responding: "drawer.message_responding",
+      failed: "drawer.message_failed",
+    };
     const deliveryStatus = !assistant && message.deliveryStatus
-      ? `<span class="chat-delivery-status ${esc(message.deliveryStatus)}">${esc(t(message.deliveryStatus === "failed"
-        ? "drawer.message_failed"
-        : message.deliveryStatus === "sending"
-          ? "drawer.message_sending"
-          : "drawer.message_sent"))}</span>`
+      ? `<span class="chat-delivery-status ${esc(message.deliveryStatus)}">${esc(t(deliveryStatusKey[message.deliveryStatus]
+        || "drawer.message_sent"))}</span>`
       : "";
     const optimisticClasses = message.optimistic
       ? ` is-optimistic is-${esc(message.deliveryStatus || "awaiting")}${message.animate ? " is-new" : ""}`
@@ -81,21 +87,24 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
     const pending = state.pendingConversationMessages.get(session.id) || [];
     if (!pending.length) return { session, forceLatestLive: false };
     const messages = [...(session.messages || [])];
-    const messageKey = (message) => {
-      const id = String(message?.id || "").trim();
-      if (id) return `id:${id}`;
-      return `${message?.role || ""}:${String(message?.text || "").replace(/\s+/g, " ").trim()}:${message?.timestamp || ""}`;
-    };
-    const normalizedText = (value) => String(value || "").replace(/\s+/g, " ").trim();
     const retained = [];
     let forceLatestLive = false;
     for (const entry of pending) {
-      const newMessages = messages.filter(message => !entry.baselineMessageKeys?.has(messageKey(message)));
-      const actualUser = newMessages.find(message =>
-        message.role === "user" && normalizedText(message.text) === normalizedText(entry.text));
-      const newAssistant = newMessages.find(message => message.role === "assistant" && normalizedText(message.text));
-      if (actualUser && newAssistant) continue;
-      if (!actualUser) {
+      const delivery = conversationDeliveryState({ ...session, messages }, entry);
+      if (!delivery) continue;
+      observeConversationDelivery(session, entry, delivery);
+      if (delivery.phase === "responded") {
+        clearTimeout(entry.confirmationTimer);
+        continue;
+      }
+      const tracking = {
+        phase: delivery.phase,
+        elapsedMs: delivery.elapsedMs,
+        error: entry.error || "",
+        receivedAt: delivery.receivedAt,
+        responseObservedAt: delivery.responseObservedAt,
+      };
+      if (!delivery.userMessage) {
         messages.push({
           id: entry.id,
           role: "user",
@@ -103,35 +112,27 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
           timestamp: entry.timestamp,
           optimistic: true,
           animate: !entry.presented,
-          deliveryStatus: entry.status,
+          deliveryStatus: delivery.phase,
+          deliveryTracking: tracking,
         });
         entry.presented = true;
+      } else {
+        const actualIndex = messages.indexOf(delivery.userMessage);
+        if (actualIndex >= 0) {
+          messages[actualIndex] = {
+            ...delivery.userMessage,
+            deliveryStatus: delivery.phase,
+            deliveryTracking: tracking,
+          };
+        }
       }
-      if (newAssistant) entry.status = "resolved";
-      if (entry.status === "sending" || entry.status === "awaiting") forceLatestLive = true;
+      forceLatestLive = true;
       retained.push(entry);
     }
     if (retained.length) state.pendingConversationMessages.set(session.id, retained);
     else state.pendingConversationMessages.delete(session.id);
     messages.sort((left, right) => Date.parse(left.timestamp || 0) - Date.parse(right.timestamp || 0));
     return { session: { ...session, messages }, forceLatestLive };
-  }
-
-  function progressUpdatesHtml(turn, session) {
-    if (!turn.progress.length) return "";
-    const rows = turn.progress.map((message, index) => {
-      const fullTime = new Date(message.timestamp).toLocaleString(uiLocale());
-      return `<article data-progress-message-id="${esc(message.id || "")}">
-        <header><b>${esc(t("drawer.progress_update_item", { count: index + 1 }))}</b><time title="${esc(fullTime)}">${esc(timeOnly(message.timestamp))}</time></header>
-        ${messageContentHtml(message, session.id)}
-      </article>`;
-    }).join("");
-    return `<details class="chat-progress-updates" data-progress-count="${turn.progress.length}"
-      data-disclosure-key="${esc(`drawer:${session.id}:turn:${turn.id}:progress`)}">
-      <summary><span><b>${esc(t("drawer.progress_updates", { count: turn.progress.length }))}</b>
-      <small>${esc(t("drawer.progress_updates_help"))}</small></span><i aria-hidden="true">↓</i></summary>
-      <div class="chat-progress-list">${rows}</div>
-      </details>`;
   }
 
   function subagentCallEvents(session) {
@@ -261,16 +262,68 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
     });
     return items.map(item => {
       if (item.kind === "call") return subagentCallHtml(item.call, { showAnchor: false });
-      const finalMessage = item.message.id === representativeId;
+      const finalMessage = item.index === turn.assistants.length - 1
+        || (representativeId && item.message.id === representativeId);
       return conversationRowHtml(item.message, session, {
         userLabel: labels.userLabel,
         assistantLabel: labels.assistantLabel,
         answerKind: finalMessage
           ? t(turn.live ? "drawer.current_progress" : turn.awaitingFinal ? "drawer.last_progress" : "drawer.final_answer")
-          : t("drawer.main_progress_before_call"),
+          : "",
         live: turn.live && finalMessage,
       });
     }).join("");
+  }
+
+  function deliveryProgressHtml(tracking) {
+    if (!tracking) {
+      return `<div class="chat-delivery-progress phase-observed" data-delivery-phase="observed" role="status" aria-live="polite">
+        <header><span aria-hidden="true"></span><div><b>${esc(t("drawer.delivery_observed_title"))}</b><small>${esc(t("drawer.delivery_observed_detail"))}</small></div></header>
+        <ol>
+          <li class="done"><i aria-hidden="true">✓</i><span><b>${esc(t("drawer.delivery_observed_message"))}</b><small>${esc(t("drawer.delivery_observed_message_help"))}</small></span></li>
+          <li class="active"><i aria-hidden="true">2</i><span><b>${esc(t("drawer.delivery_observed_session"))}</b><small>${esc(t("drawer.delivery_observed_session_help"))}</small></span></li>
+        </ol>
+        <footer><i aria-hidden="true">◎</i><span>${esc(t("drawer.delivery_evidence_observed"))}</span></footer>
+      </div>`;
+    }
+    const phase = tracking.phase || "confirming";
+    const copy = {
+      sending: ["drawer.delivery_sending_title", "drawer.delivery_sending_detail", "drawer.delivery_evidence_sending"],
+      confirming: ["drawer.delivery_confirming_title", "drawer.delivery_confirming_detail", "drawer.delivery_evidence_confirming"],
+      delayed: ["drawer.delivery_delayed_title", "drawer.delivery_delayed_detail", "drawer.delivery_evidence_delayed"],
+      received: ["drawer.delivery_received_title", "drawer.delivery_received_detail", "drawer.delivery_evidence_received"],
+      responding: ["drawer.delivery_responding_title", "drawer.delivery_responding_detail", "drawer.delivery_evidence_responding"],
+      failed: ["drawer.delivery_failed_title", "drawer.delivery_failed_detail", "drawer.delivery_evidence_failed"],
+    }[phase] || ["drawer.delivery_confirming_title", "drawer.delivery_confirming_detail", "drawer.delivery_evidence_confirming"];
+    const stepState = (step) => {
+      if (phase === "failed") return step === 0 ? "error" : "pending";
+      if (phase === "sending") return step === 0 ? "active" : "pending";
+      if (phase === "confirming" || phase === "delayed") {
+        if (step === 0) return "done";
+        if (step === 1) return phase === "delayed" ? "warning" : "active";
+        return "pending";
+      }
+      if (phase === "received") return step < 2 ? "done" : "active";
+      if (phase === "responding") return step < 2 ? "done" : "active";
+      return "pending";
+    };
+    const steps = [
+      ["drawer.delivery_step_dispatch", "drawer.delivery_step_dispatch_help"],
+      ["drawer.delivery_step_received", "drawer.delivery_step_received_help"],
+      ["drawer.delivery_step_response", "drawer.delivery_step_response_help"],
+    ].map(([label, detail], index) => {
+      const status = stepState(index);
+      const marker = status === "done" ? "✓" : status === "error" ? "!" : String(index + 1);
+      return `<li class="${status}"><i aria-hidden="true">${marker}</i><span><b>${esc(t(label))}</b><small>${esc(t(detail))}</small></span></li>`;
+    }).join("");
+    const detail = phase === "failed" && tracking.error
+      ? t("drawer.delivery_failed_with_reason", { reason: tracking.error })
+      : t(copy[1]);
+    return `<div class="chat-delivery-progress phase-${esc(phase)}" data-delivery-phase="${esc(phase)}" role="status" aria-live="polite">
+      <header><span aria-hidden="true"></span><div><b>${esc(t(copy[0]))}</b><small>${esc(detail)}</small></div></header>
+      <ol>${steps}</ol>
+      <footer><i aria-hidden="true">◎</i><span>${esc(t(copy[2]))}</span></footer>
+    </div>`;
   }
 
   function chatHtml(session, options = {}) {
@@ -283,7 +336,6 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
     const assistantLabel = options.assistantLabel || providerInfo(session.provider).label;
     const conversationLabel = options.conversationLabel || t("drawer.conversation");
     const turns = conversationTurns(session, { ...options, forceLatestLive: overlay.forceLatestLive });
-    const progressCount = turns.reduce((sum, turn) => sum + turn.progress.length, 0);
     const omitted = Number(session.omittedMessages || 0);
     const notice =
       omitted || session.truncated
@@ -291,14 +343,8 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
         : "";
     const rows = turns.map((turn, turnIndex) => {
       const user = conversationRowHtml(turn.user, session, { userLabel, assistantLabel });
-      const representative = conversationRowHtml(turn.representative, session, {
-        userLabel,
-        assistantLabel,
-        answerKind: t(turn.live ? "drawer.current_progress" : turn.awaitingFinal ? "drawer.last_progress" : "drawer.final_answer"),
-        live: turn.live,
-      });
       const waiting = turn.live && !turn.representative
-        ? `<div class="chat-turn-waiting"><span aria-hidden="true"></span><b>${esc(t("drawer.preparing_response"))}</b></div>`
+        ? deliveryProgressHtml(turn.user?.deliveryTracking)
         : "";
       const turnStartedAt = Date.parse(turn.user?.timestamp || turn.representative?.timestamp || 0);
       const nextTurnTimestamp = turns[turnIndex + 1]?.user?.timestamp;
@@ -308,11 +354,9 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
         if (Number.isFinite(turnStartedAt) && calledAt < turnStartedAt) return false;
         return !Number.isFinite(nextTurnStartedAt) || calledAt < nextTurnStartedAt;
       });
-      const timeline = turnCalls.length
-        ? turnWithSubagentCallsHtml(turn, session, turnCalls, { userLabel, assistantLabel })
-        : `${representative}${waiting}${progressUpdatesHtml(turn, session)}`;
+      const timeline = turnWithSubagentCallsHtml(turn, session, turnCalls, { userLabel, assistantLabel });
       return `<section class="chat-turn${turn.live ? " is-live" : ""}" data-conversation-turn="${esc(turn.id)}">
-        ${user}${timeline}${turnCalls.length ? waiting : ""}
+        ${user}${timeline}${waiting}
       </section>`;
     }).join("");
     const unmatchedCalls = calls.filter(call => !turns.some((turn, turnIndex) => {
@@ -325,7 +369,7 @@ window.LoadToAgentAppFactories.createDrawerContent = function createDrawerConten
     const callOnlyRows = unmatchedCalls.map(subagentCallHtml).join("");
     const emptyConversation = turns.length || calls.length ? "" : `<div class="empty-state compact"><h3>${esc(t("drawer.no_user_ai_conversation"))}</h3></div>`;
     return `${notice}<div class="chat-history-head">
-      <span>${esc(t("drawer.turn_summary", { label: conversationLabel, count: turns.length, updates: progressCount ? ` · ${t("drawer.progress_updates", { count: progressCount })}` : "" }))}</span>
+      <span>${esc(t("drawer.turn_summary", { label: conversationLabel, count: turns.length, updates: "" }))}</span>
       <button type="button" data-scroll-latest>${esc(t("drawer.latest_conversation"))} ↓</button>
       </div>
       <div class="chat-list">${callOnlyRows}${rows}${emptyConversation}<div class="chat-latest-anchor" aria-label="${esc(t("drawer.latest_conversation"))}">

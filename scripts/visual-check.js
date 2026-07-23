@@ -329,6 +329,66 @@ app.whenReady().then(() => {
       await win.webContents.executeJavaScript("document.querySelector('#closeDrawerBtn')?.click()");
       if (structuredSessionId && structuredMetrics.candidates === 0) throw new Error('구조화 JSON 메시지가 읽기 쉬운 카드로 렌더링되지 않았습니다.');
       if (structuredSessionId && !structuredMetrics.atBottom) throw new Error(`상세 대화가 최신 메시지 위치로 이동하지 않았습니다. gap=${structuredMetrics.bottomGap}`);
+      const deliveryMetrics = await win.webContents.executeJavaScript(`(() => {
+        const app = window.LoadToAgentApp;
+        const base = app.state.details.get(${JSON.stringify(structuredSessionId)}) || {};
+        const id = 'visual-check:delivery-status';
+        const now = Date.now();
+        const messages = [
+          { id: 'delivery-old-user', role: 'user', text: '이전 요청', timestamp: new Date(now - 30000).toISOString() },
+          { id: 'delivery-old-answer', role: 'assistant', text: '이전 요청을 완료했습니다.', timestamp: new Date(now - 25000).toISOString() },
+        ];
+        const fixture = {
+          ...base,
+          id,
+          title: '메시지 전달 상태 확인',
+          status: 'idle',
+          statusDetail: '다음 요청 대기',
+          updatedAt: new Date(now - 25000).toISOString(),
+          messages,
+          lifecycle: [],
+        };
+        const entry = {
+          id: 'local:visual-delivery',
+          text: '그래? 된 거야?',
+          timestamp: new Date(now - 14000).toISOString(),
+          dispatchedAt: new Date(now - 14000).toISOString(),
+          status: 'awaiting',
+          phase: 'confirming',
+          presented: false,
+          baselineMessageKeys: new Set(messages.map(app.conversationMessageKey)),
+        };
+        app.state.details.set(id, fixture);
+        app.state.pendingConversationMessages.set(id, [entry]);
+        app.state.selectedId = id;
+        app.state.drawerTab = 'chat';
+        app.state.drawerForceLatest = true;
+        document.querySelector('#drawerBackdrop').classList.remove('hidden');
+        document.querySelector('#detailDrawer').classList.add('open');
+        document.querySelector('#detailDrawer').setAttribute('aria-hidden', 'false');
+        app.renderDrawer();
+        const panel = document.querySelector('.chat-delivery-progress');
+        const content = document.querySelector('#drawerContent');
+        return {
+          phase: panel?.dataset.deliveryPhase || '',
+          steps: panel?.querySelectorAll('ol > li').length || 0,
+          completedSteps: panel?.querySelectorAll('ol > li.done').length || 0,
+          warningSteps: panel?.querySelectorAll('ol > li.warning').length || 0,
+          evidence: panel?.querySelector('footer')?.textContent.replace(/\\s+/g, ' ').trim() || '',
+          providerStatus: document.querySelector('#drawerProvider')?.textContent || '',
+          noHorizontalOverflow: Boolean(content && content.scrollWidth <= content.clientWidth + 2),
+        };
+      })()`);
+      await new Promise(resolve => setTimeout(resolve, 250));
+      const deliveryImage = await win.webContents.capturePage();
+      const deliveryOutput = path.join(outputDir, 'loadtoagent-message-delivery-status.png');
+      fs.writeFileSync(deliveryOutput, deliveryImage.toPNG());
+      await win.webContents.executeJavaScript("document.querySelector('#closeDrawerBtn')?.click()");
+      if (deliveryMetrics.phase !== 'delayed' || deliveryMetrics.steps !== 3 || deliveryMetrics.completedSteps !== 1
+        || deliveryMetrics.warningSteps !== 1 || !deliveryMetrics.evidence.includes('12초 이상')
+        || !deliveryMetrics.providerStatus.includes('전달 확인 지연') || !deliveryMetrics.noHorizontalOverflow) {
+        throw new Error(`메시지 전달 상태 화면이 실제 확인 근거를 구분하지 못했습니다: ${JSON.stringify(deliveryMetrics)}`);
+      }
       const densitySetup = await win.webContents.executeJavaScript(`(async () => {
         const sessions = window.LoadToAgentApp.state.snapshot && window.LoadToAgentApp.state.snapshot.sessions || [];
         const base = sessions.find(item => !item.parentId && window.LoadToAgentApp.isLiveSession(item)) || sessions[0];
@@ -1105,7 +1165,7 @@ app.whenReady().then(() => {
       const drawerOutput = path.join(outputDir, 'loadtoagent-session-detail.png');
       fs.writeFileSync(drawerOutput, drawerImage.toPNG());
       await win.webContents.executeJavaScript(`Promise.all([${JSON.stringify(commandTerminalId)}, ${JSON.stringify(alternateCommandTerminalId)}].map(id => window.loadtoagent.terminalClose(id).catch(() => null)))`);
-      process.stdout.write(`${output}\n${compactOutput}\n${settingsOutput}\n${terminalOutput}\n${sessionTerminalOutput}\n${terminalCompactOutput}\n${tmuxOutput}\n${tmuxControlOutput}\n${tmuxFocusOutput}\n${tmuxDetailOutput}\n${structuredOutput}\n${treeOutput}\n${managementOutput}\n${focusOutput}\n${communicationOutput}\n${childFocusOutput}\n${subagentStateOutput}\n${subagentConversationOutput}\n${workflowCompactOutput}\n${drawerOutput}\n${JSON.stringify({ bridge: bridgeInfo, beginner: beginnerMetrics, compact: compactMetrics, settings: settingsMetrics, terminal: terminalMetrics, sessionTerminal: sessionTerminalMetrics, terminalCompact: terminalCompactMetrics, terminalContinuity: continuityMetrics, terminalCommand: commandUiMetrics, controlStates: controlStateMetrics, tmuxControl: tmuxControlMetrics, dashboard: metrics, density: densityMetrics, management: managementMetrics, motion: { ...motionMetrics, ...motionClosedMetrics }, workflowChild: childMetrics, workflowReturn: returnMetrics, subagentConversation: subagentConversationMetrics, workflowCompact: workflowCompactMetrics, tmux: tmuxMetrics, tmuxDetail: tmuxDetailMetrics, structuredDetail: structuredMetrics })}\n`);
+      process.stdout.write(`${output}\n${compactOutput}\n${settingsOutput}\n${terminalOutput}\n${sessionTerminalOutput}\n${terminalCompactOutput}\n${tmuxOutput}\n${tmuxControlOutput}\n${tmuxFocusOutput}\n${tmuxDetailOutput}\n${structuredOutput}\n${deliveryOutput}\n${treeOutput}\n${managementOutput}\n${focusOutput}\n${communicationOutput}\n${childFocusOutput}\n${subagentStateOutput}\n${subagentConversationOutput}\n${workflowCompactOutput}\n${drawerOutput}\n${JSON.stringify({ bridge: bridgeInfo, beginner: beginnerMetrics, compact: compactMetrics, settings: settingsMetrics, terminal: terminalMetrics, sessionTerminal: sessionTerminalMetrics, terminalCompact: terminalCompactMetrics, terminalContinuity: continuityMetrics, terminalCommand: commandUiMetrics, controlStates: controlStateMetrics, tmuxControl: tmuxControlMetrics, dashboard: metrics, density: densityMetrics, management: managementMetrics, motion: { ...motionMetrics, ...motionClosedMetrics }, workflowChild: childMetrics, workflowReturn: returnMetrics, subagentConversation: subagentConversationMetrics, workflowCompact: workflowCompactMetrics, tmux: tmuxMetrics, tmuxDetail: tmuxDetailMetrics, structuredDetail: structuredMetrics, deliveryStatus: deliveryMetrics })}\n`);
     } catch (error) {
       process.stderr.write(`${error.stack || error.message}\n`);
       exitCode = 1;

@@ -81,6 +81,18 @@ On startup, LoadToAgent compares its package version with the newest stable GitH
 
 The `10-minute start guide` on Home lets you practice the same four steps. Progress is saved on this computer and the guide can be reopened at any time.
 
+### Continue a conversation and verify delivery
+
+Open a task's **Conversation** tab and use **Continue the conversation** to send another message to a supported connected session. The message stays in the same task and session instead of opening a separate chat.
+
+LoadToAgent shows delivery as three observable steps:
+
+1. the app dispatched the send request;
+2. the exact user message appeared in the AI session log;
+3. a new AI response-start signal appeared after that message.
+
+If the session log does not confirm receipt within 12 seconds, the app reports a delivery-confirmation delay instead of claiming that the AI is already preparing a response. Intermediate AI updates remain in chronological chat order, and only the latest completed message is marked **Final answer**. These labels describe local evidence from the session files; they do not guess what an external AI window is doing.
+
 ## What LoadToAgent shows
 
 | View | What you get |
@@ -89,7 +101,7 @@ The `10-minute start guide` on Home lets you practice the same four steps. Progr
 | Relationship view | The request origin, selected agent, and every directly delegated subagent |
 | Execution units | Foreground shells, background shells, and background jobs started by an AI, including command, workspace, execution ID, and live status |
 | Operations and attention inbox | Prioritized failures, stalls, context risk, approvals, decisions, and input requests with immediate actions |
-| Session detail | Conversation, tool activity, lifecycle events, model, workspace, and status |
+| Session detail | Chronological conversation, evidence-based delivery state, tool activity, lifecycle events, model, workspace, and status |
 | Management summary | Checkpoints, observation confidence, completion summary, artifacts, verification, and run controls |
 | Token view | Input, output, cached, reasoning, total, and reported context-window usage |
 | Session terminal | The selected AI's prior conversation beside its existing PTY or tmux pane, with input continuing in that exact session |

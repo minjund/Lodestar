@@ -7,11 +7,20 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
   const {
     $, $$, esc, state, motionPreference, motionState, STATUS, markGuideStep, rememberDialogTrigger, restoreDialogTrigger, setDialogOpenState,
     providerInfo, isLiveSession, controlRoomStatus = session => session?.status, subagentWorkState, subagentWorkLabel, isProjectlessSession, sessionOriginPath, sessionWorkspaceLabel,
+    pendingConversationDelivery = () => null,
     agentResumeSupport, originAppInfo, selectedSession, snapshotSession, loadSessionDetail, loadSubagentParentDetail,
     chatHtml, lifecycleHtml, tokensHtml, outcomeHtml, subagentCoordinationEvents, subagentConversationHtml, executionActivityDetailHtml,
     agentCommandComposer,
     rememberDisclosureStates = () => {}, restoreDisclosureStates = () => {},
   } = context;
+  const deliveryLabelKey = (phase) => ({
+    sending: "control.delivery_sending",
+    confirming: "control.delivery_confirming",
+    delayed: "control.delivery_delayed",
+    received: "control.delivery_received",
+    responding: "control.delivery_responding",
+    failed: "control.delivery_failed",
+  })[phase] || "control.delivery_confirming";
 
   function openDrawer(id) {
     rememberDialogTrigger();
@@ -98,6 +107,8 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     if (!session) return closeDrawer();
     const provider = providerInfo(session.provider);
     const presentationStatus = controlRoomStatus(session);
+    const delivery = pendingConversationDelivery(session);
+    const presentationLabel = delivery ? t(deliveryLabelKey(delivery.phase)) : STATUS[presentationStatus] || presentationStatus;
     const subagentMode = state.drawerMode === "subagent" && Boolean(session.parentId);
     const executionMode = state.drawerMode === "execution" && Boolean(state.drawerExecutionId);
     const snapshot = snapshotSession(session.id);
@@ -116,8 +127,8 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     $("#drawerProvider").textContent = executionMode
       ? `${activity?.runtime || activity?.tool || t("drawer.execution_unit")} · ${activity ? context.executionActivityStatus(activity) : t("drawer.unknown")}`
       : subagentMode
-      ? `${t("control.subagent")} · ${STATUS[presentationStatus] || presentationStatus}`
-      : `${provider.company} · ${STATUS[presentationStatus] || presentationStatus}`;
+      ? `${t("control.subagent")} · ${presentationLabel}`
+      : `${provider.company} · ${presentationLabel}`;
     const drawerTitle = executionMode
       ? context.inferredExecutionSummary(activity || {}).text
       : subagentMode ? session.title || session.taskName || (session.delegation && session.delegation.taskName) : session.title;

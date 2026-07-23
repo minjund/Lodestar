@@ -12,6 +12,7 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
     selectView,
     providerInfo,
     isLiveSession,
+    conversationMessageKey,
   } = context;
 
   function agentCommandTargets(session) {
@@ -91,12 +92,6 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
     return session?.parentId ? `${session.id}:${route}` : session.id;
   }
 
-  function conversationMessageKey(message) {
-    const id = String(message?.id || "").trim();
-    if (id) return `id:${id}`;
-    return `${message?.role || ""}:${String(message?.text || "").replace(/\s+/g, " ").trim()}:${message?.timestamp || ""}`;
-  }
-
   function beginConversationMessage(session, command) {
     const detail = state.details.get(session.id);
     const baselineMessages = [...(session.messages || []), ...(detail?.messages || [])];
@@ -105,6 +100,8 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
       text: command,
       timestamp: new Date().toISOString(),
       status: "sending",
+      phase: "sending",
+      dispatchedAt: null,
       presented: false,
       baselineMessageKeys: new Set(baselineMessages.map(conversationMessageKey)),
     };
@@ -120,6 +117,25 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
     if (!entry) return;
     entry.status = status;
     entry.error = error;
+    if (status === "awaiting") {
+      entry.dispatchedAt = entry.dispatchedAt || new Date().toISOString();
+      entry.phase = "confirming";
+      const delay = Number(window.LoadToAgentConversationDelivery?.CONFIRMATION_DELAY_MS || 12_000);
+      clearTimeout(entry.confirmationTimer);
+      entry.confirmationTimer = setTimeout(() => {
+        entry.confirmationTimer = 0;
+        const pending = state.pendingConversationMessages.get(sessionId) || [];
+        if (!pending.includes(entry) || entry.status !== "awaiting") return;
+        state.drawerForceLatest = true;
+        context.render?.();
+        context.renderDrawer?.();
+      }, delay + 40);
+    } else if (status === "failed") {
+      entry.phase = "failed";
+      entry.failedAt = new Date().toISOString();
+      clearTimeout(entry.confirmationTimer);
+      entry.confirmationTimer = 0;
+    }
     state.drawerForceLatest = true;
     context.renderDrawer?.();
   }

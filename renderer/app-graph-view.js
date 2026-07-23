@@ -22,6 +22,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     isLiveSession,
     isControlRoomSession = isLiveSession,
     controlRoomStatus = session => session?.status,
+    pendingConversationDelivery = () => null,
     sessionRetentionMinutes = () => 0,
     subagentWorkState,
     subagentWorkLabel,
@@ -41,6 +42,22 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     starting: t("ui.preparing"), running: t("ui.working"), waiting: t("ui.waiting_for_review"), idle: t("ui.idle"),
     completed: t("ui.completed"), failed: t("ui.problem"), cancelled: t("ui.stopped"),
   })[status] || STATUS[status] || status;
+  const deliveryLabelKey = (phase) => ({
+    sending: "control.delivery_sending",
+    confirming: "control.delivery_confirming",
+    delayed: "control.delivery_delayed",
+    received: "control.delivery_received",
+    responding: "control.delivery_responding",
+    failed: "control.delivery_failed",
+  })[phase] || "control.delivery_confirming";
+  const deliverySummaryKey = (phase) => ({
+    sending: "drawer.delivery_sending_title",
+    confirming: "drawer.delivery_confirming_title",
+    delayed: "drawer.delivery_delayed_title",
+    received: "drawer.delivery_received_title",
+    responding: "drawer.delivery_responding_title",
+    failed: "drawer.delivery_failed_title",
+  })[phase] || "drawer.delivery_confirming_title";
 
   function graphNode(session, options = {}) {
     const provider = providerInfo(session.provider);
@@ -50,7 +67,8 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     const percent = Math.max(0, Math.min(100, Number(context.percent || 0)));
     const running = isLiveSession(session);
     const presentationStatus = controlRoomStatus(session);
-    const retained = isControlRoomSession(session) && !running;
+    const delivery = pendingConversationDelivery(session);
+    const retained = isControlRoomSession(session) && !running && !delivery;
     const childCount = (session.childIds || []).length;
     const childMetrics = session.collaboration && session.collaboration.metrics;
     const cumulativeChildren = childMetrics ? childMetrics.cumulativeCreated : childCount;
@@ -62,7 +80,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
           ? delegation.taskName || session.taskName
           : session.title;
     const goalPreview = readablePreview(displayedTask, options.focus ? 118 : 96);
-    const currentWork = latestWorkCopy(session);
+    const currentWork = delivery ? t(deliverySummaryKey(delivery.phase)) : latestWorkCopy(session);
     const currentPreview = readablePreview(currentWork, options.focus ? 132 : 108);
     const role = session.parentId
       ? t("graph.helper_ai_identity", {
@@ -79,7 +97,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
           <span class="provider-mark">${esc(provider.mark)}</span>
           <span class="agent-identity"><b>${esc(role)}</b><small>${esc(provider.label)} · ${esc(session.model || t("graph.model_unknown"))}</small></span>
           ${executionModeBadge(session, true)}
-          <span class="status-pill ${statusClass(presentationStatus)}">${esc(statusLabel(presentationStatus))}</span>
+          <span class="status-pill ${statusClass(presentationStatus)}">${esc(delivery ? t(deliveryLabelKey(delivery.phase)) : statusLabel(presentationStatus))}</span>
         </span>
         <span class="agent-task-label">
           ${session.parentId ? t("graph.assigned_task", { source: delegation.assignmentSource === "protected"
@@ -124,6 +142,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     const usage = session.usage || {};
     const directChildren = graphChildren(session, model).length;
     const presentationStatus = controlRoomStatus(session);
+    const delivery = pendingConversationDelivery(session);
     const identity = session.parentId
       ? t("graph.helper_ai_named", { name: session.agentName || agentRoleLabel(session.agentRole) })
       : t("project.origin_named", { name: sessionWorkspaceLabel(session) });
@@ -132,7 +151,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
     const assignedWork = delegation.assignmentObserved && delegation.assignment ? delegation.assignment : taskName || session.title;
     const sharedGoal = delegation.sharedGoal || session.sharedGoal || "";
     const outcome = delegation.result || session.result || "";
-    const outcomeText = outcome || latestWorkCopy(session);
+    const outcomeText = delivery ? t(deliverySummaryKey(delivery.phase)) : outcome || latestWorkCopy(session);
     const assignedWorkPreview = readablePreview(assignedWork, session.parentId ? 110 : 104);
     const taskLabel = session.parentId ? `${label || agentRoleLabel(session.agentRole)}${taskName ? t("graph.assigned_name_suffix", { name: taskName }) : ""}` : label;
     const assignmentSourceNote = session.parentId && delegation.assignmentSource === "protected"
@@ -197,7 +216,7 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
         <em>${esc(identity)} · ${directChildren ? `${t("graph.helper_ai_count", { count: directChildren })} · ` : ""}${esc(timeAgo(session.updatedAt))}</em>
         ${assignmentSourceNote}${sharedGoalCopy}${outcomeCopy}
       </span>
-      <span class="agent-flow-provider"><i>${esc(provider.mark)}</i><small>${esc(statusLabel(presentationStatus))}</small></span>
+      <span class="agent-flow-provider"><i>${esc(provider.mark)}</i><small>${esc(delivery ? t(deliveryLabelKey(delivery.phase)) : statusLabel(presentationStatus))}</small></span>
     </button>`;
   }
 
@@ -447,8 +466,9 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
   function controlRoomSession(root, model) {
     const provider = providerInfo(root.provider);
     const presentationStatus = controlRoomStatus(root);
+    const delivery = pendingConversationDelivery(root);
     const waiting = presentationStatus === "waiting";
-    const retained = isControlRoomSession(root) && !isLiveSession(root);
+    const retained = isControlRoomSession(root) && !isLiveSession(root) && !delivery;
     const descendants = controlRoomDescendants(root, model);
     const actors = [root, ...descendants];
     const executionItems = actors.flatMap(owner => (owner.executions || []).map(activity => ({ activity, owner })));
@@ -463,14 +483,14 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
       ...completedChildren.map(child => ({ kind: "child", child, timestamp: child.completedAt || child.updatedAt })),
       ...completedExecutions.map(item => ({ kind: "execution", item, timestamp: item.activity.updatedAt || item.activity.startedAt })),
     ].sort((a, b) => Date.parse(b.timestamp || 0) - Date.parse(a.timestamp || 0)).slice(0, 3);
-    const current = controlRoomSummary(latestWorkCopy(root) || root.statusDetail || root.title, 74);
+    const current = controlRoomSummary(delivery ? t(deliverySummaryKey(delivery.phase)) : latestWorkCopy(root) || root.statusDetail || root.title, 74);
     const title = controlRoomAgentGoal(root, 64);
     const unitCount = activeUnits.length;
     const main = `<button type="button" class="control-room-main" data-open-session="${esc(root.id)}"
       data-control-summary="${esc(title.text)}"
       data-motion-key="control-main:${esc(root.id)}" data-motion-value="${esc(root.updatedAt || "")}:${esc(root.status || "")}"
       style="${providerStyle(root.provider)}">
-      <span class="control-main-top"><span class="provider-mark">${esc(provider.mark)}</span><span><small>${esc(t("control.main_agent"))}</small><b>${esc(provider.label)} · ${esc(root.model || t("session.model_unknown"))}</b></span><em><i aria-hidden="true"></i>${esc(statusLabel(presentationStatus))}</em></span>
+      <span class="control-main-top"><span class="provider-mark">${esc(provider.mark)}</span><span><small>${esc(t("control.main_agent"))}</small><b>${esc(provider.label)} · ${esc(root.model || t("session.model_unknown"))}</b></span><em><i aria-hidden="true"></i>${esc(delivery ? t(deliveryLabelKey(delivery.phase)) : statusLabel(presentationStatus))}</em></span>
       <strong title="${esc(title.full)}">${esc(title.text)}</strong>
       <span class="control-main-now"><small>${esc(t("graph.current_work"))}</small><b title="${esc(current.full)}">${esc(current.text)}</b></span>
       <span class="control-main-meta"><small>${esc(t("control.unit_counts", { helpers: activeChildren.length, executions: activeExecutions.length }))}</small><b>${esc(t("graph.view_conversation"))} →</b></span>
@@ -484,9 +504,11 @@ window.LoadToAgentAppFactories.createGraphView = function createGraphView(contex
       ? completedUnits.map(unit => unit.kind === "child" ? controlRoomChildNode(unit.child) : controlRoomExecutionNode(unit.item)).join("")
       : `<div class="control-room-complete-empty"><span>✓</span><small>${esc(t("control.completed_empty"))}</small></div>`;
     const waitingWithBackground = waiting && activeExecutions.some(item => item.activity.mode === "background" || item.activity.kind === "background");
-    const sessionStateKey = waitingWithBackground
-      ? "control.waiting_background_session"
-      : (waiting ? "control.waiting_session" : (retained ? "control.recently_completed" : "control.live_session"));
+    const sessionStateKey = delivery
+      ? deliveryLabelKey(delivery.phase)
+      : waitingWithBackground
+        ? "control.waiting_background_session"
+        : (waiting ? "control.waiting_session" : (retained ? "control.recently_completed" : "control.live_session"));
     const retention = retained ? `<small class="control-session-retention">${esc(t("control.auto_history_in_minutes", { minutes: sessionRetentionMinutes(root) }))}</small>` : "";
     const archive = retained ? `<button type="button" class="control-session-archive" data-session-archive="${esc(root.id)}">${esc(t("control.move_to_history"))}</button>` : "";
     return `<article class="control-room-session ${waiting ? "is-waiting" : ""} ${waitingWithBackground ? "has-background-work" : ""}" data-control-session="${esc(root.id)}" data-session-sortable="${esc(root.id)}"

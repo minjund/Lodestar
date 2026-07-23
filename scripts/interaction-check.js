@@ -94,7 +94,6 @@ const ACTION_MANIFEST = [
   { selector: '[data-managed-run-action]', action: 'management:run-control' },
   { selector: '[data-reassign-session]', action: 'management:reassign' },
   { selector: '[data-scroll-latest]', action: 'drawer:latest' },
-  { selector: '.chat-progress-updates > summary', action: 'drawer:expand-progress' },
   { selector: '[data-retry-detail]', action: 'drawer:retry' },
   { selector: '[data-stop-run]', action: 'drawer:stop-double' },
   { selector: '#runForm', action: 'run:submit' },
@@ -1435,13 +1434,14 @@ async function exerciseDrawer(win, round) {
     activityText: document.querySelector('#drawerContent').innerText.includes('대화 탭에서 숨겨야 하는 도구 시스템 활동'),
     turnCount: document.querySelectorAll('[data-conversation-turn]').length,
     visibleAssistantRows: document.querySelectorAll('.chat-turn > .chat-row.assistant').length,
-    progressCount: Number(document.querySelector('.chat-progress-updates')?.dataset.progressCount || 0),
-    progressOpen: Boolean(document.querySelector('.chat-progress-updates')?.open),
-    finalAnswer: document.querySelector('.chat-answer-kind')?.textContent || '',
+    separateProgressPanel: Boolean(document.querySelector('.chat-progress-updates')),
+    assistantMessageIds: [...document.querySelectorAll('.chat-turn > .chat-row.assistant')].map(item => item.dataset.messageId),
+    answerKinds: [...document.querySelectorAll('.chat-turn > .chat-row.assistant .chat-answer-kind')].map(item => item.textContent.trim()),
   }))()`);
   assert(!toolActivityHidden.activitySection && !toolActivityHidden.activityText && toolActivityHidden.turnCount === 1
-    && toolActivityHidden.visibleAssistantRows === 1 && toolActivityHidden.progressCount === 1
-    && !toolActivityHidden.progressOpen && toolActivityHidden.finalAnswer === '최종 답변',
+    && toolActivityHidden.visibleAssistantRows === 2 && !toolActivityHidden.separateProgressPanel
+    && toolActivityHidden.assistantMessageIds.join(',') === 'ended-progress,ended-roadmap'
+    && toolActivityHidden.answerKinds.length === 1 && toolActivityHidden.answerKinds[0] === '최종 답변',
   `작업 턴 요약 또는 도구·시스템 활동 숨김이 올바르지 않습니다: ${JSON.stringify(toolActivityHidden)}`);
   const titleOnlyRequest = await win.webContents.executeJavaScript(`(() => {
     const turn = window.LoadToAgentApp.conversationTurns({
@@ -1457,11 +1457,6 @@ async function exerciseDrawer(win, round) {
   })()`);
   assert(titleOnlyRequest.request === '/scheduled-run --tick fixture' && titleOnlyRequest.updates === 1 && titleOnlyRequest.awaitingFinal
     && titleOnlyRequest.representative.includes('검토 에이전트'), `제목 기반 요청 복원이나 마지막 진행 상황 판별이 올바르지 않습니다: ${JSON.stringify(titleOnlyRequest)}`);
-  await click(win, '.chat-progress-updates > summary', 'drawer:expand-progress');
-  await waitFor(win, `document.querySelector('.chat-progress-updates')?.open
-    && document.querySelector('.chat-progress-list')?.innerText.includes('먼저 상세 대화 구조와 반응형 화면을 확인하겠습니다.')`, '진행 업데이트 원문을 펼치지 못했습니다.');
-  await win.webContents.executeJavaScript(`window.interactionTest.emitSnapshot()`);
-  await waitFor(win, `document.querySelector('.chat-progress-updates')?.open`, '자동 갱신 뒤 진행 업데이트 펼침 상태가 유지되지 않았습니다.');
   fs.mkdirSync(path.join(__dirname, '..', 'artifacts'), { recursive: true });
   await sleep(120);
   fs.writeFileSync(path.join(__dirname, '..', 'artifacts', 'loadtoagent-collapsed-roadmap.png'), (await win.webContents.capturePage()).toPNG());
@@ -1829,7 +1824,7 @@ async function exerciseAgentControls(win, round) {
   await waitFor(win, `document.querySelector('#detailDrawer').classList.contains('open')
     && window.LoadToAgentApp.state.view === 'all'
     && document.querySelector('#drawerContent .chat-row.user.is-optimistic.is-sending')?.innerText.includes('HANDOFF_EXISTING_SESSION')
-    && Boolean(document.querySelector('#drawerContent .chat-turn-waiting'))
+    && document.querySelector('#drawerContent .chat-delivery-progress')?.dataset.deliveryPhase === 'sending'
     && !document.querySelector('#terminalSection:not(.hidden)')`,
   '대화 전송 직후 내 메시지와 AI 응답 대기 상태를 표시하면서 상세 창을 유지하지 못했습니다.');
   await waitFor(win, `window.interactionTest.getCalls().some(item => item.name === 'terminalCreate'
@@ -1840,7 +1835,8 @@ async function exerciseAgentControls(win, round) {
     && item.args[0].args.join(' ') === '--resume fixture-live-0-external --print HANDOFF_EXISTING_SESSION')
     && window.LoadToAgentApp.state.view === 'all'
     && document.querySelector('#detailDrawer').classList.contains('open')
-    && document.querySelector('#drawerContent .chat-row.user.is-optimistic.is-awaiting')`,
+    && document.querySelector('#drawerContent .chat-row.user.is-optimistic.is-confirming')
+    && document.querySelector('#drawerContent .chat-delivery-progress')?.dataset.deliveryPhase === 'confirming'`,
   'WSL 외부 CLI를 백그라운드에서 이어받고 대화 상세 화면을 유지하지 못했습니다.');
   await win.webContents.executeJavaScript(`(() => {
     const now = Date.now();
@@ -1853,7 +1849,7 @@ async function exerciseAgentControls(win, round) {
   await waitFor(win, `document.querySelector('#drawerContent [data-message-id="fixture-live-0-user-reply-test"]')
     && document.querySelector('#drawerContent [data-message-id="fixture-live-0-assistant-reply-test"]')?.innerText.includes('BACKGROUND_AI_RESPONSE')
     && !document.querySelector('#drawerContent .chat-row.is-optimistic')
-    && !document.querySelector('#drawerContent .chat-turn-waiting')
+    && !document.querySelector('#drawerContent .chat-delivery-progress')
     && !window.LoadToAgentApp.state.pendingConversationMessages.has('fixture-live-0')`,
   '백그라운드 AI 응답이 도착한 뒤 임시 메시지를 실제 대화로 교체하지 못했습니다.');
   await win.webContents.executeJavaScript(`window.interactionTest.clearControls()`);
@@ -1917,7 +1913,7 @@ async function exerciseAgentControls(win, round) {
   })()`);
   mark('agent:command-submit');
   await waitFor(win, `document.querySelector('#drawerContent .chat-row.user.is-optimistic.is-sending')?.innerText.includes('RESTING_HELPER_INLINE_COMMAND')
-    && Boolean(document.querySelector('#drawerContent .chat-turn-waiting'))
+    && document.querySelector('#drawerContent .chat-delivery-progress')?.dataset.deliveryPhase === 'sending'
     && document.querySelector('#detailDrawer').classList.contains('open')
     && window.LoadToAgentApp.state.view === 'all'`,
   '메인 에이전트 경유 메시지가 대화에 즉시 올라가거나 AI 응답 대기 상태가 표시되지 않았습니다.');
@@ -1928,8 +1924,8 @@ async function exerciseAgentControls(win, round) {
     && window.LoadToAgentApp.state.drawerMode === 'subagent'
     && document.querySelector('#detailDrawer').classList.contains('open')
     && !window.interactionTest.getCalls().some(item => item.name === 'terminalCreate' && item.args[0]?.bridgeId === 'fixture-resting')`, '쉬는 서브에이전트 지시가 화면 이동 없이 메인 에이전트를 통해 전달되지 않았습니다.');
-  await waitFor(win, `document.querySelector('#drawerContent .chat-row.user.is-optimistic.is-awaiting')
-    && Boolean(document.querySelector('#drawerContent .chat-turn-waiting'))`,
+  await waitFor(win, `document.querySelector('#drawerContent .chat-row.user.is-optimistic.is-confirming')
+    && document.querySelector('#drawerContent .chat-delivery-progress')?.dataset.deliveryPhase === 'confirming'`,
   '전송 완료 뒤 실제 AI 답변이 올 때까지 대기 상태를 유지하지 못했습니다.');
   await win.webContents.executeJavaScript(`window.interactionTest.clearControls()`);
   round.observed.agentControlModes = ['direct', 'connect', 'handoff', 'origin-resume', 'parent-relay'];

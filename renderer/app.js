@@ -585,6 +585,54 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     const completedAt = Date.parse(session?.completedAt || session?.endedAt || 0);
     return Number.isFinite(completedAt) ? completedAt : 0;
   }
+  function conversationMessageKey(message) {
+    const delivery = window.LoadToAgentConversationDelivery;
+    if (delivery?.messageKey) return delivery.messageKey(message);
+    const id = String(message?.id || "").trim();
+    if (id) return `id:${id}`;
+    return `${message?.role || ""}:${String(message?.text || "").replace(/\s+/g, " ").trim()}:${message?.timestamp || ""}`;
+  }
+  function conversationDeliveryState(session, entry, now = Date.now()) {
+    return window.LoadToAgentConversationDelivery?.deliveryState?.(session, entry, now) || null;
+  }
+  function pendingConversationDelivery(session, now = Date.now()) {
+    const pending = state.pendingConversationMessages.get(String(session?.id || "")) || [];
+    const retained = [];
+    let latest = null;
+    for (const entry of pending) {
+      const delivery = conversationDeliveryState(session, entry, now);
+      if (!delivery) continue;
+      observeConversationDelivery(session, entry, delivery);
+      if (delivery.phase === "responded") {
+        clearTimeout(entry.confirmationTimer);
+        continue;
+      }
+      retained.push(entry);
+      latest = { ...delivery, entry };
+    }
+    if (retained.length !== pending.length) {
+      if (retained.length) state.pendingConversationMessages.set(String(session?.id || ""), retained);
+      else state.pendingConversationMessages.delete(String(session?.id || ""));
+    }
+    return latest;
+  }
+  function observeConversationDelivery(session, entry, delivery) {
+    if (!entry || !delivery || entry.observedPhase === delivery.phase) return;
+    const previousPhase = entry.observedPhase || "";
+    entry.observedPhase = delivery.phase;
+    entry.phase = delivery.phase;
+    entry.phaseChangedAt = new Date().toISOString();
+    console.info("[LoadToAgent:conversation-delivery]", {
+      event: "conversation-delivery-phase-changed",
+      sessionId: String(session?.id || ""),
+      previousPhase,
+      phase: delivery.phase,
+      elapsedMs: Math.round(Number(delivery.elapsedMs || 0)),
+      userMessageObserved: Boolean(delivery.userMessage),
+      responseStartObserved: Boolean(delivery.responseStartEvent),
+      assistantMessageObserved: Boolean(delivery.assistantMessage),
+    });
+  }
   function loadSessionArchives() {
     try {
       const saved = JSON.parse(localStorage.getItem(SESSION_ARCHIVE_STORAGE_KEY) || "{}");
@@ -614,6 +662,10 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
   }
   function isControlRoomSession(session, now = Date.now()) {
     if (!session) return false;
+    if (pendingConversationDelivery(session, now)) {
+      state.controlRoomObservedIds.add(String(session.id || ""));
+      return true;
+    }
     if (isLiveSession(session)) {
       state.controlRoomObservedIds.add(String(session.id || ""));
       return true;
@@ -786,6 +838,10 @@ window.LoadToAgentAppFactories.createCore = function createCore(context = {}) {
     isLiveSession,
     hasRunningExecution,
     sessionResponseTimestamp,
+    conversationMessageKey,
+    conversationDeliveryState,
+    pendingConversationDelivery,
+    observeConversationDelivery,
     loadSessionArchives,
     saveSessionArchives,
     isSessionManuallyArchived,

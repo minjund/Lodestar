@@ -405,8 +405,7 @@
     align-items: flex-start;
   }
 
-  .chat-progress-updates,
-  .chat-turn-waiting,
+  .chat-delivery-progress,
   .subagent-call-moment,
   .subagent-call-event {
     margin-left: 0;
@@ -415,6 +414,11 @@
   .subagent-call-moment,
   .subagent-call-event {
     width: 100%;
+  }
+
+  .chat-delivery-progress ol,
+  .chat-delivery-progress.phase-observed ol {
+    grid-template-columns: 1fr;
   }
 
   .json-object>div {

@@ -34,6 +34,7 @@ const SYNTAX_CHECK_FILES = [
   'src/ipc/registerWorkspaceIpc.js',
   'renderer/i18n-messages.js',
   'renderer/i18n.js',
+  'renderer/conversation-delivery.js',
   'renderer/shared.js',
   'renderer/app.js',
   'renderer/app-provider-visibility.js',
