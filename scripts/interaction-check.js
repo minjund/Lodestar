@@ -1812,6 +1812,22 @@ async function exerciseAgentControls(win, round) {
   await waitFor(win, `document.querySelector('#detailDrawer').classList.contains('open')
     && document.querySelector('#drawerComposer .agent-command-panel.control-handoff[data-agent-command-routing="conversation"] textarea:not([disabled])')`,
   '외부 CLI 세션의 대화 입력창이 열리지 않았습니다.');
+  await win.webContents.executeJavaScript(`(() => {
+    const input = document.querySelector('#drawerComposer [data-agent-command-draft="fixture-live-0"]');
+    input.value = 'FOCUS_STABILITY_DRAFT';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+    input.setSelectionRange(7, 7);
+    window.interactionTest.emitSnapshot();
+  })()`);
+  await sleep(180);
+  await waitFor(win, `(() => {
+    const input = document.querySelector('#drawerComposer [data-agent-command-draft="fixture-live-0"]');
+    return document.activeElement === input
+      && input.value === 'FOCUS_STABILITY_DRAFT'
+      && input.selectionStart === 7
+      && input.selectionEnd === 7;
+  })()`, '실시간 대화 갱신 중 입력 포커스·초안·커서 위치가 유지되지 않았습니다.');
   await clearCalls(win);
   await win.webContents.executeJavaScript(`window.interactionTest.configure({ delays: { terminalCreate: 180 } })`);
   await win.webContents.executeJavaScript(`(() => {
@@ -1831,13 +1847,13 @@ async function exerciseAgentControls(win, round) {
     && item.args[0].provider === 'claude'
     && item.args[0].distro === 'FixtureLinux'
     && item.args[0].cwd === '/mnt/c/Users/fixture/board-migration-loop'
-    && item.args[0].transient === true
-    && item.args[0].args.join(' ') === '--resume fixture-live-0-external --print HANDOFF_EXISTING_SESSION')
+    && item.args[0].transient === false
+    && item.args[0].args.join(' ') === '--resume fixture-live-0-external HANDOFF_EXISTING_SESSION')
     && window.LoadToAgentApp.state.view === 'all'
     && document.querySelector('#detailDrawer').classList.contains('open')
     && document.querySelector('#drawerContent .chat-row.user.is-optimistic.is-confirming')
     && document.querySelector('#drawerContent .chat-delivery-progress')?.dataset.deliveryPhase === 'confirming'`,
-  'WSL 외부 CLI를 백그라운드에서 이어받고 대화 상세 화면을 유지하지 못했습니다.');
+  'WSL 외부 CLI를 지속형 관리 터미널로 이어받고 대화 상세 화면을 유지하지 못했습니다.');
   await win.webContents.executeJavaScript(`(() => {
     const now = Date.now();
     window.interactionTest.appendSessionMessages('fixture-live-0', [
@@ -1940,6 +1956,17 @@ async function exerciseTerminal(win, round) {
   }
   await click(win, '[data-view="terminal"]', 'nav:terminal');
   await waitFor(win, `Boolean(document.querySelector('[data-terminal-id="terminal-main"]'))`, '터미널 목록 로드 실패');
+  await waitFor(win, `Boolean(document.querySelector('#terminalViewport .terminal-screen:not(.hidden) .xterm-helper-textarea'))`, '터미널 직접 입력 요소가 준비되지 않았습니다.');
+  await win.webContents.executeJavaScript(`window.interactionTest.configure({ delays: { terminalList: 180 } })`);
+  await win.webContents.executeJavaScript(`(() => {
+    const input = document.querySelector('#terminalViewport .terminal-screen:not(.hidden) .xterm-helper-textarea');
+    input.focus();
+    window.interactionTest.emitSnapshot();
+  })()`);
+  await sleep(260);
+  await waitFor(win, `document.activeElement === document.querySelector('#terminalViewport .terminal-screen:not(.hidden) .xterm-helper-textarea')`,
+    '실시간 세션 갱신 중 터미널 직접 입력 포커스가 유지되지 않았습니다.');
+  await win.webContents.executeJavaScript(`window.interactionTest.clearControls()`);
   await click(win, '.terminal-session-tools > summary', 'terminal:session-controls');
   await waitFor(win, `document.querySelector('.terminal-session-tools')?.hasAttribute('open')`, '터미널 세션 관리 메뉴가 열리지 않았습니다.');
   const initialFontSize = await win.webContents.executeJavaScript(`Number.parseInt(document.querySelector('#terminalFontSizeLabel')?.textContent || '0', 10)`);

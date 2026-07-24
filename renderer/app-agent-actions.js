@@ -330,6 +330,7 @@ window.LoadToAgentAppFactories.createAgentActions = function createAgentActions(
         try {
           await window.LoadToAgentTerminal.resumeForAgent(targetSession, routedCommand, true, { focus: false });
           state.agentCommandDrafts.delete(sessionId);
+          if (input) input.value = "";
           updateConversationMessage(sessionId, pendingMessage, "awaiting");
           context.toast(t(routingEnabled && routeContext.route === "parent" ? "agent.command_routed_via_parent" : "agent.command_sent_background"));
         } catch (error) {

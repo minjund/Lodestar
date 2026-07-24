@@ -151,7 +151,8 @@
   animation: motion-backdrop-in var(--motion-medium) ease both;
 }
 
-.drawer-backdrop.closing {
+.drawer-backdrop.closing,
+.drawer-backdrop.hidden {
   animation: motion-backdrop-out 260ms ease both;
   pointer-events: none;
 }

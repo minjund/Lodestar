@@ -35,6 +35,8 @@ window.LoadToAgentAppFactories.createGraphOrchestration = function createGraphOr
 
   function renderAgentMap(sessions, motionKind = "refresh") {
     const liveSessionGrid = $("#liveSessionGrid");
+    const preserveFocusedComposer = document.activeElement?.matches?.("[data-agent-command-draft]")
+      && liveSessionGrid.contains(document.activeElement);
     rememberDisclosureStates(liveSessionGrid);
     const model = connectedGraphSessions(sessions);
     const focus =
@@ -47,7 +49,7 @@ window.LoadToAgentAppFactories.createGraphOrchestration = function createGraphOr
         ? [...rootSessions].sort((a, b) => Number((b.context && b.context.percent) || 0) - Number((a.context && a.context.percent) || 0))
         : stableSessionSort(rootSessions);
     if (!model.nodes.length) {
-      liveSessionGrid.innerHTML = "";
+      if (!preserveFocusedComposer) liveSessionGrid.innerHTML = "";
       $("#graphBreadcrumbs").innerHTML = "";
       $("#graphResetBtn").classList.add("hidden");
       $("#agentMapToolbar")?.classList.add("hidden");
@@ -61,7 +63,7 @@ window.LoadToAgentAppFactories.createGraphOrchestration = function createGraphOr
       $("#agentMapToolbar")?.classList.remove("hidden");
       $("#controlRoomProjectToolbar")?.classList.add("hidden");
       $("#controlRoomListToolbar")?.classList.add("hidden");
-      liveSessionGrid.innerHTML = focusedGraph(focus, model, motionKind);
+      if (!preserveFocusedComposer) liveSessionGrid.innerHTML = focusedGraph(focus, model, motionKind);
       const path = graphPath(focus, model.byId);
       $("#graphBreadcrumbs").innerHTML = `<button type="button" data-graph-reset>${esc(t("graph.task_list"))}</button>${path
         .map((item) => {
@@ -77,7 +79,7 @@ window.LoadToAgentAppFactories.createGraphOrchestration = function createGraphOr
       scheduleAgentWorkflowConnections();
     } else {
       const runtime = runtimeAgentSummary(model, liveTmuxEntries(state.snapshot && state.snapshot.tmux));
-      liveSessionGrid.innerHTML = runtimeSeparatedOverview(roots, model, roots);
+      if (!preserveFocusedComposer) liveSessionGrid.innerHTML = runtimeSeparatedOverview(roots, model, roots);
       restoreDisclosureStates(liveSessionGrid);
       $("#graphBreadcrumbs").innerHTML = "";
       $("#agentMapToolbar")?.classList.add("hidden");

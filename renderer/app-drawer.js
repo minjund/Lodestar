@@ -197,7 +197,7 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
     motionState.drawerRenderKey = renderKey;
     motionState.drawerTab = state.drawerTab;
     const detailError = state.detailErrors.get(state.selectedId);
-    content.innerHTML = detailLoading
+    const nextContentHtml = detailLoading
       ? `<div class="drawer-loading"><span></span><b>${esc(t("drawer.loading_history"))}</b><small>${esc(t("drawer.loading_history_help"))}</small></div>`
       : detailError
         ? `<div class="drawer-error">
@@ -216,10 +216,28 @@ window.LoadToAgentAppFactories.createDrawer = function createDrawer(context = {}
             : state.drawerTab === "lifecycle"
               ? lifecycleHtml(session)
               : tokensHtml(session);
+    if (motionState.drawerContentHtml !== nextContentHtml) {
+      content.innerHTML = nextContentHtml;
+      motionState.drawerContentHtml = nextContentHtml;
+    }
     const composer = $("#drawerComposer");
     const showComposer = !executionMode && !detailLoading && !detailError && state.drawerTab === "chat" && typeof agentCommandComposer === "function";
     composer.classList.toggle("hidden", !showComposer);
-    composer.innerHTML = showComposer ? agentCommandComposer(session, { conversation: true }) : "";
+    const nextComposerHtml = showComposer ? agentCommandComposer(session, { conversation: true }) : "";
+    const focusedDraft = document.activeElement?.matches?.("[data-agent-command-draft]")
+      && composer.contains(document.activeElement)
+      && document.activeElement.dataset.agentCommandDraft === session.id;
+    // Session snapshots arrive while the user is typing. Replacing the
+    // composer would destroy the focused textarea and its IME/caret state.
+    // Keep that exact node alive until focus leaves it; the delegated input
+    // handler already mirrors the current draft into state.
+    if (!focusedDraft && motionState.drawerComposerHtml !== nextComposerHtml) {
+      composer.innerHTML = nextComposerHtml;
+      motionState.drawerComposerHtml = nextComposerHtml;
+    } else if (!showComposer && composer.innerHTML) {
+      composer.innerHTML = "";
+      motionState.drawerComposerHtml = "";
+    }
     restoreDisclosureStates(content);
     content.classList.toggle("motion-content-in", shouldAnimateContent && !motionPreference.matches);
     clearTimeout(motionState.drawerContentTimer);

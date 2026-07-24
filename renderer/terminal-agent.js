@@ -153,12 +153,15 @@ window.LoadToAgentTerminalAgentActions = function createModule(context) {
     const created = await window.loadtoagent.terminalCreate({
       type: 'agent',
       provider: support.provider,
-      args: resumeLaunchArgs(support, sendDraft ? prompt : '', { background: options.focus === false }),
+      args: resumeLaunchArgs(support, sendDraft ? prompt : ''),
       cwd,
       distro,
       bridgeId: agentSession.id,
       title,
-      transient: options.focus === false,
+      // Conversation sends must keep the resumed PTY alive. A transient
+      // one-shot process can exit after spawn (for example when the session is
+      // busy) while the composer incorrectly reports that the prompt was sent.
+      transient: false,
       cols: 120,
       rows: 32,
     });

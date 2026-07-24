@@ -179,11 +179,9 @@
     return { supported: true, provider, sessionId, args };
   }
 
-  function resumeLaunchArgs(support, prompt = '', options = {}) {
+  function resumeLaunchArgs(support, prompt = '') {
     const args = [...support.args];
     const text = String(prompt || '').trim();
-    if (options.background && text && support.provider === 'codex') return ['exec', 'resume', support.sessionId, text];
-    if (options.background && text && support.provider === 'claude') return ['--resume', support.sessionId, '--print', text];
     if (text) args.push(text);
     return args;
   }
@@ -698,13 +696,26 @@
       state.active = false;
       return;
     }
+    // Snapshot renders call activate repeatedly while this view is already
+    // open. Refreshing and re-showing the same xterm screen would temporarily
+    // hide its helper textarea and steal direct keyboard focus.
+    if (!enteringMode) return;
     await refreshSessions();
     if (!state.active || state.mode !== nextMode) return;
+    let selectionChanged = false;
     if (enteringMode && !state.selectedId && !state.selectedTmux) {
       const visible = modeSessions();
-      if (visible.length) state.selectedId = visible[0].id;
-      else if (state.mode === 'tmux') state.selectedTmux = tmuxRows()[0] || null;
+      if (visible.length) {
+        state.selectedId = visible[0].id;
+        selectionChanged = true;
+      } else if (state.mode === 'tmux') {
+        state.selectedTmux = tmuxRows()[0] || null;
+        selectionChanged = Boolean(state.selectedTmux);
+      }
     }
+    // refreshSessions already rendered and showed the existing selection. Avoid
+    // hiding the same xterm host a second time after users can start typing.
+    if (!selectionChanged) return;
     renderAll();
     await showSelection();
   }

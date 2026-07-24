@@ -275,6 +275,13 @@ window.LoadToAgentAppFactories.createRuntimeOverview = function createRuntimeOve
         ${selected ? loopDetail(selected) : noActiveLoop()}
       </section>
     </div>`;
+    // Restore scroll synchronously before another snapshot render can replace
+    // this freshly-created DOM and accidentally capture zero as its position.
+    const immediateScheduleList = section.querySelector(".runtime-schedule-list");
+    const immediateSelectedTab = section.querySelector(".runtime-loop-tab.selected");
+    const immediateTabList = immediateSelectedTab?.closest(".runtime-loop-tabs");
+    if (immediateScheduleList) immediateScheduleList.scrollTop = scheduleScrollTop;
+    if (immediateTabList) immediateTabList.scrollLeft = loopScrollLeft;
     requestAnimationFrame(() => {
       if (renderVersion !== runtimeRenderVersion) return;
       const scheduleList = section.querySelector(".runtime-schedule-list");

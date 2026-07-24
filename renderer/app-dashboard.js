@@ -211,7 +211,9 @@ window.LoadToAgentAppFactories.createDashboard = function createDashboard(contex
       if (desktopList.dataset.overflowBound !== "true") {
         desktopList.dataset.overflowBound = "true";
         desktopList.addEventListener("scroll", updateProjectOverflow, { passive: true });
-        desktopList._overflowObserver = new ResizeObserver(updateProjectOverflow);
+        // Mutating layout-related classes directly inside ResizeObserver can
+        // trigger Chromium's "undelivered notifications" loop warning.
+        desktopList._overflowObserver = new ResizeObserver(() => requestAnimationFrame(updateProjectOverflow));
         desktopList._overflowObserver.observe(desktopList);
       }
       requestAnimationFrame(updateProjectOverflow);

@@ -246,6 +246,8 @@ window.LoadToAgentAppFactories.createManagement = function createManagement(cont
   function renderAttentionInbox() {
     const section = $("#attentionInbox");
     if (!section) return 0;
+    const preserveFocusedComposer = document.activeElement?.matches?.("[data-agent-command-draft]")
+      && section.contains(document.activeElement);
     const reviewSessions = context.filteredSessions().filter(needsManagementReview);
     const filter = ["critical", "warning", "attention"].includes(state.managementFilter) ? state.managementFilter : "all";
     const sessions = reviewSessions.filter(session => filter === "all" || matchesManagementFilter(session, filter));
@@ -255,13 +257,14 @@ window.LoadToAgentAppFactories.createManagement = function createManagement(cont
       attention: reviewSessions.filter(session => matchesManagementFilter(session, "attention")).length,
     };
     const filterButton = (value, label, count) => `<button type="button" data-management-inbox-filter="${value}" aria-pressed="${filter === value ? "true" : "false"}"><i></i><span>${esc(label)}</span><b>${count}</b></button>`;
-    section.innerHTML = `<header class="attention-inbox-head"><div><p>${esc(t("management.inbox_eyebrow"))}</p><h2>${esc(t("management.inbox_title"))}</h2><span>${esc(t("management.inbox_description"))}</span></div><strong>${sessions.length}</strong></header>
+    const nextHtml = `<header class="attention-inbox-head"><div><p>${esc(t("management.inbox_eyebrow"))}</p><h2>${esc(t("management.inbox_title"))}</h2><span>${esc(t("management.inbox_description"))}</span></div><strong>${sessions.length}</strong></header>
       <div class="attention-inbox-summary" role="toolbar" aria-label="${esc(t("management.operations_severity_buckets"))}">
         <div class="management-filter-all">${filterButton("all", t("management.filter_all"), reviewSessions.length)}</div>
         <div class="management-filter-group response" role="group" aria-label="${esc(t("management.filter_group_response"))}"><small>${esc(t("management.filter_group_response"))}</small>${filterButton("attention", t("management.health.attention"), counts.attention)}</div>
         <div class="management-filter-group risk" role="group" aria-label="${esc(t("management.filter_group_risk"))}"><small>${esc(t("management.filter_group_risk"))}</small>${filterButton("critical", t("management.health.critical"), counts.critical)}${filterButton("warning", t("management.health.warning"), counts.warning)}</div>
       </div>
       <div class="attention-card-list">${sessions.length ? sessions.map(attentionCardHtml).join("") : `<div class="management-empty"><b>${esc(t("management.inbox_empty"))}</b><span>${esc(t("management.inbox_empty_detail"))}</span></div>`}</div>`;
+    if (!preserveFocusedComposer) section.innerHTML = nextHtml;
     return sessions.length;
   }
 
